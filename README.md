@@ -583,4 +583,6 @@ The model uses reverse pathways and generally doesn't only do patterns good beca
 You can also see an_idea_of_a_neural_web.pdf file for more information about the reasoning behind the model's structure, mathematics, and the like.
 neuron update shader and the code must be in the same directory.
 
+To modify number of neurons change MAX_NEURONS
+
 Note this is for now only for macOS as it uses metal might later implement for cuda if enough support.
