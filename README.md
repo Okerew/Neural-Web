@@ -35,14 +35,12 @@ clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
 
 ## Architecture Overview
-![alt text](image-3.png)
 The architecture consists of several key components:
 
 - **Neurons**: The basic units of the neural network, organized into layers, each connected in a 3d like structure.
 ![alt text](neuron_connections_3d.png)
 - **Memory System**: A hierarchical memory system to store and manage memories with varying importance.
 - **Dynamic Parameters**: Parameters that adapt based on the network's performance and stability.
-![alt text](image.png)
 - **Performance Metrics**: Metrics to track the performance of the network.
 - **Optimization**: Techniques to optimize the network's parameters for better performance.
 
@@ -379,7 +377,6 @@ Combines similar memories to reduce redundancy.
 ---
 
 # Neural Web Training Mechanism
-![alt text](image-2.png)
 This README file explains the training mechanism of the neural web implemented in the provided `main()` function. The training process involves several key components, including Metal device setup, memory system management, neural network initialization, and the main simulation loop for training. Below, we delve into the design reasons behind each component.
 
 ## Table of Contents
