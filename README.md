@@ -43,7 +43,7 @@ The architecture consists of several key components:
 - **Dynamic Parameters**: Parameters that adapt based on the network's performance and stability.
 - **Performance Metrics**: Metrics to track the performance of the network.
 - **Optimization**: Techniques to optimize the network's parameters for better performance.
-
+![alt text](image.png)
 ## Loss figure :
 
 ![alt text](image-1.png)
