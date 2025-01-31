@@ -1,4 +1,4 @@
-#include "/opt/homebrew/Cellar/json-c/0.17/include/json-c/json.h"
+#include <json-c/json.h> 
 #include <Foundation/Foundation.h>
 #include <Metal/Metal.h>
 #include <simd/simd.h>
