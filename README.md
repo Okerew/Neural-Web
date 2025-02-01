@@ -45,7 +45,8 @@ clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/
 
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
 
-Note: the perfomance of other versions than metal might be off as it wasn't that easy to port the metal code to C
+1. Note: the perfomance of other versions than metal might be off as it wasn't that easy to port the metal code to C
+2. Note: the actual code is located in src so you should either unpack files from there into your folder or just compile there
 ## Architecture Overview
 The architecture consists of several key components:
 
