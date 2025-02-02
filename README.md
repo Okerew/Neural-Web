@@ -418,7 +418,7 @@ id<MTLCommandQueue> commandQueue = [device newCommandQueue];
 ```
 
 ### Design Reason
-Metal is used for its high performance and low-level access to the GPU, which is crucial for the efficient computation required in neural network training. Setting up the Metal device and command queue ensures that the GPU resources are ready for compute tasks.
+Metal is used for its high performance and low-level access to the GPU, which is crucial for the efficient computation required in neural network training. Setting up the Metal device and command queue ensures that the GPU resources are ready for compute tasks, note cuda also can work in this place.
 
 ## Memory System Management
 
@@ -591,7 +591,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 
 ### Example
 
-Example of the training can be seen in the neural_web.m file in int main
+Example of the training can be seen in the MacOS/neural_web.m file in int main or if you are not familiar with metal 86\64/neural_web64CPU.c
 
 ## Needed information
 Note if you modify max_neurons in the example you have to also modify the input_size to be at max greater than the number of max_neurons by 1 or just lesser than the number of max_neurons or it will have an out of bounds error
@@ -603,4 +603,4 @@ neuron update shader and the code must be in the same directory.
 
 To modify number of neurons change MAX_NEURONS
 
-Note this is for now only for macOS as it uses metal might later implement for cuda if enough support.
+Only for unix type systems
