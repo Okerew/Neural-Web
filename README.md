@@ -49,7 +49,7 @@ nvcc -o neural_web neural_web.cu -I/opt/homebrew/Cellar/json-c/0.17/include -L/o
 ```
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
 
-1. Note: the perfomance of other cpu versions than metal might be off as the gpu is far more efficient than cpu
+1. Note: the perfomance of other cpu versions than metal and cuda might be off as the gpu is far more efficient than cpu
 2. Note: the actual code is located in src so you should either unpack files from there into your folder or just compile there
 ## Architecture Overview
 The architecture consists of several key components:
