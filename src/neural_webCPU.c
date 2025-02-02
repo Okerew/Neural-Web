@@ -25,12 +25,12 @@
 #define MAX_SIMULATIONS 10        // Number of simulation runs
 #define MIN_WEIGHT -1.0f
 #define MAX_WEIGHT 1.0f
-#define DECAY_RATE 0.95f
-#define CONNECTION_WEIGHT 0.5f
-#define INPUT_WEIGHT 0.3f
-#define ACTIVATION_SCALE 1.0f
-#define ACTIVATION_BIAS 0.0f
-#define MIN_ACTIVATION 0.0f
+#define DECAY_RATE 0.8f
+#define CONNECTION_WEIGHT 0.2f
+#define INPUT_WEIGHT 0.1f
+#define ACTIVATION_SCALE 1.5f
+#define ACTIVATION_BIAS 0.1f
+#define MIN_ACTIVATION -1.0f
 #define MAX_ACTIVATION 1.0f
 
 typedef struct {
