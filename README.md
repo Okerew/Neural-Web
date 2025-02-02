@@ -28,6 +28,7 @@ The goal of this architecture is to present an alternative to modern neural mode
 
 To compile the code, run the following command in the root directory of the project:
 
+### arch64 MacOS
 For metal version
 ```sh
 clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web.m      
@@ -38,6 +39,7 @@ For cpu but macOS version
 clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_webCPU.c      
 ```
 
+### 64/86 unix
 For cpu 86/64 unix version
 ```sh
 clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web64.c      
@@ -47,6 +49,7 @@ For cuda version
 ```sh
 nvcc -o neural_web neural_web.cu -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c
 ```
+
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
 
 1. Note: the perfomance of other cpu versions than metal and cuda might be off as the gpu is far more efficient than cpu
