@@ -23,7 +23,10 @@ Video explanation:
 
 This documentation provides a comprehensive guide to the decentralized neural web architecture implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization.
 The goal of this architecture is to present an alternative to modern neural models, which are often complex and resource-intensive, taking inspiration from our brains, neurons are decentralized organized in layers, allowing them to interact with themselves and change theirselves overtime in more than just sates and weights, while also creating a dynamic memory system.
-
+## Requirements:
+json-c library
+for metal macos version metal api
+for cuda version cuda
 ## Compilation
 
 To compile the code, run the following command in the root directory of the project:
