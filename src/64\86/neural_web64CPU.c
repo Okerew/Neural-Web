@@ -96,24 +96,24 @@ typedef struct {
 } OptimizationState;
 
 typedef struct {
-  float input_noise_resistance;
+  float input_noise_resistance;  
   float weight_noise_resistance;
-  float adaptation_speed;     // Speed of recovery from perturbations
-  float baseline_performance; // Performance without noise
-  float noisy_performance;    // Performance with noise
+  float adaptation_speed;        // Speed of recovery from perturbations
+  float baseline_performance;    // Performance without noise
+  float noisy_performance;       // Performance with noise
 } AdaptationMetrics;
 
 typedef struct {
-  float input_noise_scale;
-  float weight_noise_scale;
-  float base_adaptation_rate;
-  float current_adaptation_rate;
-  float learning_momentum;
-  float stability_threshold;
-  float noise_tolerance;
-  float recovery_rate;
-  float plasticity;
-  float homeostatic_factor;
+  float input_noise_scale;      
+  float weight_noise_scale;      
+  float base_adaptation_rate;    
+  float current_adaptation_rate; 
+  float learning_momentum;      
+  float stability_threshold;   
+  float noise_tolerance;      
+  float recovery_rate;          
+  float plasticity;             
+  float homeostatic_factor;      
 } DynamicParameters;
 
 typedef struct {
@@ -168,12 +168,20 @@ typedef struct {
 } MetaController;
 
 typedef struct {
-  float output_stability; // Variation in neuron's output
-  float prediction_error;
-  float connection_quality;
-  float adaptive_response; // Neuron's ability to adapt to different inputs
-  float importance_score;  // Overall significance in network
+  float output_stability;   // Variation in neuron's output
+  float prediction_error;   
+  float connection_quality; 
+  float adaptive_response;  // Neuron's ability to adapt to different inputs
+  float importance_score;   // Overall significance in network
 } NeuronPerformanceMetric;
+
+typedef struct {
+  const char *word;
+  const char *category;    // e.g., "fruit", "common", "action"
+  float semantic_weight;   // How strongly this word relates to its category
+  const char *connects_to; // The most likely word it connects with
+  const char *description; // Detailed description of the word
+} VocabularyEntry;
 
 typedef struct {
   float prediction_weight;
@@ -182,6 +190,50 @@ typedef struct {
 } PredictiveCodingParams;
 
 PredictiveCodingParams predictive_params[MAX_NEURONS];
+
+typedef struct ContextNode {
+    char *name;
+    float importance;
+    float *state_vector;
+    int vector_size;
+    struct ContextNode **children;
+    int num_children;
+    int max_children;
+    struct ContextNode *parent;
+    float temporal_relevance;
+    int last_updated;
+} ContextNode;
+
+typedef struct GlobalContextManager {
+    ContextNode *root;
+    int total_nodes;
+    float *global_context_vector;
+    int vector_size;
+    float decay_rate;
+    float update_threshold;
+    int max_depth;
+    int max_children_per_node;
+} GlobalContextManager;
+
+typedef struct {
+    float *context_weights;
+    float *feedback_history;
+    float adaptation_rate;
+    int history_size;
+    int current_index;
+    float context_threshold;
+    float feedback_decay;
+} DynamicContextFeedback;
+
+typedef struct {
+    float *recent_outcomes;
+    float *input_history;
+    int history_length;
+    float *correlation_matrix;
+    float learning_momentum;
+    float minimum_context_weight;
+} ContextAdaptation;
+
 
 DynamicParameters initDynamicParameters() {
   DynamicParameters params = {.input_noise_scale = 0.1f,
@@ -567,14 +619,6 @@ void initializeNeurons(Neuron *neurons, int *connections, float *weights,
     weights[i] = (((float)rand() / RAND_MAX) - 0.5f);
   }
 }
-
-typedef struct {
-  const char *word;
-  const char *category;    // e.g., "fruit", "common", "action"
-  float semantic_weight;   // How strongly this word relates to its category
-  const char *connects_to; // The most likely word it connects with
-  const char *description; // Detailed description of the word
-} VocabularyEntry;
 
 const VocabularyEntry vocabulary[] = {
     // Common English Words
@@ -2646,6 +2690,328 @@ void processNeuronsOnCPU(Neuron* neurons, const float* weights,
         neurons[id].state = new_state;
         neurons[id].output = new_output;
     }
+}
+
+ContextNode* createContextNode(const char *name, int vector_size, ContextNode *parent) {
+    ContextNode *node = (ContextNode*)malloc(sizeof(ContextNode));
+    node->name = strdup(name);
+    node->importance = 1.0f;
+    node->state_vector = (float*)calloc(vector_size, sizeof(float));
+    node->vector_size = vector_size;
+    node->children = (ContextNode**)malloc(sizeof(ContextNode*) * 10);
+    node->num_children = 0;
+    node->max_children = 10;
+    node->parent = parent;
+    node->temporal_relevance = 1.0f;
+    node->last_updated = time(NULL);
+    return node;
+}
+
+GlobalContextManager* initializeGlobalContextManager(int vector_size) {
+    GlobalContextManager *manager = (GlobalContextManager*)malloc(sizeof(GlobalContextManager));
+    manager->vector_size = vector_size;
+    manager->total_nodes = 1;
+    manager->decay_rate = 0.95f;
+    manager->update_threshold = 0.1f;
+    manager->max_depth = 5;
+    manager->max_children_per_node = 10;
+    
+    // Initialize global context vector
+    manager->global_context_vector = (float*)calloc(vector_size, sizeof(float));
+    
+    // Create root node
+    manager->root = createContextNode("Global", vector_size, NULL);
+    
+    // Initialize default context hierarchy
+    ContextNode *goals = createContextNode("Goals", vector_size, manager->root);
+    ContextNode *constraints = createContextNode("Constraints", vector_size, manager->root);
+    ContextNode *environment = createContextNode("Environment", vector_size, manager->root);
+    
+    manager->root->children[0] = goals;
+    manager->root->children[1] = constraints;
+    manager->root->children[2] = environment;
+    manager->root->num_children = 3;
+    
+    return manager;
+}
+
+void updateContextNode(ContextNode *node, float *new_state, float importance) {
+    for (int i = 0; i < node->vector_size; i++) {
+        node->state_vector[i] = node->state_vector[i] * (1 - importance) + 
+                               new_state[i] * importance;
+    }
+    node->last_updated = time(NULL);
+    node->importance = fmax(node->importance * 0.95f + importance * 0.05f, 0.1f);
+}
+
+void propagateContextUpdates(ContextNode *node) {
+    if (node->parent != NULL) {
+        float *aggregated = (float*)calloc(node->vector_size, sizeof(float));
+        float total_importance = 0.0f;
+        
+        // Aggregate child states weighted by importance
+        for (int i = 0; i < node->parent->num_children; i++) {
+            ContextNode *sibling = node->parent->children[i];
+            float temp_relevance = expf(-(time(NULL) - sibling->last_updated) / 3600.0f);
+            float weight = sibling->importance * temp_relevance;
+            
+            for (int j = 0; j < node->vector_size; j++) {
+                aggregated[j] += sibling->state_vector[j] * weight;
+            }
+            total_importance += weight;
+        }
+        
+        // Normalize and update parent
+        if (total_importance > 0) {
+            for (int i = 0; i < node->vector_size; i++) {
+                aggregated[i] /= total_importance;
+            }
+            updateContextNode(node->parent, aggregated, 0.3f);
+        }
+        
+        free(aggregated);
+        propagateContextUpdates(node->parent);
+    }
+}
+
+ContextNode* findContextNode(ContextNode *root, const char *name) {
+    if (strcmp(root->name, name) == 0) {
+        return root;
+    }
+    
+    for (int i = 0; i < root->num_children; i++) {
+        ContextNode *result = findContextNode(root->children[i], name);
+        if (result) {
+            return result;
+        }
+    }
+    
+    return NULL;
+}
+
+
+ContextNode* addContextNode(GlobalContextManager *manager, const char *name, 
+                          const char *parent_name, float *initial_state) {
+    ContextNode *parent = findContextNode(manager->root, parent_name);
+    if (!parent || parent->num_children >= manager->max_children_per_node) {
+        return NULL;
+    }
+    
+    ContextNode *new_node = createContextNode(name, manager->vector_size, parent);
+    if (initial_state) {
+        memcpy(new_node->state_vector, initial_state, 
+               manager->vector_size * sizeof(float));
+    }
+    
+    parent->children[parent->num_children++] = new_node;
+    manager->total_nodes++;
+    
+    return new_node;
+}
+
+float evaluateConstraintSatisfaction(ContextNode *constraint, Neuron *neurons, 
+                                   int num_neurons) {
+    float satisfaction = 1.0f;
+    
+    // Example constraint evaluation
+    if (strcmp(constraint->name, "ActivityLevel") == 0) {
+        float total_activity = 0;
+        for (int i = 0; i < num_neurons; i++) {
+            total_activity += neurons[i].output;
+        }
+        satisfaction = 1.0f - fabs(0.5f - (total_activity / num_neurons));
+    }
+    
+    return satisfaction;
+}
+
+
+void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons, 
+                        int num_neurons, float *input_tensor) {
+    // Extract relevant features from current network state
+    float *current_context = (float*)calloc(manager->vector_size, sizeof(float));
+    
+    // Analyze network activity patterns
+    for (int i = 0; i < manager->vector_size && i < num_neurons; i++) {
+        current_context[i] = neurons[i].output;
+    }
+    
+    // Update environmental context
+    ContextNode *env_node = findContextNode(manager->root, "Environment");
+    if (env_node) {
+        updateContextNode(env_node, current_context, 0.2f);
+        propagateContextUpdates(env_node);
+    }
+    
+    // Update constraint satisfaction levels
+    ContextNode *constraints = findContextNode(manager->root, "Constraints");
+    if (constraints) {
+        float *constraint_state = (float*)calloc(manager->vector_size, sizeof(float));
+        // Evaluate current constraint satisfaction
+        for (int i = 0; i < constraints->num_children; i++) {
+            float satisfaction = evaluateConstraintSatisfaction(
+                constraints->children[i], neurons, num_neurons);
+            for (int j = 0; j < manager->vector_size; j++) {
+                constraint_state[j] += satisfaction;
+            }
+        }
+        updateContextNode(constraints, constraint_state, 0.3f);
+        free(constraint_state);
+    }
+    
+    // Update global context vector
+    for (int i = 0; i < manager->vector_size; i++) {
+        manager->global_context_vector[i] = 0;
+        float total_weight = 0;
+        
+        // Weighted combination of all top-level contexts
+        for (int j = 0; j < manager->root->num_children; j++) {
+            ContextNode *child = manager->root->children[j];
+            float weight = child->importance * child->temporal_relevance;
+            manager->global_context_vector[i] += child->state_vector[i] * weight;
+            total_weight += weight;
+        }
+        
+        if (total_weight > 0) {
+            manager->global_context_vector[i] /= total_weight;
+        }
+    }
+    
+    free(current_context);
+}
+
+void integrateGlobalContext(GlobalContextManager *manager, Neuron *neurons, 
+                           int num_neurons, float *weights, 
+                           int max_connections) {
+    // Modulate neuron behavior based on global context
+    for (int i = 0; i < num_neurons; i++) {
+        float context_influence = 0;
+        
+        // Compute context influence on this neuron
+        for (int j = 0; j < manager->vector_size && j < num_neurons; j++) {
+            context_influence += manager->global_context_vector[j] * 
+                               weights[i * max_connections + j];
+        }
+        
+        // Apply context modulation
+        neurons[i].state = neurons[i].state * (1.0f + 0.1f * context_influence);
+        neurons[i].output = tanh(neurons[i].state);
+    }
+}
+
+float computeOutcomeMetric(Neuron *neurons, float *targets, int size) {
+    float total_error = 0.0f;
+    for (int i = 0; i < size; i++) {
+        float error = fabs(neurons[i].output - targets[i]);
+        total_error += error;
+    }
+    return 1.0f / (1.0f + total_error / size); // Normalize to [0,1]
+}
+
+void updateCorrelationMatrix(float *correlation_matrix,
+                           float *input_history,
+                           float *outcomes,
+                           int history_length,
+                           int input_size) {
+    for (int i = 0; i < input_size; i++) {
+        for (int j = 0; j < input_size; j++) {
+            float correlation = 0.0f;
+            for (int h = 0; h < history_length; h++) {
+                correlation += input_history[h * input_size + i] * 
+                             input_history[h * input_size + j] * 
+                             outcomes[h];
+            }
+            correlation_matrix[i * input_size + j] = 
+                correlation / history_length;
+        }
+    }
+}
+
+float computeFeedbackSignal(float current_outcome,
+                          float *feedback_history,
+                          int history_size) {
+    float recent_average = 0.0f;
+    int count = 0;
+    for (int i = 0; i < history_size; i++) {
+        if (feedback_history[i] > 0.0f) {
+            recent_average += feedback_history[i];
+            count++;
+        }
+    }
+    if (count > 0) {
+        recent_average /= count;
+    }
+    return current_outcome - recent_average;
+}
+
+void applyDynamicContext(Neuron *neurons,
+                        float *context_weights,
+                        GlobalContextManager *context,
+                        int size) {
+    for (int i = 0; i < size; i++) {
+        neurons[i].state = neurons[i].state * (1.0f - context_weights[i]) +
+                          context->global_context_vector[i] * context_weights[i];
+    }
+}
+
+float computeAverageFeedback(float *feedback_history, int history_size) {
+    float sum = 0.0f;
+    int valid_count = 0;
+    
+    for (int i = 0; i < history_size; i++) {
+        if (feedback_history[i] != 0.0f) {  // Only count non-zero feedback
+            sum += feedback_history[i];
+            valid_count++;
+        }
+    }
+    
+    return valid_count > 0 ? sum / valid_count : 0.0f;
+}
+
+float computeMinWeight(float *weights, int size) {
+    if (size <= 0 || weights == NULL) return 0.0f;
+    
+    float min_weight = weights[0];
+    for (int i = 1; i < size; i++) {
+        if (weights[i] < min_weight) {
+            min_weight = weights[i];
+        }
+    }
+    
+    return min_weight;
+}
+
+float computeMaxWeight(float *weights, int size) {
+    if (size <= 0 || weights == NULL) return 0.0f;
+    
+    float max_weight = weights[0];
+    for (int i = 1; i < size; i++) {
+        if (weights[i] > max_weight) {
+            max_weight = weights[i];
+        }
+    }
+    
+    return max_weight;
+}
+
+float computeAverageCorrelation(float *correlation_matrix, int size) {
+    if (size <= 0 || correlation_matrix == NULL) return 0.0f;
+    
+    float sum = 0.0f;
+    int count = 0;
+    
+    // Compute average of absolute correlation values
+    // Skip diagonal elements (self-correlation)
+    for (int i = 0; i < size; i++) {
+        for (int j = 0; j < size; j++) {
+            if (i != j) {  // Skip diagonal
+                sum += fabs(correlation_matrix[i * size + j]);
+                count++;
+            }
+        }
+    }
+    
+    return count > 0 ? sum / count : 0.0f;
 }
 
 int main() {
