@@ -178,6 +178,50 @@ typedef struct {
 
 PredictiveCodingParams predictive_params[MAX_NEURONS];
 
+typedef struct ContextNode {
+    char *name;
+    float importance;
+    float *state_vector;
+    uint32_t vector_size;
+    struct ContextNode **children;
+    uint32_t num_children;
+    uint32_t max_children;
+    struct ContextNode *parent;
+    float temporal_relevance;
+    uint64_t last_updated;
+} ContextNode;
+
+typedef struct GlobalContextManager {
+    ContextNode *root;
+    uint32_t total_nodes;
+    float *global_context_vector;
+    uint32_t vector_size;
+    float decay_rate;
+    float update_threshold;
+    uint32_t max_depth;
+    uint32_t max_children_per_node;
+} GlobalContextManager;
+
+typedef struct {
+    float *context_weights;
+    float *feedback_history;
+    float adaptation_rate;
+    int history_size;
+    int current_index;
+    float context_threshold;
+    float feedback_decay;
+} DynamicContextFeedback;
+
+typedef struct {
+    float *recent_outcomes;
+    float *input_history;
+    int history_length;
+    float *correlation_matrix;
+    float learning_momentum;
+    float minimum_context_weight;
+} ContextAdaptation;
+
+
 DynamicParameters initDynamicParameters() {
   DynamicParameters params = {.input_noise_scale = 0.1f,
                               .weight_noise_scale = 0.05f,
@@ -2488,6 +2532,327 @@ void selectOptimalDecisionPath(Neuron *neurons, float *weights, uint *connection
                          max_neurons, simulation_depths[best_depth_index]);
 }
 
+ContextNode* createContextNode(const char *name, uint32_t vector_size, ContextNode *parent) {
+    ContextNode *node = (ContextNode*)malloc(sizeof(ContextNode));
+    node->name = strdup(name);
+    node->importance = 1.0f;
+    node->state_vector = (float*)calloc(vector_size, sizeof(float));
+    node->vector_size = vector_size;
+    node->children = (ContextNode**)malloc(sizeof(ContextNode*) * 10);
+    node->num_children = 0;
+    node->max_children = 10;
+    node->parent = parent;
+    node->temporal_relevance = 1.0f;
+    node->last_updated = time(NULL);
+    return node;
+}
+
+GlobalContextManager* initializeGlobalContextManager(uint32_t vector_size) {
+    GlobalContextManager *manager = (GlobalContextManager*)malloc(sizeof(GlobalContextManager));
+    manager->vector_size = vector_size;
+    manager->total_nodes = 1;
+    manager->decay_rate = 0.95f;
+    manager->update_threshold = 0.1f;
+    manager->max_depth = 5;
+    manager->max_children_per_node = 10;
+    
+    // Initialize global context vector
+    manager->global_context_vector = (float*)calloc(vector_size, sizeof(float));
+    
+    // Create root node
+    manager->root = createContextNode("Global", vector_size, NULL);
+    
+    // Initialize default context hierarchy
+    ContextNode *goals = createContextNode("Goals", vector_size, manager->root);
+    ContextNode *constraints = createContextNode("Constraints", vector_size, manager->root);
+    ContextNode *environment = createContextNode("Environment", vector_size, manager->root);
+    
+    manager->root->children[0] = goals;
+    manager->root->children[1] = constraints;
+    manager->root->children[2] = environment;
+    manager->root->num_children = 3;
+    
+    return manager;
+}
+
+void updateContextNode(ContextNode *node, float *new_state, float importance) {
+    for (uint32_t i = 0; i < node->vector_size; i++) {
+        node->state_vector[i] = node->state_vector[i] * (1 - importance) + 
+                               new_state[i] * importance;
+    }
+    node->last_updated = time(NULL);
+    node->importance = fmax(node->importance * 0.95f + importance * 0.05f, 0.1f);
+}
+
+void propagateContextUpdates(ContextNode *node) {
+    if (node->parent != NULL) {
+        float *aggregated = (float*)calloc(node->vector_size, sizeof(float));
+        float total_importance = 0.0f;
+        
+        // Aggregate child states weighted by importance
+        for (uint32_t i = 0; i < node->parent->num_children; i++) {
+            ContextNode *sibling = node->parent->children[i];
+            float temp_relevance = expf(-(time(NULL) - sibling->last_updated) / 3600.0f);
+            float weight = sibling->importance * temp_relevance;
+            
+            for (uint32_t j = 0; j < node->vector_size; j++) {
+                aggregated[j] += sibling->state_vector[j] * weight;
+            }
+            total_importance += weight;
+        }
+        
+        // Normalize and update parent
+        if (total_importance > 0) {
+            for (uint32_t i = 0; i < node->vector_size; i++) {
+                aggregated[i] /= total_importance;
+            }
+            updateContextNode(node->parent, aggregated, 0.3f);
+        }
+        
+        free(aggregated);
+        propagateContextUpdates(node->parent);
+    }
+}
+
+ContextNode* findContextNode(ContextNode *root, const char *name) {
+    if (strcmp(root->name, name) == 0) {
+        return root;
+    }
+    
+    for (uint32_t i = 0; i < root->num_children; i++) {
+        ContextNode *result = findContextNode(root->children[i], name);
+        if (result) {
+            return result;
+        }
+    }
+    
+    return NULL;
+}
+
+
+ContextNode* addContextNode(GlobalContextManager *manager, const char *name, 
+                          const char *parent_name, float *initial_state) {
+    ContextNode *parent = findContextNode(manager->root, parent_name);
+    if (!parent || parent->num_children >= manager->max_children_per_node) {
+        return NULL;
+    }
+    
+    ContextNode *new_node = createContextNode(name, manager->vector_size, parent);
+    if (initial_state) {
+        memcpy(new_node->state_vector, initial_state, 
+               manager->vector_size * sizeof(float));
+    }
+    
+    parent->children[parent->num_children++] = new_node;
+    manager->total_nodes++;
+    
+    return new_node;
+}
+
+float evaluateConstraintSatisfaction(ContextNode *constraint, Neuron *neurons, 
+                                   uint32_t num_neurons) {
+    float satisfaction = 1.0f;
+    
+    // Example constraint evaluation
+    if (strcmp(constraint->name, "ActivityLevel") == 0) {
+        float total_activity = 0;
+        for (uint32_t i = 0; i < num_neurons; i++) {
+            total_activity += neurons[i].output;
+        }
+        satisfaction = 1.0f - fabs(0.5f - (total_activity / num_neurons));
+    }
+    
+    return satisfaction;
+}
+
+
+void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons, 
+                        uint32_t num_neurons, float *input_tensor) {
+    // Extract relevant features from current network state
+    float *current_context = (float*)calloc(manager->vector_size, sizeof(float));
+    
+    // Analyze network activity patterns
+    for (uint32_t i = 0; i < manager->vector_size && i < num_neurons; i++) {
+        current_context[i] = neurons[i].output;
+    }
+    
+    // Update environmental context
+    ContextNode *env_node = findContextNode(manager->root, "Environment");
+    if (env_node) {
+        updateContextNode(env_node, current_context, 0.2f);
+        propagateContextUpdates(env_node);
+    }
+    
+    // Update constraint satisfaction levels
+    ContextNode *constraints = findContextNode(manager->root, "Constraints");
+    if (constraints) {
+        float *constraint_state = (float*)calloc(manager->vector_size, sizeof(float));
+        // Evaluate current constraint satisfaction
+        for (uint32_t i = 0; i < constraints->num_children; i++) {
+            float satisfaction = evaluateConstraintSatisfaction(
+                constraints->children[i], neurons, num_neurons);
+            for (uint32_t j = 0; j < manager->vector_size; j++) {
+                constraint_state[j] += satisfaction;
+            }
+        }
+        updateContextNode(constraints, constraint_state, 0.3f);
+        free(constraint_state);
+    }
+    
+    // Update global context vector
+    for (uint32_t i = 0; i < manager->vector_size; i++) {
+        manager->global_context_vector[i] = 0;
+        float total_weight = 0;
+        
+        // Weighted combination of all top-level contexts
+        for (uint32_t j = 0; j < manager->root->num_children; j++) {
+            ContextNode *child = manager->root->children[j];
+            float weight = child->importance * child->temporal_relevance;
+            manager->global_context_vector[i] += child->state_vector[i] * weight;
+            total_weight += weight;
+        }
+        
+        if (total_weight > 0) {
+            manager->global_context_vector[i] /= total_weight;
+        }
+    }
+    
+    free(current_context);
+}
+
+void integrateGlobalContext(GlobalContextManager *manager, Neuron *neurons, 
+                           uint32_t num_neurons, float *weights, 
+                           uint32_t max_connections) {
+    // Modulate neuron behavior based on global context
+    for (uint32_t i = 0; i < num_neurons; i++) {
+        float context_influence = 0;
+        
+        // Compute context influence on this neuron
+        for (uint32_t j = 0; j < manager->vector_size && j < num_neurons; j++) {
+            context_influence += manager->global_context_vector[j] * 
+                               weights[i * max_connections + j];
+        }
+        
+        // Apply context modulation
+        neurons[i].state = neurons[i].state * (1.0f + 0.1f * context_influence);
+        neurons[i].output = tanh(neurons[i].state);
+    }
+}
+
+float computeOutcomeMetric(Neuron *neurons, float *targets, int size) {
+    float total_error = 0.0f;
+    for (int i = 0; i < size; i++) {
+        float error = fabs(neurons[i].output - targets[i]);
+        total_error += error;
+    }
+    return 1.0f / (1.0f + total_error / size); // Normalize to [0,1]
+}
+
+void updateCorrelationMatrix(float *correlation_matrix,
+                           float *input_history,
+                           float *outcomes,
+                           int history_length,
+                           int input_size) {
+    for (int i = 0; i < input_size; i++) {
+        for (int j = 0; j < input_size; j++) {
+            float correlation = 0.0f;
+            for (int h = 0; h < history_length; h++) {
+                correlation += input_history[h * input_size + i] * 
+                             input_history[h * input_size + j] * 
+                             outcomes[h];
+            }
+            correlation_matrix[i * input_size + j] = 
+                correlation / history_length;
+        }
+    }
+}
+
+float computeFeedbackSignal(float current_outcome,
+                          float *feedback_history,
+                          int history_size) {
+    float recent_average = 0.0f;
+    int count = 0;
+    for (int i = 0; i < history_size; i++) {
+        if (feedback_history[i] > 0.0f) {
+            recent_average += feedback_history[i];
+            count++;
+        }
+    }
+    if (count > 0) {
+        recent_average /= count;
+    }
+    return current_outcome - recent_average;
+}
+
+void applyDynamicContext(Neuron *neurons,
+                        float *context_weights,
+                        GlobalContextManager *context,
+                        int size) {
+    for (int i = 0; i < size; i++) {
+        neurons[i].state = neurons[i].state * (1.0f - context_weights[i]) +
+                          context->global_context_vector[i] * context_weights[i];
+    }
+}
+
+float computeAverageFeedback(float *feedback_history, int history_size) {
+    float sum = 0.0f;
+    int valid_count = 0;
+    
+    for (int i = 0; i < history_size; i++) {
+        if (feedback_history[i] != 0.0f) {  // Only count non-zero feedback
+            sum += feedback_history[i];
+            valid_count++;
+        }
+    }
+    
+    return valid_count > 0 ? sum / valid_count : 0.0f;
+}
+
+float computeMinWeight(float *weights, int size) {
+    if (size <= 0 || weights == NULL) return 0.0f;
+    
+    float min_weight = weights[0];
+    for (int i = 1; i < size; i++) {
+        if (weights[i] < min_weight) {
+            min_weight = weights[i];
+        }
+    }
+    
+    return min_weight;
+}
+
+float computeMaxWeight(float *weights, int size) {
+    if (size <= 0 || weights == NULL) return 0.0f;
+    
+    float max_weight = weights[0];
+    for (int i = 1; i < size; i++) {
+        if (weights[i] > max_weight) {
+            max_weight = weights[i];
+        }
+    }
+    
+    return max_weight;
+}
+
+float computeAverageCorrelation(float *correlation_matrix, int size) {
+    if (size <= 0 || correlation_matrix == NULL) return 0.0f;
+    
+    float sum = 0.0f;
+    int count = 0;
+    
+    // Compute average of absolute correlation values
+    // Skip diagonal elements (self-correlation)
+    for (int i = 0; i < size; i++) {
+        for (int j = 0; j < size; j++) {
+            if (i != j) {  // Skip diagonal
+                sum += fabs(correlation_matrix[i * size + j]);
+                count++;
+            }
+        }
+    }
+    
+    return count > 0 ? sum / count : 0.0f;
+}
 
 int main() {
   id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -2739,6 +3104,7 @@ int main() {
 
   int network_regions = 2; // Assuming 2 layers
   MetaController *metaController = initializeMetaController(network_regions);
+  GlobalContextManager *contextManager = initializeGlobalContextManager(MAX_NEURONS);
   NetworkPerformanceMetrics *performanceMetrics =
       initializePerformanceMetrics(network_regions);
 
@@ -2979,6 +3345,111 @@ int main() {
     // Read back results
     updatedNeurons = (Neuron *)neuronBuffer.contents;
     verifyNetworkState(updatedNeurons, &current_prompt);
+
+    // Update global context based on current network state
+    updateGlobalContext(contextManager, updatedNeurons, max_neurons, input_tensor);
+
+    // Integrate context into network processing
+    integrateGlobalContext(contextManager, updatedNeurons, max_neurons, weights, max_connections);
+
+     DynamicContextFeedback feedback = {
+        .adaptation_rate = 0.01f,
+        .history_size = 100,
+        .current_index = 0,
+        .context_threshold = 0.3f,
+        .feedback_decay = 0.95f
+    };
+    
+    feedback.context_weights = (float *)calloc(max_neurons, sizeof(float));
+    feedback.feedback_history = (float *)calloc(feedback.history_size, sizeof(float));
+
+    ContextAdaptation adaptation = {
+        .history_length = 50,
+        .learning_momentum = 0.8f,
+        .minimum_context_weight = 0.1f
+    };
+    
+    adaptation.recent_outcomes = (float *)calloc(adaptation.history_length, sizeof(float));
+    adaptation.input_history = (float *)calloc(adaptation.history_length * max_neurons, sizeof(float));
+    adaptation.correlation_matrix = (float *)calloc(max_neurons * max_neurons, sizeof(float));
+
+    // Update global context based on current network state
+    updateGlobalContext(contextManager, updatedNeurons, max_neurons, input_tensor);
+
+    // Calculate outcome metrics for feedback
+    float current_outcome = computeOutcomeMetric(updatedNeurons, target_outputs, max_neurons);
+    
+    // Store outcome and input in history
+    int history_idx = step % adaptation.history_length;
+    adaptation.recent_outcomes[history_idx] = current_outcome;
+    memcpy(&adaptation.input_history[history_idx * max_neurons], 
+           input_tensor, 
+           max_neurons * sizeof(float));
+
+    // Update correlation matrix
+    updateCorrelationMatrix(adaptation.correlation_matrix,
+                           adaptation.input_history,
+                           adaptation.recent_outcomes,
+                           adaptation.history_length,
+                           max_neurons);
+
+    // Compute feedback signal
+    float feedback_signal = computeFeedbackSignal(current_outcome,
+                                                feedback.feedback_history,
+                                                feedback.history_size);
+
+    // Update context weights based on feedback
+    for (int i = 0; i < max_neurons; i++) {
+        float weight_update = feedback_signal * feedback.adaptation_rate;
+        
+        // Apply correlation-based adjustments
+        for (int j = 0; j < max_neurons; j++) {
+            weight_update += adaptation.correlation_matrix[i * max_neurons + j] * 
+                           adaptation.learning_momentum;
+        }
+        
+        // Update weight with momentum and bounds
+        feedback.context_weights[i] = fmax(
+            adaptation.minimum_context_weight,
+            feedback.context_weights[i] + weight_update
+        );
+    }
+
+    // Store feedback for history
+    feedback.feedback_history[feedback.current_index] = feedback_signal;
+    feedback.current_index = (feedback.current_index + 1) % feedback.history_size;
+
+    // Apply updated context weights to network processing
+    applyDynamicContext(updatedNeurons,
+                       feedback.context_weights,
+                       contextManager,
+                       max_neurons);
+
+    // Decay historical feedback influence
+    for (int i = 0; i < feedback.history_size; i++) {
+        feedback.feedback_history[i] *= feedback.feedback_decay;
+    }
+
+    // Integrate context into network processing with dynamic weights
+    integrateGlobalContext(contextManager, 
+                          updatedNeurons,
+                          max_neurons,
+                          weights,
+                          max_connections);
+
+    // Print context adaptation metrics periodically
+    if (step % 20 == 0) {
+        printf("\nContext Adaptation Metrics (Step %d):\n", step);
+        printf("Average Feedback Signal: %.4f\n", 
+               computeAverageFeedback(feedback.feedback_history, 
+                                    feedback.history_size));
+        printf("Context Weight Range: %.4f - %.4f\n",
+               computeMinWeight(feedback.context_weights, max_neurons),
+               computeMaxWeight(feedback.context_weights, max_neurons));
+        printf("Correlation Strength: %.4f\n",
+               computeAverageCorrelation(adaptation.correlation_matrix, 
+                                       max_neurons));
+    }
 
     // Update memory system with new outputs
     addMemory(memorySystem, updatedNeurons, input_tensor,
