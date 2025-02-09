@@ -23,34 +23,43 @@ Video explanation:
 
 This documentation provides a comprehensive guide to the decentralized neural web architecture implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization.
 The goal of this architecture is to present an alternative to modern neural models, which are often complex and resource-intensive, taking inspiration from our brains, neurons are decentralized organized in layers, allowing them to interact with themselves and change theirselves overtime in more than just sates and weights, while also creating a dynamic memory system.
+
 ## Requirements:
+
 json-c library
 
 for metal macos version metal api
 
 for cuda version cuda
+
 ## Compilation
 
 To compile the code, run the following command in the root directory of the project:
 
 ### arch64 MacOS
+
 For metal version
+
 ```sh
-clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web.m      
+clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web.m
 ```
 
 For cpu but macOS version
+
 ```sh
-clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_webCPU.c      
+clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_webCPU.c
 ```
 
 ### 64/86 unix
+
 For cpu 86/64 unix version
+
 ```sh
-clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web64.c      
+clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web64.c
 ```
 
 For cuda version
+
 ```sh
 nvcc -o neural_web neural_web.cu -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c
 ```
@@ -59,16 +68,19 @@ JsonC library replace with your own imports in the command if you copied it into
 
 1. Note: the perfomance of other cpu versions than metal and cuda might be off as the gpu is far more efficient than cpu
 2. Note: the actual code is located in src so you should either unpack files from there into your folder or just compile there
+
 ## Architecture Overview
+
 The architecture consists of several key components:
 
 - **Neurons**: The basic units of the neural network, organized into layers, each connected in a 3d like structure.
-![alt text](neuron_connections_3d.png)
+  ![alt text](neuron_connections_3d.png)
 - **Memory System**: A hierarchical memory system to store and manage memories with varying importance.
 - **Dynamic Parameters**: Parameters that adapt based on the network's performance and stability.
 - **Performance Metrics**: Metrics to track the performance of the network.
 - **Optimization**: Techniques to optimize the network's parameters for better performance.
-![alt text](image.png)
+  ![alt text](image.png)
+
 ## Loss figure :
 
 ![alt text](image-1.png)
@@ -266,9 +278,11 @@ initializeNeurons(neurons, connections, weights, input_tensor);
 - `void adaptNetworkDynamic(Neuron *neurons, float *weights, DynamicParameters *params, float performance_delta, float *input_tensor)`: Adapts the network with dynamic parameters.
 
 # Algorithm and Mathematics
+
 This document outlines the core algorithms and mathematical principles behind a decentralized neural network architecture. These mechanisms enable hierarchical memory management, dynamic adaptation, and optimization.
 
 ---
+
 ## Key Components
 
 ### 1. **Neuron State Update**
@@ -285,9 +299,11 @@ This algorithm calculates the new state of each neuron based on its current stat
 ---
 
 ### 2. **Weight Update**
+
 Adjusts the connections (weights) between neurons using a modified Hebbian learning rule.
 
 #### How It Works:
+
 - **Weight Update Formula**:  
   `delta_w = learning_rate * (pre_activation * post_activation - weight * decay_factor)`
 - **Normalization**: Weights are clipped to prevent unbounded growth:  
@@ -296,9 +312,11 @@ Adjusts the connections (weights) between neurons using a modified Hebbian learn
 ---
 
 ### 3. **Memory Management**
+
 Maintains memories in a hierarchical system, adjusting their importance dynamically.
 
 #### How It Works:
+
 - **Memory Importance**:  
   `importance = sum(abs(vector[i]) for i in range(vector_size)) / vector_size`
 - **Decay Over Time**:  
@@ -309,9 +327,11 @@ Maintains memories in a hierarchical system, adjusting their importance dynamica
 ---
 
 ### 4. **Dynamic Parameter Adaptation**
+
 Automatically tunes parameters based on performance and stability.
 
 #### How It Works:
+
 - **Adaptation Rate**:  
   `new_adaptation_rate = (momentum * adaptation_rate) + ((1 - momentum) * target_rate)`
 - **Plasticity Adjustment**:  
@@ -322,9 +342,11 @@ Automatically tunes parameters based on performance and stability.
 ---
 
 ### 5. **Performance Optimization**
+
 Optimizes learning rate and batch size based on network performance.
 
 #### How It Works:
+
 - **Performance Score**:  
   `performance_score = (time_score * 0.4) + (output_score * 0.4) + (error_penalty * 0.2)`
 - **Batch Size Adjustment**:  
@@ -335,18 +357,22 @@ Optimizes learning rate and batch size based on network performance.
 ---
 
 ### 6. **Pattern Matching**
+
 Finds similar memories using cosine similarity.
 
 #### How It Works:
+
 - **Cosine Similarity**:  
   `similarity = (sum(vector1[i] * vector2[i] for i in range(vector_size))) / (sqrt(sum(vector1[i]**2 for i in range(vector_size))) * sqrt(sum(vector2[i]**2 for i in range(vector_size))))`
 
 ---
 
 ### 7. **Performance Analysis**
+
 Provides insights by calculating statistics like averages and variances.
 
 #### How It Works:
+
 - **Average**:  
   `average = sum(values) / len(values)`
 - **Variance**:  
@@ -355,9 +381,11 @@ Provides insights by calculating statistics like averages and variances.
 ---
 
 ### 8. **Backpropagation**
+
 Refines the network by minimizing errors via gradient descent.
 
 #### How It Works:
+
 - **Loss Function (Mean Squared Error)**:  
   `loss = sum((y[i] - y_hat[i])**2 for i in range(n)) / n`
 - **Gradient Descent**:  
@@ -366,9 +394,11 @@ Refines the network by minimizing errors via gradient descent.
 ---
 
 ### 9. **SIMD Operations**
+
 Performs vector operations efficiently.
 
 #### How It Works:
+
 - **Addition**:  
   `result[i] = vector1[i] + vector2[i]`
 - **Multiplication**:  
@@ -377,31 +407,38 @@ Performs vector operations efficiently.
 ---
 
 ### 10. **Memory Vector Computation**
+
 Creates a memory vector by combining various data sources:  
 `memory_vector = [neuron_states, neuron_outputs, input_tensor]`
 
 ---
 
 ### 11. **Network Stability Measurement**
+
 Assesses stability by comparing current and previous neuron states.
 
 #### How It Works:
+
 - **Stability Measure**:  
   `stability_measure = 1 - (sum(abs(current_state[i] - previous_state[i]) for i in range(n)) / n)`
 
 ---
 
 ### 12. **Memory Merging**
+
 Combines similar memories to reduce redundancy.
 
 #### How It Works:
+
 - **Weighted Merge**:  
   `merged_vector = ((importance1 * vector1) + (importance2 * vector2)) / (importance1 + importance2)`
 - **Merged Importance**:  
   `merged_importance = max(importance1, importance2) * 1.1`
+
 ---
 
 # Neural Web Training Mechanism
+
 This README file explains the training mechanism of the neural web implemented in the provided `main()` function. The training process involves several key components, including Metal device setup, memory system management, neural network initialization, and the main simulation loop for training. Below, we delve into the design reasons behind each component.
 
 ## Table of Contents
@@ -417,17 +454,20 @@ This README file explains the training mechanism of the neural web implemented i
 ## Metal Device Setup
 
 ### Code
+
 ```c
 id<MTLDevice> device = MTLCreateSystemDefaultDevice();
 id<MTLCommandQueue> commandQueue = [device newCommandQueue];
 ```
 
 ### Design Reason
+
 Metal is used for its high performance and low-level access to the GPU, which is crucial for the efficient computation required in neural network training. Setting up the Metal device and command queue ensures that the GPU resources are ready for compute tasks, note cuda also can work in this place.
 
 ## Memory System Management
 
 ### Code
+
 ```c
 MemorySystem *memorySystem = loadMemorySystem("memory_system.dat");
 if (memorySystem != NULL) {
@@ -439,11 +479,26 @@ if (memorySystem != NULL) {
 ```
 
 ### Design Reason
-The memory system is designed to store and manage hierarchical memory structures, which are essential for retaining learned patterns and experiences. This hierarchical approach allows the system to prioritize and manage memories based on their importance and recency, mimicking human memory processes. Loading an existing memory system ensures continuity and prevents the loss of previously learned information.
+
+The memory system is designed to store and manage hierarchical memory structures, which are essential for retaining learned patterns and experiences. This hierarchical approach allows the system to prioritize and manage memories based on their importance and recency, mimicking human memory processes. Loading an existing memory system ensures continuity and prevents the loss of previously learned information, along with the working memory system allowing the model to have a dynamic realtime memory.
+
+## Meta controller, cognitive system, goal planning
+
+```c
+MetaController *metaController = initializeMetaController(network_regions);
+IntrinsicMotivation *motivation = initializeMotivationSystem();
+GoalSystem *goalSystem = initializeGoalSystem(10);
+GlobalContextManager *contextManager = initializeGlobalContextManager(MAX_NEURONS);
+```
+
+### Design Reason
+
+The meta controller, cognitive system, and goal planning components are initialized using the provided functions. These components are responsible for orchestrating the overall behavior of the neural web. Allowing the model to have a dynamic realtime memory, understand in a way.
 
 ## Neural Network Initialization
 
 ### Code
+
 ```c
 Neuron neurons[MAX_NEURONS];
 uint connections[MAX_NEURONS * MAX_CONNECTIONS] = {0};
@@ -458,6 +513,7 @@ if (memorySystem->size > 0) {
 ```
 
 ### Design Reason
+
 Initializing the neural network involves setting up neurons, connections, and weights. If the memory system contains existing data, neurons are initialized from the last memory state to leverage previously learned information. This approach ensures that the network can build upon past experiences, enhancing learning efficiency and effectiveness.
 
 ## Main Simulation Loop
@@ -471,17 +527,20 @@ Performance tracking and optimization are crucial for ensuring that the neural n
 ## Dynamic Parameter Adaptation
 
 ### Code
+
 ```c
 updateDynamicParameters(&params, performance_delta, stability, performance_history[step].error_rate);
 adaptNetworkDynamic(updatedNeurons, weights, &params, performance_delta, input_tensor);
 ```
 
 ### Design Reason
+
 Dynamic parameter adaptation allows the neural network to adjust its parameters in real-time based on performance metrics and network stability. This adaptability ensures that the network can respond to varying inputs and conditions, improving its robustness and flexibility. Parameters such as adaptation rate, input noise scale, and plasticity are adjusted to optimize learning and performance.
 
 ### Overview
 
 1. **Initialization and Setup**:
+
    - **Metal Device and Command Queue**:
      ```c
      id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -496,6 +555,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
      ```
 
 2. **Loading and Creating Shaders**:
+
    - **Shader Source and Library**:
      ```c
      NSString *shaderSource = @"neuron_update.metal";
@@ -509,6 +569,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
      ```
 
 3. **Neural Network Initialization**:
+
    - **Neurons and Connections**:
      ```c
      Neuron neurons[MAX_NEURONS];
@@ -523,6 +584,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
      ```
 
 4. **Main Simulation Loop**:
+
    - **Task Prompt and Memory Management**:
      ```c
      for (int step = 0; step < STEPS; step++) {
@@ -547,6 +609,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
      ```
 
 5. **Performance Metrics and Optimization**:
+
    - **Compute Loss and Update Weights**:
      ```c
      float loss = computeMSELoss(updatedNeurons, target_outputs, max_neurons);
@@ -577,15 +640,18 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 ### Structuring `int main()`
 
 1. **Initialization**:
+
    - Initialize Metal device and command queue.
    - Load or create the memory system.
    - Load shader source and create pipeline states.
 
 2. **Neural Network Setup**:
+
    - Initialize neurons, connections, and weights.
    - Create Metal buffers for neurons, connections, weights, and other parameters.
 
 3. **Main Simulation Loop**:
+
    - Generate task prompts and manage memory system.
    - Perform forward and backward passes using Metal command encoders.
    - Compute loss, update weights, and optimize parameters periodically.
@@ -599,6 +665,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 Example of the training can be seen in the MacOS/neural_web.m file in int main or if you are not familiar with metal 86\64/neural_web64CPU.c
 
 ## Needed information
+
 Note if you modify max_neurons in the example you have to also modify the input_size to be at max greater than the number of max_neurons by 1 or just lesser than the number of max_neurons or it will have an out of bounds error
 
 The model uses reverse pathways and generally doesn't only do patterns good because it also reverses its outputs and finds more meaning in it and additional pathways to achieve what it is supposed to similar to how humans do, or as how I think humans do.
