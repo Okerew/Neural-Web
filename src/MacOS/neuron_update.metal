@@ -13,9 +13,10 @@ constant float LEARNING_RATE = 0.01f;
 constant float WEIGHT_DECAY = 0.1f;
 constant float MIN_WEIGHT = -1.0f;
 constant float MAX_WEIGHT = 1.0f;
-constant uint MAX_NEURONS = 1024;     
-constant uint MAX_CONNECTIONS = 16;   
+constant uint MAX_NEURONS = 1024;      // Adjust as needed
+constant uint MAX_CONNECTIONS = 16;    // Adjust as needed
 
+// Define MemoryEntry structure
 struct MemoryEntry {
     float vector[MAX_NEURONS * 2]; // Stores neuron states and outputs
     float importance;              // Importance of the memory
@@ -116,6 +117,7 @@ kernel void update_neurons(device Neuron* neurons [[buffer(0)]],
     neurons[id].output = new_output;
 }
 
+// Weight update kernel
 kernel void update_weights(device float* weights [[buffer(0)]],
                          device const Neuron* neurons [[buffer(1)]],
                          device const uint* connections [[buffer(2)]],
@@ -132,7 +134,7 @@ kernel void update_weights(device float* weights [[buffer(0)]],
     
     uint target_idx = connections[id];
     
-    // Hebbian learning with normalization
+    // Modified Hebbian learning with normalization
     float pre_activation = neurons[neuron_idx].state;
     float post_activation = neurons[target_idx].output;
     float current_weight = weights[id];
@@ -151,6 +153,7 @@ kernel void update_weights(device float* weights [[buffer(0)]],
     weights[id] = metal::clamp(new_weight, MIN_WEIGHT, MAX_WEIGHT);
 }
 
+// Updated neuron processing kernel
 kernel void process_neurons(device Neuron* neurons [[buffer(0)]],
                           device const float* weights [[buffer(1)]],
                           device const uint* connections [[buffer(2)]],
@@ -212,46 +215,73 @@ kernel void process_neurons(device Neuron* neurons [[buffer(0)]],
 
 kernel void backwardKernel(
     const device Neuron *neurons [[buffer(0)]],         
-    const device float *weights [[buffer(1)]],        
+    device float *weights [[buffer(1)]],        
     const device uint2 *connections [[buffer(2)]],     
     const device uint *maxNeurons [[buffer(3)]],       
     const device uint *maxConnections [[buffer(4)]],    
     const device float *targetOutputs [[buffer(5)]],    
     device float *outputErrors [[buffer(6)]],           
-    const device float *learningRate [[buffer(7)]],     
-    uint gid [[thread_position_in_grid]]) {              // Thread position
+    device float *m [[buffer(7)]],   // First moment buffer for Adam
+    device float *v [[buffer(8)]],   // Second moment buffer for Adam
+    const device float *beta1 [[buffer(9)]],   
+    const device float *beta2 [[buffer(10)]],  
+    const device float *epsilon [[buffer(11)]], 
+    const device float *learningRate [[buffer(12)]],     
+    const device uint *timeSteps [[buffer(13)]],  
+    device uint *t [[buffer(14)]],  // Optimization step counter
+    uint gid [[thread_position_in_grid]]) { 
+
     if (gid >= *maxNeurons) return;
 
-    float predictedOutput = neurons[gid].output;
+    float totalError = 0.0;
 
-    float targetOutput = targetOutputs[gid]; 
+    // Iterate over time steps in reverse (BPTT)
+    for (int step = *timeSteps - 1; step >= 0; step--) {
+        uint neuronIndex = gid * (*timeSteps) + step;
+        float predictedOutput = neurons[neuronIndex].output;
+        float targetOutput = targetOutputs[neuronIndex];
 
-    // Compute the error between predicted and target output (e.g., for MSE)
-    float error = predictedOutput - targetOutput;
+        // Compute error
+        float error = predictedOutput - targetOutput;
+        float activationGradient = predictedOutput * (1.0 - predictedOutput); // Sigmoid derivative
+        totalError += error;
 
-    // Store the error in the outputErrors buffer
-    outputErrors[gid] = error;
+        // Store error for analysis
+        outputErrors[neuronIndex] = error;
 
-    float activationGradient = predictedOutput * (1.0 - predictedOutput);
+        // Compute gradients and update weights
+        for (uint i = 0; i < *maxConnections; i++) {
+            uint2 connection = connections[gid * (*maxConnections) + i];
+            uint connectedNeuron = connection.x;
+            uint weightIndex = connection.y;
 
-    for (uint i = 0; i < *maxConnections; i++) {
-        uint2 connection = connections[gid * (*maxConnections) + i];
-        uint connectedNeuron = connection.x; // Source neuron index
-        uint weightIndex = connection.y;     // Weight index
+            if (connectedNeuron >= *maxNeurons) continue;
 
-        // Ensure the connected neuron index is valid
-        if (connectedNeuron >= *maxNeurons) continue;
+            float inputGradient = neurons[connectedNeuron * (*timeSteps) + step].output * totalError * activationGradient;
 
-        // Calculate gradient for this weight (backpropagation)
-        float inputGradient = neurons[connectedNeuron].output * error * activationGradient;
+            // Adam Optimizer updates
+            float beta1_t = *beta1;
+            float beta2_t = *beta2;
+            float epsilon_t = *epsilon;
+            uint timeStep = *t;
 
-        // Update weight using learning rate (gradient descent)
-        float updatedWeight = weights[weightIndex] - (*learningRate) * inputGradient;
+            // Compute first and second moment estimates
+            m[weightIndex] = beta1_t * m[weightIndex] + (1.0 - beta1_t) * inputGradient;
+            v[weightIndex] = beta2_t * v[weightIndex] + (1.0 - beta2_t) * (inputGradient * inputGradient);
 
-        // Store updated weight back to the weights buffer
-        ((device float *)weights)[weightIndex] = updatedWeight;
+            // Bias correction
+            float mHat = m[weightIndex] / (1.0 - pow(beta1_t, timeStep));
+            float vHat = v[weightIndex] / (1.0 - pow(beta2_t, timeStep));
+
+            // Adam weight update
+            weights[weightIndex] -= (*learningRate) * mHat / (sqrt(vHat) + epsilon_t);
+        }
     }
+
+    // Increment the optimization step counter
+    atomic_fetch_add_explicit((device atomic_uint *)t, 1, memory_order_relaxed);
 }
+
 
 kernel void reverse_process(
     device Neuron *neurons [[buffer(0)]],
@@ -273,7 +303,7 @@ kernel void reverse_process(
     }
 
     // Update neuron state based on reverse pathway
-    neurons[id].state += 0.1f * sum;
+    neurons[id].state += 0.1f * sum; // Adjust the scaling factor as needed
 }
 
 kernel void memory_replay(
