@@ -539,103 +539,140 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 
 ### Overview
 
-1. **Initialization and Setup**:
-
-   - **Metal Device and Command Queue**:
+1. **Input Data**:
+   - **Code**:
      ```c
-     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-     id<MTLCommandQueue> commandQueue = [device newCommandQueue];
+     const char *text_input = "Apple, banana, cherry, date, and elderberry are fruits.";
      ```
-   - **Memory System**:
-     ```c
-     MemorySystem *memorySystem = loadMemorySystem("memory_system.dat");
-     if (memorySystem == NULL) {
-       memorySystem = createMemorySystem(MEMORY_BUFFER_SIZE);
-     }
-     ```
+   - **Description**: The input data is a text string that serves as the initial input to the neural network. This aligns with the "Input Data" node in the diagram.
 
-2. **Loading and Creating Shaders**:
-
-   - **Shader Source and Library**:
-     ```c
-     NSString *shaderSource = @"neuron_update.metal";
-     NSString *sourceCode = [NSString stringWithContentsOfFile:shaderSource encoding:NSUTF8StringEncoding error:&error];
-     id<MTLLibrary> library = [device newLibraryWithSource:sourceCode options:nil error:&error];
-     ```
-   - **Pipeline States**:
-     ```c
-     id<MTLFunction> function = [library newFunctionWithName:@"update_neurons"];
-     id<MTLComputePipelineState> pipelineState = [device newComputePipelineStateWithFunction:function error:&error];
-     ```
-
-3. **Neural Network Initialization**:
-
-   - **Neurons and Connections**:
+2. **Neurons**:
+   - **Code**:
      ```c
      Neuron neurons[MAX_NEURONS];
-     uint connections[MAX_NEURONS * MAX_CONNECTIONS] = {0};
-     float weights[MAX_NEURONS * MAX_CONNECTIONS] = {0};
      ```
-   - **Buffers**:
-     ```c
-     id<MTLBuffer> neuronBuffer = [device newBufferWithBytes:neurons length:sizeof(neurons) options:MTLResourceStorageModeShared];
-     id<MTLBuffer> connectionBuffer = [device newBufferWithBytes:connections length:sizeof(connections) options:MTLResourceStorageModeShared];
-     id<MTLBuffer> weightBuffer = [device newBufferWithBytes:weights length:sizeof(weights) options:MTLResourceStorageModeShared];
-     ```
+   - **Description**: An array of `Neuron` structures is initialized to represent the neurons in the network. This corresponds to the "Neurons" node.
 
-4. **Main Simulation Loop**:
+3. **Neuron State Update**:
+   - **Code**:
+     ```c
+     processNeurons(neurons, max_neurons, weights, connections, max_connections, 1.5f);
+     ```
+   - **Description**: The `processNeurons` function updates the state of each neuron based on weights and connections. This relates to the "Neuron State Update" node.
 
-   - **Task Prompt and Memory Management**:
+4. **Activation Function (tanh)**:
+   - **Code**:
      ```c
-     for (int step = 0; step < STEPS; step++) {
-       TaskPrompt current_prompt;
-       generateTaskPrompt(&current_prompt, step);
-       if (step % 10 == 0) {
-         decayMemorySystem(memorySystem);
-         mergeSimilarMemories(memorySystem);
-       }
-     }
+     id<MTLFunction> function = [library newFunctionWithName:@"update_neurons"];
      ```
-   - **Forward and Backward Pass**:
-     ```c
-     id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
-     id<MTLComputeCommandEncoder> forwardEncoder = [commandBuffer computeCommandEncoder];
-     [forwardEncoder setComputePipelineState:pipelineState];
-     [forwardEncoder setBuffer:neuronBuffer offset:0 atIndex:0];
-     [forwardEncoder setBuffer:weightBuffer offset:0 atIndex:1];
-     [forwardEncoder setBuffer:connectionBuffer offset:0 atIndex:2];
-     [forwardEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
-     [forwardEncoder endEncoding];
-     ```
+   - **Description**: The activation function is defined in the shader code and applied during the forward pass. This corresponds to the "Activation Function (tanh)" node.
 
-5. **Performance Metrics and Optimization**:
+5. **Weight Update (Hebbian Learning)**:
+   - **Code**:
+     ```c
+     id<MTLComputePipelineState> weightPipelineState = [device newComputePipelineStateWithFunction:weightFunction error:&error];
+     ```
+   - **Description**: Weights are updated using a Hebbian learning approach, implemented in the shader pipeline. This aligns with the "Weight Update (Hebbian Learning)" node.
 
-   - **Compute Loss and Update Weights**:
+6. **Memory Management**:
+   - **Code**:
      ```c
-     float loss = computeMSELoss(updatedNeurons, target_outputs, max_neurons);
-     updateWeights(weights, updatedNeurons, connections, learning_rate);
+     MemorySystem *memorySystem = loadMemorySystem("memory_system.dat");
      ```
-   - **Optimize Parameters**:
-     ```c
-     if (step % OPTIMIZATION_WINDOW == 0 && step > 0) {
-       optimizeParameters(&opt_state, performance_history, step + 1);
-     }
-     ```
+   - **Description**: The memory system is loaded or created to manage memories, corresponding to the "Memory Management" node.
 
-6. **Cleanup and Saving State**:
-   - **Save States**:
+7. **Generate Memory Vector**:
+   - **Code**:
      ```c
-     saveNetworkStates(stateHistory, STEPS);
-     saveMemorySystem(memorySystem, "memory_system.dat");
-     saveHierarchicalMemory(memorySystem, "hierarchical_memory.dat");
-     saveSystemParameters(system_params, "system_parameters.dat");
+     addMemory(memorySystem, working_memory, updatedNeurons, input_tensor, lastTimestamp + step + 1, feature_projection_matrix);
      ```
-   - **Free Memory**:
+   - **Description**: New memories are generated and added to the memory system, aligning with the "Generate Memory Vector" node.
+
+8. **Hierarchical Memory**:
+   - **Code**:
      ```c
-     freeMemorySystem(memorySystem);
-     free(stateHistory);
-     free(system_params);
+     loadHierarchicalMemory(memorySystem, "hierarchical_memory.dat");
      ```
+   - **Description**: The memory system is hierarchical, with short-term, medium-term, and long-term memories. This corresponds to the "Hierarchical Memory" node.
+
+9. **Memory Retrieval**:
+   - **Code**:
+     ```c
+     MemoryEntry *relevantMemory = retrieveMemory(memorySystem);
+     ```
+   - **Description**: Relevant memories are retrieved from the memory system, aligning with the "Memory Retrieval" node.
+
+10. **Memory Merging**:
+    - **Code**:
+      ```c
+      mergeSimilarMemories(memorySystem);
+      ```
+    - **Description**: Similar memories are merged to optimize storage, corresponding to the "Memory Merging" node.
+
+11. **Predictive Coding**:
+    - **Code**:
+      ```c
+      initPredictiveCodingParams(max_neurons);
+      ```
+    - **Description**: Predictive coding parameters are initialized and used to generate predictive inputs, aligning with the "Predictive Coding" node.
+
+12. **Memory Importance Update**:
+    - **Code**:
+      ```c
+      decayMemorySystem(memorySystem);
+      ```
+    - **Description**: The importance of memories is updated through decay and consolidation, corresponding to the "Memory Importance Update" node.
+
+13. **Working Memory**:
+    - **Code**:
+      ```c
+      WorkingMemorySystem *working_memory = createWorkingMemorySystem(200);
+      ```
+    - **Description**: A working memory system is created to assist with temporary storage and active processing, aligning with the "Working Memory" node.
+
+14. **Global Context Manager**:
+    - **Code**:
+      ```c
+      GlobalContextManager *contextManager = initializeGlobalContextManager(MAX_NEURONS);
+      ```
+    - **Description**: The global context manager provides context to neurons and influences memory importance, corresponding to the "Global Context Manager" node.
+
+15. **Motivation System**:
+    - **Code**:
+      ```c
+      IntrinsicMotivation *motivation = initializeMotivationSystem();
+      ```
+    - **Description**: The motivation system drives learning and action, prioritizing memory and attention, aligning with the "Motivation System" node.
+
+16. **Dynamic Adaptation**:
+    - **Code**:
+      ```c
+      DynamicParameters params = initDynamicParameters();
+      ```
+    - **Description**: Dynamic parameters are used to adapt the network's learning rate and stability, corresponding to the "Dynamic Adaptation" node.
+
+17. **Performance Optimization**:
+    - **Code**:
+      ```c
+      optimizeParameters(&opt_state, performance_history, step + 1);
+      ```
+    - **Description**: Parameters are optimized to enhance performance, aligning with the "Performance Optimization" node.
+
+18. **Network Stability Measurement**:
+    - **Code**:
+      ```c
+      float stability = measureNetworkStability(updatedNeurons, previous_states);
+      ```
+    - **Description**: Network stability is measured to monitor and improve adaptation, corresponding to the "Network Stability Measurement" node.
+
+19. **Text Output / Action**:
+    - **Code**:
+      ```c
+      char outputText[4096];
+      transformOutputsToText(previous_outputs, MAX_NEURONS, outputText, sizeof(outputText));
+      ```
+    - **Description**: The network's output is transformed into text or action, corresponding to the "Text Output / Action" node.
+
 
 ### Structuring `int main()`
 
@@ -659,7 +696,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 4. **Cleanup and Saving State**:
    - Save the final states of the neural network, memory system, and system parameters.
    - Free allocated memory.
-
+     
 ### Example
 
 Example of the training can be seen in the MacOS/neural_web.m file in int main or if you are not familiar with metal 86\64/neural_web64CPU.c
@@ -676,3 +713,5 @@ neuron update shader and the code must be in the same directory.
 To modify number of neurons change MAX_NEURONS
 
 Only for unix type systems
+
+Cuda version might not work the best
