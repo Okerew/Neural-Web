@@ -38,6 +38,9 @@
 #define CONTEXT_VECTOR_SIZE 256
 #define CLAMP_MIN -1e6f // Min value for feature or coherence
 #define CLAMP_MAX 1e6f  // Max value for feature or coherence
+#define PATTERN_SIZE 3
+#define EXPERIENCE_VECTOR_SIZE 256
+#define MAX_USAGE_COUNT 1000 // Maximum usage count for normalization
 
 typedef struct {
   float state;
@@ -306,6 +309,94 @@ typedef struct {
   DynamicClusterSystem clusters;
   float *global_context;
 } WorkingMemorySystem;
+
+// Self-reflection system structures
+typedef struct {
+  float confidence_score;
+  float coherence_score;
+  float novelty_score;
+  float consistency_score;
+  char reasoning[1024];
+  bool potentially_confabulated;
+} ReflectionMetrics;
+
+typedef struct {
+  float historical_confidence[100];
+  float historical_coherence[100];
+  float historical_consistency[100];
+  int history_index;
+  float confidence_threshold;
+  float coherence_threshold;
+  float consistency_threshold;
+} ReflectionHistory;
+
+typedef struct {
+  float current_adaptation_rate;
+  float input_noise_scale;
+  float weight_noise_scale;
+  float plasticity;
+  float noise_tolerance;
+  float learning_rate;
+} ReflectionParameters;
+
+typedef struct {
+  float *core_values;         // Stable personality traits/values
+  float *belief_system;       // Current belief states
+  float *identity_markers;    // Unique identifying characteristics
+  float *experience_history;  // Compressed history of experiences
+  float *behavioral_patterns; // Consistent behavior patterns
+
+  int num_core_values;
+  int num_beliefs;
+  int num_markers;
+  int history_size;
+  int pattern_size;
+
+  float consistency_score; // Measure of identity stability
+  float adaptation_rate;   // Rate of identity evolution
+  float confidence_level;  // Self-confidence in identity
+
+  // Temporal consistency tracking
+  float *temporal_coherence; // Track consistency over time
+  int coherence_window;      // Time window for coherence analysis
+
+  // Identity verification system
+  struct {
+    float threshold;        // Minimum consistency threshold
+    float *reference_state; // Reference identity state
+    int state_size;         // Size of reference state
+  } verification;
+
+} SelfIdentitySystem;
+
+// Knowledge category structure
+typedef struct {
+  char name[64];
+  float *feature_vector;
+  float importance;
+  float confidence;
+  int usage_count;
+  time_t last_accessed;
+} KnowledgeCategory;
+
+typedef struct {
+  char description[256];
+  float *feature_vector;
+  float difficulty;
+  float success_rate;
+  KnowledgeCategory *category;
+  time_t timestamp;
+} ProblemInstance;
+
+typedef struct {
+  KnowledgeCategory *categories;
+  int num_categories;
+  int capacity;
+  ProblemInstance *problem_history;
+  int num_problems;
+  int problem_capacity;
+  float *category_similarity_matrix;
+} KnowledgeFilter;
 
 DynamicParameters initDynamicParameters() {
   DynamicParameters params = {.input_noise_scale = 0.1f,
@@ -1547,12 +1638,14 @@ MemoryEntry *retrieveMemory(MemorySystem *system) {
   MemoryEntry *most_relevant = NULL;
   float highest_importance = 0.0f;
 
-  // Search long-term memory first
-  for (unsigned int i = 0; i < system->hierarchy.long_term.size; i++) {
-    if (system->hierarchy.long_term.entries[i].importance >
-        highest_importance) {
-      highest_importance = system->hierarchy.long_term.entries[i].importance;
-      most_relevant = &system->hierarchy.long_term.entries[i];
+  // Search short-term if still nothing found
+  if (!most_relevant) {
+    for (unsigned int i = 0; i < system->hierarchy.short_term.size; i++) {
+      if (system->hierarchy.short_term.entries[i].importance >
+          highest_importance) {
+        highest_importance = system->hierarchy.short_term.entries[i].importance;
+        most_relevant = &system->hierarchy.short_term.entries[i];
+      }
     }
   }
 
@@ -1568,14 +1661,12 @@ MemoryEntry *retrieveMemory(MemorySystem *system) {
     }
   }
 
-  // Search short-term if still nothing found
-  if (!most_relevant) {
-    for (unsigned int i = 0; i < system->hierarchy.short_term.size; i++) {
-      if (system->hierarchy.short_term.entries[i].importance >
-          highest_importance) {
-        highest_importance = system->hierarchy.short_term.entries[i].importance;
-        most_relevant = &system->hierarchy.short_term.entries[i];
-      }
+  // Search long-term memory first
+  for (unsigned int i = 0; i < system->hierarchy.long_term.size; i++) {
+    if (system->hierarchy.long_term.entries[i].importance >
+        highest_importance) {
+      highest_importance = system->hierarchy.long_term.entries[i].importance;
+      most_relevant = &system->hierarchy.long_term.entries[i];
     }
   }
 
@@ -3923,6 +4014,1305 @@ float computeNovelty(Neuron *neurons, NetworkStateSnapshot stateHistory,
   return novelty_score;
 }
 
+float computeStateSimilarity(Neuron *current_neurons,
+                             NetworkStateSnapshot *historical_state) {
+  float similarity = 0.0f;
+  float total_neurons = (float)MAX_NEURONS;
+
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    float output_diff =
+        fabs(current_neurons[i].output - historical_state->outputs[i]);
+    float state_diff =
+        fabs(current_neurons[i].state - historical_state->states[i]);
+
+    // Combine output and state differences
+    float neuron_similarity = 1.0f - (output_diff + state_diff) / 2.0f;
+    similarity += neuron_similarity;
+  }
+
+  return similarity / total_neurons;
+}
+
+// Compute consistency between neuron state and memory entry
+float computeMemoryConsistency(Neuron *neurons, MemoryEntry *memory) {
+  float consistency = 0.0f;
+  float total_elements = (float)MAX_NEURONS;
+
+  // Compare neuron outputs with memory vector
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    float diff = fabs(neurons[i].output - memory->vector[i]);
+    consistency += (1.0f - diff);
+  }
+
+  // Factor in memory importance
+  float weighted_consistency = consistency / total_elements;
+  weighted_consistency *= (0.5f + 0.5f * memory->importance);
+
+  return weighted_consistency;
+}
+
+// Compute consistency score based on historical states
+float computeConsistencyScore(Neuron *current_neurons,
+                              NetworkStateSnapshot *history, int current_step) {
+  float consistency = 0.0f;
+  int comparison_window = 5; // Look at last 5 steps
+  int start_step = fmax(0, current_step - comparison_window);
+  int steps_compared = 0;
+
+  // Compare with recent historical states
+  for (int step = start_step; step < current_step; step++) {
+    float step_similarity =
+        computeStateSimilarity(current_neurons, &history[step]);
+
+    // Weight recent steps more heavily
+    float time_weight = 1.0f - (float)(current_step - step) / comparison_window;
+    consistency += step_similarity * time_weight;
+    steps_compared++;
+  }
+
+  return steps_compared > 0 ? consistency / steps_compared : 1.0f;
+}
+
+// Helper function to retrieve most relevant memory
+MemoryEntry *retrieveRelevantMemory(MemorySystem *memorySystem,
+                                    Neuron *current_neurons) {
+  if (memorySystem->size == 0) {
+    return NULL;
+  }
+
+  MemoryEntry *best_match = NULL;
+  float best_similarity = -1.0f;
+
+  // Compare current neuron states with memory entries
+  for (int i = 0; i < memorySystem->size; i++) {
+    int idx = (memorySystem->head - 1 - i + memorySystem->capacity) %
+              memorySystem->capacity;
+    MemoryEntry *memory = &memorySystem->entries[idx];
+
+    float similarity = 0.0f;
+    for (int j = 0; j < MAX_NEURONS; j++) {
+      float diff = fabs(current_neurons[j].output - memory->vector[j]);
+      similarity += (1.0f - diff);
+    }
+    similarity /= MAX_NEURONS;
+
+    // Weight by memory importance
+    similarity *= memory->importance;
+
+    if (similarity > best_similarity) {
+      best_similarity = similarity;
+      best_match = memory;
+    }
+  }
+
+  return best_match;
+}
+
+// Initialize reflection system
+ReflectionHistory *initializeReflectionSystem() {
+  ReflectionHistory *history = malloc(sizeof(ReflectionHistory));
+  memset(history, 0, sizeof(ReflectionHistory));
+  history->confidence_threshold = 0.7f;
+  history->coherence_threshold = 0.65f;
+  history->consistency_threshold = 0.75f;
+  history->history_index = 0;
+  return history;
+}
+
+// Analyze response coherence by comparing with previous states and memories
+float analyzeResponseCoherence(Neuron *neurons, MemorySystem *memorySystem,
+                               NetworkStateSnapshot *history,
+                               int current_step) {
+  float coherence_score = 1.0f;
+
+  // Check internal consistency of current neural activations
+  for (int i = 0; i < MAX_NEURONS - 1; i++) {
+    for (int j = i + 1; j < MAX_NEURONS; j++) {
+      float activation_diff = fabs(neurons[i].output - neurons[j].output);
+      if (neurons[i].layer_id == neurons[j].layer_id &&
+          activation_diff > 0.8f) {
+        coherence_score *=
+            0.95f; // Penalize large differences within same layer
+      }
+    }
+  }
+
+  // Compare with recent history
+  if (current_step > 0) {
+    float historical_similarity =
+        computeStateSimilarity(neurons, &history[current_step - 1]);
+    coherence_score *=
+        (0.5f +
+         0.5f * historical_similarity); // Blend with historical coherence
+  }
+
+  // Check consistency with relevant memories
+  MemoryEntry *relevant_memory = retrieveMemory(memorySystem);
+  if (relevant_memory != NULL) {
+    float memory_consistency =
+        computeMemoryConsistency(neurons, relevant_memory);
+    coherence_score *= (0.7f + 0.3f * memory_consistency);
+  }
+
+  return coherence_score;
+}
+
+// Detect potential confabulation by analyzing response patterns
+bool detectConfabulation(Neuron *neurons, ReflectionHistory *history,
+                         float current_coherence) {
+  // Check for sudden spikes in neuron activity
+  int activation_spikes = 0;
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    if (neurons[i].output > 0.95f) {
+      activation_spikes++;
+    }
+  }
+
+  // Compare with historical coherence
+  float avg_historical_coherence = 0.0f;
+  int valid_history = 0;
+  for (int i = 0; i < 100; i++) {
+    if (history->historical_coherence[i] > 0) {
+      avg_historical_coherence += history->historical_coherence[i];
+      valid_history++;
+    }
+  }
+  if (valid_history > 0) {
+    avg_historical_coherence /= valid_history;
+  }
+
+  // Detect potential confabulation through multiple indicators
+  bool suspicious_pattern =
+      (activation_spikes > MAX_NEURONS * 0.3f) ||
+      (current_coherence < avg_historical_coherence * 0.6f) ||
+      (current_coherence < history->coherence_threshold);
+
+  return suspicious_pattern;
+}
+
+// Helper function to regenerate response when confabulation is detected
+void regenerateResponse(Neuron *neurons, MemorySystem *memorySystem,
+                        ReflectionMetrics metrics, float *weights,
+                        int *connections, ReflectionParameters *params) {
+  float temp_noise = params->input_noise_scale;
+  params->input_noise_scale *= 2.0f;
+
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    neurons[i].state *= 0.5f;
+    neurons[i].output *= 0.7f;
+  }
+
+  processNeurons(neurons, MAX_NEURONS, weights, connections, MAX_CONNECTIONS,
+                 1.2f);
+
+  params->input_noise_scale = temp_noise;
+
+  printf("Response regenerated with adjusted parameters\n");
+}
+
+// Main self-reflection function
+ReflectionMetrics performSelfReflection(Neuron *neurons,
+                                        MemorySystem *memorySystem,
+                                        NetworkStateSnapshot *history,
+                                        ReflectionHistory *reflection_history,
+                                        int current_step) {
+  ReflectionMetrics metrics = {0};
+
+  // Analyze response coherence
+  metrics.coherence_score =
+      analyzeResponseCoherence(neurons, memorySystem, history, current_step);
+
+  // Calculate confidence based on output stability
+  float confidence = 0.0f;
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    confidence +=
+        neurons[i].output *
+        (1.0f -
+         neurons[i].state); // Higher confidence when output and state align
+  }
+  metrics.confidence_score = confidence / MAX_NEURONS;
+
+  // Assess novelty compared to memory
+  metrics.novelty_score = computeNovelty(neurons, *history, current_step);
+
+  // Check consistency with previous responses
+  metrics.consistency_score = 1.0f;
+  if (current_step > 0) {
+    metrics.consistency_score =
+        computeConsistencyScore(neurons, history, current_step);
+  }
+
+  // Detect potential confabulation
+  metrics.potentially_confabulated =
+      detectConfabulation(neurons, reflection_history, metrics.coherence_score);
+
+  // Generate reasoning about the reflection
+  if (metrics.potentially_confabulated) {
+    snprintf(
+        metrics.reasoning, sizeof(metrics.reasoning),
+        "Warning: Response shows signs of confabulation (coherence: %.2f, "
+        "confidence: %.2f). "
+        "Unusual activation patterns detected. Consider regenerating response.",
+        metrics.coherence_score, metrics.confidence_score);
+  } else {
+    snprintf(metrics.reasoning, sizeof(metrics.reasoning),
+             "Response appears reliable (coherence: %.2f, confidence: %.2f). "
+             "Consistent with historical patterns and memories.",
+             metrics.coherence_score, metrics.confidence_score);
+  }
+
+  // Update reflection history
+  reflection_history->historical_coherence[reflection_history->history_index] =
+      metrics.coherence_score;
+  reflection_history->historical_confidence[reflection_history->history_index] =
+      metrics.confidence_score;
+  reflection_history
+      ->historical_consistency[reflection_history->history_index] =
+      metrics.consistency_score;
+  reflection_history->history_index =
+      (reflection_history->history_index + 1) % 100;
+
+  return metrics;
+}
+
+// Integration with main loop
+void integrateReflectionSystem(Neuron *neurons, MemorySystem *memorySystem,
+                               NetworkStateSnapshot *history, int step,
+                               float *weights, int *connections,
+                               ReflectionParameters *params) {
+  static ReflectionHistory *reflection_history = NULL;
+  if (reflection_history == NULL) {
+    reflection_history = initializeReflectionSystem();
+  }
+
+  ReflectionMetrics metrics = performSelfReflection(
+      neurons, memorySystem, history, reflection_history, step);
+
+  if (step % 10 == 0) {
+    printf("\nSelf-Reflection Metrics (Step %d):\n", step);
+    printf("Coherence Score: %.3f\n", metrics.coherence_score);
+    printf("Confidence Score: %.3f\n", metrics.confidence_score);
+    printf("Novelty Score: %.3f\n", metrics.novelty_score);
+    printf("Consistency Score: %.3f\n", metrics.consistency_score);
+    printf("Reasoning: %s\n", metrics.reasoning);
+
+    if (metrics.potentially_confabulated) {
+      printf("\nWARNING: Potential confabulation detected!\n");
+      regenerateResponse(neurons, memorySystem, metrics, weights, connections,
+                         params);
+    }
+  }
+
+  if (metrics.coherence_score < reflection_history->coherence_threshold) {
+    params->learning_rate *= 0.8f;
+  }
+
+  params->plasticity *= (0.8f + 0.4f * metrics.confidence_score);
+  params->noise_tolerance = fmax(
+      0.1f, params->noise_tolerance * (1.0f - 0.2f * metrics.novelty_score));
+}
+
+ReflectionParameters *initializeReflectionParameters() {
+  ReflectionParameters *params =
+      (ReflectionParameters *)malloc(sizeof(ReflectionParameters));
+
+  if (params == NULL) {
+    fprintf(stderr, "Failed to allocate memory for ReflectionParameters\n");
+    return NULL;
+  }
+
+  // Initialize with default values
+  params->current_adaptation_rate =
+      0.01f;                          // Conservative initial adaptation rate
+  params->input_noise_scale = 0.1f;   // Moderate input noise for exploration
+  params->weight_noise_scale = 0.05f; // Small weight perturbations
+  params->plasticity = 0.8f;          // High initial plasticity
+  params->noise_tolerance = 0.2f;     // Moderate noise tolerance
+  params->learning_rate = 0.01f;      // Conservative learning rate
+
+  return params;
+}
+
+// Initialize the self-identity system
+SelfIdentitySystem *initializeSelfIdentity(int num_values, int num_beliefs,
+                                           int num_markers, int history_size,
+                                           int pattern_size) {
+  SelfIdentitySystem *system =
+      (SelfIdentitySystem *)malloc(sizeof(SelfIdentitySystem));
+
+  system->num_core_values = num_values;
+  system->num_beliefs = num_beliefs;
+  system->num_markers = num_markers;
+  system->history_size = history_size;
+  system->pattern_size = pattern_size;
+
+  // Allocate memory for identity components
+  system->core_values = (float *)calloc(num_values, sizeof(float));
+  system->belief_system = (float *)calloc(num_beliefs, sizeof(float));
+  system->identity_markers = (float *)calloc(num_markers, sizeof(float));
+  system->experience_history = (float *)calloc(history_size, sizeof(float));
+  system->behavioral_patterns = (float *)calloc(pattern_size, sizeof(float));
+
+  // Initialize temporal coherence tracking
+  system->coherence_window = 100; // Track last 100 states
+  system->temporal_coherence =
+      (float *)calloc(system->coherence_window, sizeof(float));
+
+  // Set initial parameters
+  system->consistency_score = 1.0f;
+  system->adaptation_rate = 0.01f;
+  system->confidence_level = 0.5f;
+
+  // Initialize verification system
+  system->verification.threshold = 0.8f;
+  system->verification.state_size = num_values + num_beliefs + num_markers;
+  system->verification.reference_state =
+      (float *)calloc(system->verification.state_size, sizeof(float));
+
+  return system;
+}
+
+// Extract behavioral patterns from neural network state
+float *extractBehavioralPatterns(Neuron *neurons, int num_neurons) {
+  float *patterns = (float *)calloc(PATTERN_SIZE, sizeof(float));
+
+  // Calculate activation patterns
+  for (int i = 0; i < PATTERN_SIZE; i++) {
+    float pattern_sum = 0.0f;
+    int neurons_per_pattern = num_neurons / PATTERN_SIZE;
+
+    for (int j = 0; j < neurons_per_pattern; j++) {
+      int neuron_idx = i * neurons_per_pattern + j;
+      if (neuron_idx < num_neurons) {
+        pattern_sum += neurons[neuron_idx].output;
+      }
+    }
+    patterns[i] = pattern_sum / neurons_per_pattern;
+  }
+
+  // Normalize patterns
+  float max_pattern = 0.0f;
+  for (int i = 0; i < PATTERN_SIZE; i++) {
+    if (patterns[i] > max_pattern)
+      max_pattern = patterns[i];
+  }
+  if (max_pattern > 0.0f) {
+    for (int i = 0; i < PATTERN_SIZE; i++) {
+      patterns[i] /= max_pattern;
+    }
+  }
+
+  return patterns;
+}
+
+// Compute consistency between current and stored patterns
+float computePatternConsistency(float *stored_patterns, float *current_patterns,
+                                int pattern_size) {
+  float consistency = 0.0f;
+  float sum_squared_diff = 0.0f;
+
+  for (int i = 0; i < pattern_size; i++) {
+    float diff = stored_patterns[i] - current_patterns[i];
+    sum_squared_diff += diff * diff;
+  }
+
+  consistency = 1.0f - sqrt(sum_squared_diff / pattern_size);
+  return fmax(0.0f, consistency); // Ensure non-negative
+}
+
+float computeValueConsistency(float *core_values, int num_values) {
+  if (num_values == 0)
+    return 0.0f;
+
+  float consistency = 0.0f;
+  float value_sum = 0.0f;
+  float value_squared_sum = 0.0f;
+  bool has_valid_values = false;
+
+  // First pass - check if we have any non-zero values
+  for (int i = 0; i < num_values; i++) {
+    if (core_values[i] != 0.0f) {
+      has_valid_values = true;
+      break;
+    }
+  }
+
+  // If all values are 0, initialize with small random values
+  if (!has_valid_values) {
+    for (int i = 0; i < num_values; i++) {
+      // Initialize with small random values between 0.1 and 0.3
+      core_values[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
+    }
+  }
+
+  // Calculate consistency
+  for (int i = 0; i < num_values; i++) {
+    if (isnan(core_values[i])) {
+      core_values[i] = 0.1f; // Handle NaN with small non-zero value
+    }
+    value_sum += core_values[i];
+    value_squared_sum += core_values[i] * core_values[i];
+  }
+
+  float mean = value_sum / num_values;
+  float variance = (value_squared_sum / num_values) - (mean * mean);
+
+  // Use a different formula that better reflects stability
+  // Higher values when core values are stable and significant
+  consistency = mean / (1.0f + sqrt(variance));
+
+  // Ensure result is meaningful and between 0.1 and 1.0
+  return fmin(1.0f, fmax(0.1f, consistency));
+}
+
+bool haveCommonPrimeFactors(int a, int b) {
+  while (a % 2 == 0 && b % 2 == 0) {
+    return true;
+  }
+  for (int i = 3; i <= sqrt((a > b) ? a : b); i += 2) {
+    if (a % i == 0 && b % i == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Function to count the number of differing bits between two numbers
+int countDifferentBits(int a, int b) {
+  int xor_result = a ^ b;
+  int count = 0;
+  while (xor_result) {
+    count += xor_result & 1;
+    xor_result >>= 1;
+  }
+  return count;
+}
+
+// Function to check bitwise similarity (at most `threshold` differing bits)
+bool areBitsSimilar(int a, int b, int threshold) {
+  return countDifferentBits(a, b) <= threshold;
+}
+
+bool areNumericallyClose(int a, int b, int threshold) {
+  return (a > b) ? (a - b <= threshold) : (b - a <= threshold);
+}
+
+bool areBeliefsProbablyRelated(int belief1_idx, int belief2_idx) {
+  return (belief1_idx / 10 == belief2_idx / 10) || // Same decade cluster
+         (belief1_idx % 7 == belief2_idx % 7) || // Additional clustering factor
+         haveCommonPrimeFactors(belief1_idx,
+                                belief2_idx) || // Prime factor similarity
+         areBitsSimilar(belief1_idx, belief2_idx, 3) || // Bitwise similarity
+         areNumericallyClose(belief1_idx, belief2_idx,
+                             5); // Numeric proximity threshold
+}
+
+float computeBeliefConsistency(float *beliefs, int num_beliefs) {
+  if (num_beliefs == 0)
+    return 0.0f;
+
+  float consistency = 0.0f;
+  float belief_coherence = 0.0f;
+  int total_comparisons = 0;
+
+  for (int i = 0; i < num_beliefs; i++) {
+    if (isnan(beliefs[i])) {
+      beliefs[i] = 0.0f; // Handle NaN values
+    }
+
+    float local_coherence = 0.0f;
+    int related_beliefs = 0;
+
+    for (int j = 0; j < num_beliefs; j++) {
+      if (i != j && areBeliefsProbablyRelated(i, j)) {
+        if (!isnan(beliefs[j])) {
+          local_coherence += 1.0f - fabs(beliefs[i] - beliefs[j]);
+          related_beliefs++;
+        }
+      }
+    }
+
+    if (related_beliefs > 0) {
+      belief_coherence += local_coherence / related_beliefs;
+      total_comparisons++;
+    }
+  }
+
+  // Prevent division by zero
+  consistency =
+      (total_comparisons > 0) ? (belief_coherence / total_comparisons) : 0.0f;
+
+  return fmin(1.0f,
+              fmax(0.0f, consistency)); // Ensure result is between 0 and 1
+}
+
+float computeMarkerStability(float *markers, int num_markers) {
+  if (num_markers == 0)
+    return 0.0f;
+
+  float stability = 0.0f;
+  float marker_strength = 0.0f;
+  int valid_markers = 0;
+  bool has_valid_markers = false;
+
+  // First pass - check if we have any non-zero values
+  for (int i = 0; i < num_markers; i++) {
+    if (markers[i] != 0.0f) {
+      has_valid_markers = true;
+      break;
+    }
+  }
+
+  // If all markers are 0, initialize with small random values
+  if (!has_valid_markers) {
+    for (int i = 0; i < num_markers; i++) {
+      // Initialize with small random values between 0.1 and 0.3
+      markers[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
+    }
+  }
+
+  // Calculate stability with enhanced weighting
+  float max_strength = 0.0f;
+  for (int i = 0; i < num_markers; i++) {
+    if (!isnan(markers[i])) {
+      float strength = fabs(markers[i]);
+      marker_strength += strength * strength; // Quadratic weighting
+      max_strength = fmax(max_strength, strength);
+      valid_markers++;
+    } else {
+      markers[i] = 0.1f; // Handle NaN with small non-zero value
+    }
+  }
+
+  // Enhanced stability calculation that considers both average and peak
+  // strength
+  if (valid_markers > 0 && marker_strength >= 0.0f) {
+    float avg_strength = sqrt(marker_strength / valid_markers);
+    stability = 0.7f * avg_strength + 0.3f * max_strength;
+  }
+
+  // Ensure result is meaningful and between 0.1 and 1.0
+  return fmin(1.0f, fmax(0.1f, stability));
+}
+
+// Add this new function to properly initialize values and markers
+void initializeIdentityComponents(SelfIdentitySystem *system) {
+  if (!system)
+    return;
+
+  // Initialize core values with small random values
+  for (int i = 0; i < system->num_core_values; i++) {
+    system->core_values[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
+  }
+
+  // Initialize identity markers with small random values
+  for (int i = 0; i < system->num_markers; i++) {
+    system->identity_markers[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
+  }
+
+  // Initialize belief system with small random values
+  for (int i = 0; i < system->num_beliefs; i++) {
+    system->belief_system[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
+  }
+}
+
+// Get current complete identity state
+float *getCurrentIdentityState(SelfIdentitySystem *system) {
+  int total_size = system->verification.state_size;
+  float *current_state = (float *)malloc(total_size * sizeof(float));
+  int offset = 0;
+
+  // Copy core values
+  memcpy(current_state + offset, system->core_values,
+         system->num_core_values * sizeof(float));
+  offset += system->num_core_values;
+
+  // Copy beliefs
+  memcpy(current_state + offset, system->belief_system,
+         system->num_beliefs * sizeof(float));
+  offset += system->num_beliefs;
+
+  // Copy identity markers
+  memcpy(current_state + offset, system->identity_markers,
+         system->num_markers * sizeof(float));
+
+  return current_state;
+}
+
+// Compute consistency between two identity states
+float computeStateConsistency(float *state1, float *state2, int state_size) {
+  float consistency = 0.0f;
+  float sum_squared_diff = 0.0f;
+  float sum_magnitudes = 0.0f;
+
+  for (int i = 0; i < state_size; i++) {
+    float diff = state1[i] - state2[i];
+    sum_squared_diff += diff * diff;
+    sum_magnitudes += fabs(state1[i]) + fabs(state2[i]);
+  }
+
+  if (sum_magnitudes > 0.0f) {
+    consistency = 1.0f - (sqrt(sum_squared_diff) / (sum_magnitudes / 2.0f));
+  }
+
+  return fmax(0.0f, consistency);
+}
+
+// Update core values based on behavioral patterns
+void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
+                      float pattern_consistency) {
+  float adaptation_factor =
+      system->adaptation_rate * (1.0f - pattern_consistency);
+
+  for (int i = 0; i < system->num_core_values; i++) {
+    // Map patterns to core values (simplified mapping)
+    float pattern_influence = 0.0f;
+    int patterns_per_value = system->pattern_size / system->num_core_values;
+
+    for (int j = 0; j < patterns_per_value; j++) {
+      int pattern_idx = i * patterns_per_value + j;
+      if (pattern_idx < system->pattern_size) {
+        pattern_influence += current_patterns[pattern_idx];
+      }
+    }
+    pattern_influence /= patterns_per_value;
+
+    // Update core value with stability consideration
+    system->core_values[i] =
+        (1.0f - adaptation_factor) * system->core_values[i] +
+        adaptation_factor * pattern_influence;
+  }
+}
+
+float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
+
+// Compute experience value using weighted encoding
+float computeExperienceValue(float *experience_vector) {
+  float weighted_sum = 0.0f;
+  float weight_total = 0.0f;
+
+  for (int i = 0; i < EXPERIENCE_VECTOR_SIZE; i++) {
+    float weight = expf(-(float)(EXPERIENCE_VECTOR_SIZE - i) /
+                        EXPERIENCE_VECTOR_SIZE); // Exponential decay
+    weighted_sum += experience_vector[i] * weight;
+    weight_total += weight;
+  }
+
+  float encoded_value =
+      weighted_sum / weight_total; // Normalize with sum of weights
+  return sigmoid(
+      encoded_value); // Apply sigmoid to keep result in a controlled range
+}
+
+// Add new experience to history
+void addExperience(SelfIdentitySystem *system, float *experience_vector) {
+  // Shift history window
+  memmove(system->experience_history + 1, system->experience_history,
+          (system->history_size - 1) * sizeof(float));
+
+  // Add new experience
+  system->experience_history[0] = computeExperienceValue(experience_vector);
+}
+
+// Helper function to compute memory influence on beliefs
+float computeMemoryInfluence(MemorySystem *memory_system, int belief_idx) {
+  float influence = 0.0f;
+  int recent_memories = 10; // Consider last 10 memories
+
+  for (int i = 0; i < recent_memories && i < memory_system->size; i++) {
+    int memory_idx = (memory_system->head - 1 - i + memory_system->capacity) %
+                     memory_system->capacity;
+    influence += memory_system->entries[memory_idx]
+                     .vector[belief_idx % MEMORY_VECTOR_SIZE];
+  }
+
+  return influence / recent_memories;
+}
+
+// Helper function to compute experience influence on beliefs
+float computeExperienceInfluence(SelfIdentitySystem *system, int belief_idx) {
+  float influence = 0.0f;
+  int recent_experiences = 5; // Consider last 5 experiences
+
+  for (int i = 0; i < recent_experiences && i < system->history_size; i++) {
+    influence += system->experience_history[i];
+  }
+
+  return influence / recent_experiences;
+}
+
+// Update belief system based on experiences and memory
+void updateBeliefs(SelfIdentitySystem *system, MemorySystem *memory_system) {
+  for (int i = 0; i < system->num_beliefs; i++) {
+    float memory_influence = computeMemoryInfluence(memory_system, i);
+    float experience_influence = computeExperienceInfluence(system, i);
+
+    // Update belief with weighted combination of memory and experience
+    system->belief_system[i] =
+        (1.0f - system->adaptation_rate) * system->belief_system[i] +
+        system->adaptation_rate *
+            (0.7f * memory_influence + 0.3f * experience_influence);
+  }
+}
+
+// Enhanced version of areValueAndMarkerRelated
+bool areValueAndMarkerRelated(int value_idx, int marker_idx) {
+  return (value_idx % 5 == marker_idx % 5) ||
+         haveCommonPrimeFactors(value_idx,
+                                marker_idx) ||     // Common prime factors
+         areBitsSimilar(value_idx, marker_idx, 3); // Bitwise similarity
+}
+
+// Enhanced version of areBeliefAndMarkerRelated
+bool areBeliefAndMarkerRelated(int belief_idx, int marker_idx) {
+  return (belief_idx % 7 == marker_idx % 7) ||
+         haveCommonPrimeFactors(belief_idx,
+                                marker_idx) ||      // Common prime factors
+         areBitsSimilar(belief_idx, marker_idx, 3); // Bitwise similarity
+}
+
+// Helper function to compute core value influence on markers
+float computeValueInfluence(SelfIdentitySystem *system, int marker_idx) {
+  float influence = 0.0f;
+  int related_values = 0;
+
+  for (int i = 0; i < system->num_core_values; i++) {
+    if (areValueAndMarkerRelated(i, marker_idx)) {
+      influence += system->core_values[i];
+      related_values++;
+    }
+  }
+
+  return related_values > 0 ? influence / related_values : 0.0f;
+}
+
+// Helper function to compute belief influence on markers
+float computeBeliefInfluence(SelfIdentitySystem *system, int marker_idx) {
+  float influence = 0.0f;
+  int related_beliefs = 0;
+
+  for (int i = 0; i < system->num_beliefs; i++) {
+    if (areBeliefAndMarkerRelated(i, marker_idx)) {
+      influence += system->belief_system[i];
+      related_beliefs++;
+    }
+  }
+
+  return related_beliefs > 0 ? influence / related_beliefs : 0.0f;
+}
+
+// Update identity markers
+void updateIdentityMarkers(SelfIdentitySystem *system) {
+  for (int i = 0; i < system->num_markers; i++) {
+    float value_influence = computeValueInfluence(system, i);
+    float belief_influence = computeBeliefInfluence(system, i);
+
+    // Update marker with weighted combination of influences
+    system->identity_markers[i] =
+        (1.0f - system->adaptation_rate) * system->identity_markers[i] +
+        system->adaptation_rate *
+            (0.6f * value_influence + 0.4f * belief_influence);
+  }
+}
+
+float computeRecentCoherence(float *coherence_history, int window_size) {
+  if (window_size == 0)
+    return 0.0f;
+
+  float sum = 0.0f;
+  int valid_samples = 0;
+
+  for (int i = 0; i < window_size; i++) {
+    if (!isnan(coherence_history[i])) {
+      sum += coherence_history[i];
+      valid_samples++;
+    }
+  }
+
+  // Prevent division by zero
+  return (valid_samples > 0) ? (sum / valid_samples) : 0.0f;
+}
+
+void updateConfidenceLevel(SelfIdentitySystem *system) {
+  if (!system)
+    return;
+
+  float recent_coherence =
+      computeRecentCoherence(system->temporal_coherence, 10);
+  float value_consistency =
+      computeValueConsistency(system->core_values, system->num_core_values);
+  float belief_consistency =
+      computeBeliefConsistency(system->belief_system, system->num_beliefs);
+
+  // Calculate weighted average with validity checks
+  float confidence = 0.0f;
+  float total_weight = 0.0f;
+
+  if (!isnan(recent_coherence)) {
+    confidence += 0.4f * recent_coherence;
+    total_weight += 0.4f;
+  }
+  if (!isnan(value_consistency)) {
+    confidence += 0.3f * value_consistency;
+    total_weight += 0.3f;
+  }
+  if (!isnan(belief_consistency)) {
+    confidence += 0.3f * belief_consistency;
+    total_weight += 0.3f;
+  }
+
+  // Normalize if we have any valid components
+  system->confidence_level =
+      (total_weight > 0.0f) ? (confidence / total_weight) : 0.0f;
+}
+
+// Shift coherence window to make room for new coherence value
+void shiftCoherenceWindow(SelfIdentitySystem *system) {
+  memmove(system->temporal_coherence, system->temporal_coherence + 1,
+          (system->coherence_window - 1) * sizeof(float));
+}
+
+// Compress current experience into a summary vector
+float *compressExperience(float *current_input, Neuron *neurons,
+                          int num_neurons) {
+  float *compressed = (float *)calloc(EXPERIENCE_VECTOR_SIZE, sizeof(float));
+
+  // Combine input and neuron states into experience vector
+  for (int i = 0; i < EXPERIENCE_VECTOR_SIZE; i++) {
+    float input_contribution = 0.0f;
+    float neuron_contribution = 0.0f;
+
+    // Sample input values
+    int inputs_per_experience = num_neurons / EXPERIENCE_VECTOR_SIZE;
+    for (int j = 0; j < inputs_per_experience; j++) {
+      int idx = i * inputs_per_experience + j;
+      if (idx < num_neurons) {
+        input_contribution += current_input[idx];
+        neuron_contribution += neurons[idx].output;
+      }
+    }
+
+    compressed[i] = (input_contribution + neuron_contribution) /
+                    (2.0f * inputs_per_experience);
+  }
+
+  return compressed;
+}
+
+// Calculate identity coherence score
+float computeIdentityCoherence(SelfIdentitySystem *system) {
+  float coherence = 0.0f;
+  float value_consistency =
+      computeValueConsistency(system->core_values, system->num_core_values);
+  float belief_consistency =
+      computeBeliefConsistency(system->belief_system, system->num_beliefs);
+  float marker_stability =
+      computeMarkerStability(system->identity_markers, system->num_markers);
+
+  coherence = (value_consistency * 0.4f + belief_consistency * 0.3f +
+               marker_stability * 0.3f);
+  return coherence;
+}
+
+// Update identity based on new experiences and network state
+void updateIdentity(SelfIdentitySystem *system, Neuron *neurons,
+                    int num_neurons, MemorySystem *memory_system,
+                    float *current_input) {
+
+  // Extract current behavioral patterns
+  float *current_patterns = extractBehavioralPatterns(neurons, num_neurons);
+
+  // Calculate pattern consistency
+  float pattern_consistency = computePatternConsistency(
+      system->behavioral_patterns, current_patterns, system->pattern_size);
+
+  // Update behavioral patterns with temporal smoothing
+  for (int i = 0; i < system->pattern_size; i++) {
+    system->behavioral_patterns[i] =
+        (1 - system->adaptation_rate) * system->behavioral_patterns[i] +
+        system->adaptation_rate * current_patterns[i];
+  }
+
+  // Update core values based on consistent behaviors
+  updateCoreValues(system, current_patterns, pattern_consistency);
+
+  // Integrate new experiences
+  float *experience_vector =
+      compressExperience(current_input, neurons, num_neurons);
+  addExperience(system, experience_vector);
+
+  // Update belief system based on experiences and core values
+  updateBeliefs(system, memory_system);
+
+  // Update identity markers
+  updateIdentityMarkers(system);
+
+  // Track temporal coherence
+  shiftCoherenceWindow(system);
+  system->temporal_coherence[system->coherence_window - 1] =
+      computeIdentityCoherence(system);
+
+  // Update confidence based on consistency
+  updateConfidenceLevel(system);
+
+  free(current_patterns);
+  free(experience_vector);
+}
+
+// Verify identity consistency
+bool verifyIdentity(SelfIdentitySystem *system) {
+  float *current_state = getCurrentIdentityState(system);
+  float consistency = computeStateConsistency(
+      current_state, system->verification.reference_state,
+      system->verification.state_size);
+
+  bool verified = consistency >= system->verification.threshold;
+
+  if (verified) {
+    // Update reference state with slight adaptation
+    for (int i = 0; i < system->verification.state_size; i++) {
+      system->verification.reference_state[i] =
+          (1 - system->adaptation_rate) *
+              system->verification.reference_state[i] +
+          system->adaptation_rate * current_state[i];
+    }
+  }
+
+  free(current_state);
+  return verified;
+}
+
+// Generate identity reflection
+char *generateIdentityReflection(SelfIdentitySystem *system) {
+  char *reflection = (char *)malloc(4096 * sizeof(char));
+
+  sprintf(reflection,
+          "Identity Reflection:\n"
+          "Consistency Score: %.2f\n"
+          "Confidence Level: %.2f\n"
+          "Core Value Stability: %.2f\n"
+          "Belief System Coherence: %.2f\n"
+          "Identity Marker Prominence: %.2f\n"
+          "Temporal Coherence (Last 10 states): %.2f\n",
+          system->consistency_score, system->confidence_level,
+          computeValueConsistency(system->core_values, system->num_core_values),
+          computeBeliefConsistency(system->belief_system, system->num_beliefs),
+          computeMarkerStability(system->identity_markers, system->num_markers),
+          computeRecentCoherence(system->temporal_coherence, 10));
+
+  return reflection;
+}
+
+KnowledgeFilter *initializeKnowledgeFilter(int initial_capacity) {
+  KnowledgeFilter *filter = (KnowledgeFilter *)malloc(sizeof(KnowledgeFilter));
+  filter->categories =
+      (KnowledgeCategory *)malloc(initial_capacity * sizeof(KnowledgeCategory));
+  filter->num_categories = 0;
+  filter->capacity = initial_capacity;
+
+  filter->problem_history =
+      (ProblemInstance *)malloc(initial_capacity * sizeof(ProblemInstance));
+  filter->num_problems = 0;
+  filter->problem_capacity = initial_capacity;
+
+  // Initialize similarity matrix
+  filter->category_similarity_matrix =
+      (float *)calloc(initial_capacity * initial_capacity, sizeof(float));
+
+  // Initialize default categories
+  const char *default_categories[] = {
+      "Pattern Recognition", "Numerical Computation",
+      "Sequence Learning",   "Classification",
+      "Prediction",          "Optimization",
+      "Error Correction",    "Memory Consolidation"};
+
+  for (int i = 0; i < sizeof(default_categories) / sizeof(char *); i++) {
+    KnowledgeCategory category = {.importance = 1.0f,
+                                  .confidence = 0.5f,
+                                  .usage_count = 0,
+                                  .last_accessed = time(NULL)};
+    strncpy(category.name, default_categories[i], 63);
+    category.feature_vector =
+        (float *)calloc(FEATURE_VECTOR_SIZE, sizeof(float));
+    filter->categories[filter->num_categories++] = category;
+  }
+
+  return filter;
+}
+
+float computeCategorySimilarity(float *feature_vector1, float *feature_vector2) {
+  float dot_product = 0.0f;
+  float norm1 = 0.0f;
+  float norm2 = 0.0f;
+
+  for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+    dot_product += feature_vector1[i] * feature_vector2[i];
+    norm1 += feature_vector1[i] * feature_vector1[i];
+    norm2 += feature_vector2[i] * feature_vector2[i];
+  }
+
+  // Avoid NaN by checking for zero norm
+  if (norm1 == 0.0f || norm2 == 0.0f) {
+    return 0.0f; // No valid similarity if either vector is zero
+  }
+
+  return dot_product / (sqrtf(norm1) * sqrtf(norm2));
+}
+
+void updateCategorySimilarityMatrix(KnowledgeFilter *filter) {
+  for (int i = 0; i < filter->num_categories; i++) {
+    for (int j = i; j < filter->num_categories; j++) {
+      float similarity =
+          computeCategorySimilarity(filter->categories[i].feature_vector,
+                                    filter->categories[j].feature_vector);
+      filter->category_similarity_matrix[i * filter->capacity + j] = similarity;
+      filter->category_similarity_matrix[j * filter->capacity + i] = similarity;
+    }
+  }
+}
+
+KnowledgeCategory *categorizeInput(KnowledgeFilter *filter, float *input_vector,
+                                   float threshold) {
+  KnowledgeCategory *best_match = NULL;
+  float best_similarity = threshold;
+
+  for (int i = 0; i < filter->num_categories; i++) {
+    float similarity = computeCategorySimilarity(
+        input_vector, filter->categories[i].feature_vector);
+
+    if (similarity > best_similarity) {
+      best_similarity = similarity;
+      best_match = &filter->categories[i];
+    }
+  }
+
+  if (best_match) {
+    // Update usage statistics
+    best_match->usage_count++;
+    best_match->last_accessed = time(NULL);
+
+    // Update confidence based on similarity score
+    best_match->confidence =
+        (best_match->confidence * 0.9f + best_similarity * 0.1f);
+
+    // Adjust importance based on usage and confidence
+    best_match->importance =
+        (best_match->usage_count / (float)MAX_USAGE_COUNT) * 0.5f +
+        best_match->confidence * 0.5f;
+  }
+
+  return best_match;
+}
+
+void recordProblemInstance(KnowledgeFilter *filter, const char *description,
+                           float *feature_vector, float difficulty,
+                           float success_rate, KnowledgeCategory *category) {
+  if (filter->num_problems >= filter->problem_capacity) {
+    filter->problem_capacity *= 2;
+    filter->problem_history = (ProblemInstance *)realloc(
+        filter->problem_history,
+        filter->problem_capacity * sizeof(ProblemInstance));
+  }
+
+  ProblemInstance problem = {.difficulty = difficulty,
+                             .success_rate = success_rate,
+                             .category = category,
+                             .timestamp = time(NULL)};
+
+  strncpy(problem.description, description, 255);
+  problem.feature_vector = (float *)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+  memcpy(problem.feature_vector, feature_vector,
+         FEATURE_VECTOR_SIZE * sizeof(float));
+
+  filter->problem_history[filter->num_problems++] = problem;
+}
+
+typedef struct {
+  float avg_success_rate;
+  float avg_difficulty;
+  int total_instances;
+  time_t last_encounter;
+} CategoryStatistics;
+
+CategoryStatistics analyzeCategory(KnowledgeFilter *filter,
+                                   KnowledgeCategory *category) {
+  CategoryStatistics stats = {0};
+  stats.avg_success_rate = 0;
+  stats.avg_difficulty = 0;
+  stats.total_instances = 0;
+  stats.last_encounter = 0;
+
+  for (int i = 0; i < filter->num_problems; i++) {
+    if (filter->problem_history[i].category == category) {
+      stats.avg_success_rate += filter->problem_history[i].success_rate;
+      stats.avg_difficulty += filter->problem_history[i].difficulty;
+      stats.total_instances++;
+      if (filter->problem_history[i].timestamp > stats.last_encounter) {
+        stats.last_encounter = filter->problem_history[i].timestamp;
+      }
+    }
+  }
+
+  if (stats.total_instances > 0) {
+    stats.avg_success_rate /= stats.total_instances;
+    stats.avg_difficulty /= stats.total_instances;
+  }
+
+  return stats;
+}
+
+float *extractFeatureVector(Neuron *neurons, float *input_tensor) {
+  float *feature_vector = (float *)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+
+  // Initialize feature vector with small nonzero values
+  for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+    feature_vector[i] = 1e-6f; // Prevent division by zero later
+  }
+
+  // Extract neuron activations
+  for (int i = 0; i < MAX_NEURONS && i < FEATURE_VECTOR_SIZE / 2; i++) {
+    feature_vector[i] = neurons[i].output;
+  }
+
+  // Extract input patterns
+  for (int i = 0; i < MAX_NEURONS && i < FEATURE_VECTOR_SIZE / 2; i++) {
+    feature_vector[i + FEATURE_VECTOR_SIZE / 2] = input_tensor[i];
+  }
+
+  // Normalize feature vector
+  float norm = 0.0f;
+  for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+    norm += feature_vector[i] * feature_vector[i];
+  }
+  norm = sqrtf(norm);
+
+  if (norm > 1e-6f) { // Ensure norm is not too close to zero
+    for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+      feature_vector[i] /= norm;
+    }
+  }
+
+  return feature_vector;
+}
+
+// Comparison function for memory sorting
+int compareMemoryImportance(const void *a, const void *b) {
+  const MemoryEntry *entry_a = (const MemoryEntry *)a;
+  const MemoryEntry *entry_b = (const MemoryEntry *)b;
+
+  if (entry_a->importance > entry_b->importance)
+    return -1;
+  if (entry_a->importance < entry_b->importance)
+    return 1;
+  return 0;
+}
+
+void addToMemoryLevel(MemoryCluster *level, MemoryEntry *entry) {
+  if (level->size < level->capacity) {
+    // Copy entry to the level
+    memcpy(&level->entries[level->size], entry, sizeof(MemoryEntry));
+    level->size++;
+
+    // Sort entries by importance
+    qsort(level->entries, level->size, sizeof(MemoryEntry),
+          compareMemoryImportance);
+  }
+}
+
+void strengthenMemory(MemorySystem *memory_system, int index) {
+  if (index >= memory_system->size) {
+    return;
+  }
+
+  // Increase importance of the memory
+  memory_system->entries[index].importance *= 1.1f;
+
+  // Cap importance at 1.0
+  if (memory_system->entries[index].importance > 1.0f) {
+    memory_system->entries[index].importance = 1.0f;
+  }
+
+  // Update access time
+  memory_system->entries[index].timestamp = time(NULL);
+
+  // Promote memory based on importance
+  MemoryEntry *entry = &memory_system->entries[index];
+
+  if (entry->importance > 0.9f) {
+    // Move to long-term memory if space is available
+    if (memory_system->hierarchy.long_term.size <
+        memory_system->hierarchy.long_term.capacity) {
+      addToMemoryLevel(&memory_system->hierarchy.long_term, entry);
+    }
+  } else if (entry->importance > 0.8f) {
+    // Move to medium-term memory if space is available
+    if (memory_system->hierarchy.medium_term.size <
+        memory_system->hierarchy.medium_term.capacity) {
+      addToMemoryLevel(&memory_system->hierarchy.medium_term, entry);
+    }
+  } else {
+    // Default to short-term if not promoted
+    if (memory_system->hierarchy.short_term.size <
+        memory_system->hierarchy.short_term.capacity) {
+      addToMemoryLevel(&memory_system->hierarchy.short_term, entry);
+    }
+  }
+}
+
+void integrateKnowledgeFilter(KnowledgeFilter *filter,
+                              MemorySystem *memory_system, Neuron *neurons,
+                              float *input_tensor) {
+  // Extract feature vector from current network state
+  float *current_features = extractFeatureVector(neurons, input_tensor);
+
+  // Categorize current input
+  KnowledgeCategory *category = categorizeInput(filter, current_features, 0.7f);
+
+  if (category) {
+    // Get category statistics including success rate
+    CategoryStatistics stats = analyzeCategory(filter, category);
+
+    // Update category confidence based on success rate
+    category->confidence =
+        category->confidence * 0.8f + stats.avg_success_rate * 0.2f;
+
+    // Update importance based on multiple factors
+    float usage_factor = (float)category->usage_count / MAX_USAGE_COUNT;
+    float difficulty_factor = stats.avg_difficulty;
+    float success_factor = stats.avg_success_rate;
+
+    category->importance =
+        usage_factor * 0.3f + difficulty_factor * 0.4f + success_factor * 0.3f;
+
+    // Normalize importance to [0,1] range
+    category->importance = fmax(0.0f, fmin(1.0f, category->importance));
+
+    // Update feature vector with new information
+    for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+      category->feature_vector[i] =
+          category->feature_vector[i] * 0.9f + current_features[i] * 0.1f;
+    }
+  }
+
+  free(current_features);
+}
+
+void printCategoryInsights(KnowledgeFilter *filter) {
+  printf("\nKnowledge Category Insights:\n");
+  printf("%-20s %-12s %-12s %-12s %-12s\n", "Category", "Confidence",
+         "Importance", "Usage Count", "Last Access");
+
+  for (int i = 0; i < filter->num_categories; i++) {
+    KnowledgeCategory *cat = &filter->categories[i];
+    char time_str[26];
+    ctime_r(&cat->last_accessed, time_str);
+    time_str[24] = '\0'; // Remove newline
+
+    printf("%-20s %-12.2f %-12.2f %-12u %s\n", cat->name, cat->confidence,
+           cat->importance, cat->usage_count, time_str);
+  }
+}
+
 int main() {
   // Try to load existing memory system
   MemorySystem *memorySystem = NULL;
@@ -4061,6 +5451,17 @@ int main() {
   NetworkPerformanceMetrics *performanceMetrics =
       initializePerformanceMetrics(network_regions);
 
+  ReflectionParameters *reflection_params = initializeReflectionParameters();
+  SelfIdentitySystem *identity_system =
+      initializeSelfIdentity(100,  // num_values
+                             200,  // num_beliefs
+                             50,   // num_markers
+                             1000, // history_size
+                             100   // pattern_size
+      );
+
+  KnowledgeFilter *knowledge_filter = initializeKnowledgeFilter(100);
+
   addGoal(goalSystem, "Minimize prediction error", 1.0f);
   addGoal(goalSystem, "Develop stable representations", 0.8f);
   addGoal(goalSystem, "Maximize information gain", 0.7f);
@@ -4141,6 +5542,13 @@ int main() {
     updateMetaControllerPriorities(metaController, performanceMetrics);
     applyMetaControllerAdaptations(neurons, weights, metaController,
                                    MAX_NEURONS);
+    integrateKnowledgeFilter(knowledge_filter, memorySystem, neurons,
+                             input_tensor);
+
+    // Add periodic insights printing
+    if (step % 50 == 0) {
+      printCategoryInsights(knowledge_filter);
+    }
 
     // Meta-controller logging
     if (step % 20 == 0) {
@@ -4310,9 +5718,30 @@ int main() {
         {0.11, 0.12, 0.13, 0.14, 0.15}, // row 3
     };
 
+    integrateReflectionSystem(neurons, memorySystem, stateHistory, step,
+                              weights, connections, reflection_params);
+
     // Update memory system with new outputs
     addMemory(memorySystem, working_memory, neurons, input_tensor,
               lastTimestamp + step + 1, feature_projection_matrix);
+
+    // Update identity system
+    updateIdentity(identity_system, neurons, max_neurons, memorySystem,
+                   input_tensor);
+
+    // Periodically verify identity consistency
+    if (step % 20 == 0) {
+      bool identity_verified = verifyIdentity(identity_system);
+      if (!identity_verified) {
+        printf("Warning: Identity consistency check failed\n");
+        // Implement recovery mechanisms
+      }
+
+      // Generate and log identity reflection
+      char *reflection = generateIdentityReflection(identity_system);
+      printf("%s\n", reflection);
+      free(reflection);
+    }
 
     // Update state history
     captureNetworkState(neurons, input_tensor, &stateHistory[step], weights,

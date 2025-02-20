@@ -1,4 +1,4 @@
-# Decentralized 3d Neural Web Architecture Documentation
+# Decentralized 3D Neural Web Architecture Documentation
 
 ## Table of Contents
 
@@ -15,22 +15,22 @@
 11. [API Reference](#api-reference)
 12. [Algorithm explanations and mathematics](#algorithm-and-mathematics)
 13. [Training mechanism](#neural-web-training-mechanism)
+14. [Reflection System](#reflection-system)
+15. [Self-Identification System](#self-identification-system)
+16. [Knowledge Filter](#knowledge-filter)
 
 ## Introduction
 
 Video explanation:
 <a href="https://youtu.be/watUi5B4ANI"><img src="structure.png" alt_text="watch the video"></a>
 
-This documentation provides a comprehensive guide to the decentralized neural web architecture implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization.
-The goal of this architecture is to present an alternative to modern neural models, which are often complex and resource-intensive, taking inspiration from our brains, neurons are decentralized organized in layers, allowing them to interact with themselves and change theirselves overtime in more than just sates and weights, while also creating a dynamic memory system.
+This documentation provides a comprehensive guide to the decentralized neural web architecture implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization. The goal of this architecture is to present an alternative to modern neural models, which are often complex and resource-intensive, taking inspiration from our brains. Neurons are decentralized, organized in layers, allowing them to interact with themselves and change themselves over time in more than just states and weights, while also creating a dynamic memory system.
 
 ## Requirements:
 
 json-c library
 
 for metal macos version metal api
-
-for cuda version cuda
 
 ## Compilation
 
@@ -58,15 +58,9 @@ For cpu 86/64 unix version
 clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web64.c
 ```
 
-For cuda version
-
-```sh
-nvcc -o neural_web neural_web.cu -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c
-```
-
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
 
-1. Note: the perfomance of other cpu versions than metal and cuda might be off as the gpu is far more efficient than cpu
+1. Note: the performance of other cpu versions than metal might be off as the gpu is far more efficient than cpu
 2. Note: the actual code is located in src so you should either unpack files from there into your folder or just compile there
 
 ## Architecture Overview
@@ -80,6 +74,9 @@ The architecture consists of several key components:
 - **Performance Metrics**: Metrics to track the performance of the network.
 - **Optimization**: Techniques to optimize the network's parameters for better performance.
   ![alt text](image.png)
+- **Reflection System**: Evaluates the quality of outputs and suggests improvements.
+- **Self-Identification System**: Helps the system assess its own state and biases, allowing the AI to form an identity of sorts.
+- **Knowledge Filter**: Ensures that only relevant and high-quality information is processed.
 
 ## Loss figure :
 
@@ -225,6 +222,18 @@ typedef struct {
 } AdaptationMetrics;
 ```
 
+### Reflection System
+
+The reflection system evaluates the quality of outputs and suggests improvements. It helps in continuously refining the network's performance by identifying areas that need enhancement.
+
+### Self-Identification System
+
+The self-identification system helps the neural web assess its own state and biases. This allows the AI to form an identity of sorts, enabling it to understand its capabilities and limitations better.
+
+### Knowledge Filter
+
+The knowledge filter ensures that only relevant and high-quality information is processed. This component is crucial for maintaining the integrity and efficiency of the neural web by filtering out noise and irrelevant data.
+
 ## Usage
 
 ### Initialization
@@ -291,9 +300,9 @@ This algorithm calculates the new state of each neuron based on its current stat
 
 #### How It Works:
 
-- **State Update Formula**:  
+- **State Update Formula**:
   `new_state = (current_state * decay_factor) + (recurrent_inputs * recurrent_weight) + (neighbor_influences * neighbor_weight)`
-- **Activation Function**: The output is scaled using a hyperbolic tangent (tanh) function:  
+- **Activation Function**: The output is scaled using a hyperbolic tangent (tanh) function:
   `output = tanh(state * scale)`
 
 ---
@@ -304,9 +313,9 @@ Adjusts the connections (weights) between neurons using a modified Hebbian learn
 
 #### How It Works:
 
-- **Weight Update Formula**:  
+- **Weight Update Formula**:
   `delta_w = learning_rate * (pre_activation * post_activation - weight * decay_factor)`
-- **Normalization**: Weights are clipped to prevent unbounded growth:  
+- **Normalization**: Weights are clipped to prevent unbounded growth:
   `new_weight = max(-1.0, min(1.0, weight + delta_w))`
 
 ---
@@ -317,11 +326,11 @@ Maintains memories in a hierarchical system, adjusting their importance dynamica
 
 #### How It Works:
 
-- **Memory Importance**:  
+- **Memory Importance**:
   `importance = sum(abs(vector[i]) for i in range(vector_size)) / vector_size`
-- **Decay Over Time**:  
+- **Decay Over Time**:
   `new_importance = importance * decay_factor`
-- **Strengthening Important Memories**:  
+- **Strengthening Important Memories**:
   `new_importance = importance * strengthen_factor`
 
 ---
@@ -332,11 +341,11 @@ Automatically tunes parameters based on performance and stability.
 
 #### How It Works:
 
-- **Adaptation Rate**:  
+- **Adaptation Rate**:
   `new_adaptation_rate = (momentum * adaptation_rate) + ((1 - momentum) * target_rate)`
-- **Plasticity Adjustment**:  
+- **Plasticity Adjustment**:
   `new_plasticity = plasticity * stability_factor`
-- **Noise Tolerance**:  
+- **Noise Tolerance**:
   `new_noise_tolerance = max(0.1, noise_tolerance * (1 - error_rate))`
 
 ---
@@ -347,11 +356,11 @@ Optimizes learning rate and batch size based on network performance.
 
 #### How It Works:
 
-- **Performance Score**:  
+- **Performance Score**:
   `performance_score = (time_score * 0.4) + (output_score * 0.4) + (error_penalty * 0.2)`
-- **Batch Size Adjustment**:  
+- **Batch Size Adjustment**:
   `new_batch_size = (current_batch_size % max_batch_size) + 1`
-- **Learning Rate Update**:  
+- **Learning Rate Update**:
   `new_learning_rate = current_learning_rate * (rand() / RAND_MAX) * 0.5 + 0.75`
 
 ---
@@ -362,7 +371,7 @@ Finds similar memories using cosine similarity.
 
 #### How It Works:
 
-- **Cosine Similarity**:  
+- **Cosine Similarity**:
   `similarity = (sum(vector1[i] * vector2[i] for i in range(vector_size))) / (sqrt(sum(vector1[i]**2 for i in range(vector_size))) * sqrt(sum(vector2[i]**2 for i in range(vector_size))))`
 
 ---
@@ -373,9 +382,9 @@ Provides insights by calculating statistics like averages and variances.
 
 #### How It Works:
 
-- **Average**:  
+- **Average**:
   `average = sum(values) / len(values)`
-- **Variance**:  
+- **Variance**:
   `variance = sum((x - average)**2 for x in values) / len(values)`
 
 ---
@@ -386,9 +395,9 @@ Refines the network by minimizing errors via gradient descent.
 
 #### How It Works:
 
-- **Loss Function (Mean Squared Error)**:  
+- **Loss Function (Mean Squared Error)**:
   `loss = sum((y[i] - y_hat[i])**2 for i in range(n)) / n`
-- **Gradient Descent**:  
+- **Gradient Descent**:
   `new_weight = weight - (learning_rate * loss_gradient)`
 
 ---
@@ -399,16 +408,16 @@ Performs vector operations efficiently.
 
 #### How It Works:
 
-- **Addition**:  
+- **Addition**:
   `result[i] = vector1[i] + vector2[i]`
-- **Multiplication**:  
+- **Multiplication**:
   `result[i] = vector1[i] * vector2[i]`
 
 ---
 
 ### 10. **Memory Vector Computation**
 
-Creates a memory vector by combining various data sources:  
+Creates a memory vector by combining various data sources:
 `memory_vector = [neuron_states, neuron_outputs, input_tensor]`
 
 ---
@@ -419,7 +428,7 @@ Assesses stability by comparing current and previous neuron states.
 
 #### How It Works:
 
-- **Stability Measure**:  
+- **Stability Measure**:
   `stability_measure = 1 - (sum(abs(current_state[i] - previous_state[i]) for i in range(n)) / n)`
 
 ---
@@ -430,9 +439,9 @@ Combines similar memories to reduce redundancy.
 
 #### How It Works:
 
-- **Weighted Merge**:  
+- **Weighted Merge**:
   `merged_vector = ((importance1 * vector1) + (importance2 * vector2)) / (importance1 + importance2)`
-- **Merged Importance**:  
+- **Merged Importance**:
   `merged_importance = max(importance1, importance2) * 1.1`
 
 ---
@@ -462,7 +471,7 @@ id<MTLCommandQueue> commandQueue = [device newCommandQueue];
 
 ### Design Reason
 
-Metal is used for its high performance and low-level access to the GPU, which is crucial for the efficient computation required in neural network training. Setting up the Metal device and command queue ensures that the GPU resources are ready for compute tasks, note cuda also can work in this place.
+Metal is used for its high performance and low-level access to the GPU, which is crucial for the efficient computation required in neural network training. Setting up the Metal device and command queue ensures that the GPU resources are ready for compute tasks.
 
 ## Memory System Management
 
@@ -539,140 +548,103 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 
 ### Overview
 
-1. **Input Data**:
-   - **Code**:
-     ```c
-     const char *text_input = "Apple, banana, cherry, date, and elderberry are fruits.";
-     ```
-   - **Description**: The input data is a text string that serves as the initial input to the neural network. This aligns with the "Input Data" node in the diagram.
+1. **Initialization and Setup**:
 
-2. **Neurons**:
-   - **Code**:
+   - **Metal Device and Command Queue**:
      ```c
-     Neuron neurons[MAX_NEURONS];
+     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+     id<MTLCommandQueue> commandQueue = [device newCommandQueue];
      ```
-   - **Description**: An array of `Neuron` structures is initialized to represent the neurons in the network. This corresponds to the "Neurons" node.
-
-3. **Neuron State Update**:
-   - **Code**:
-     ```c
-     processNeurons(neurons, max_neurons, weights, connections, max_connections, 1.5f);
-     ```
-   - **Description**: The `processNeurons` function updates the state of each neuron based on weights and connections. This relates to the "Neuron State Update" node.
-
-4. **Activation Function (tanh)**:
-   - **Code**:
-     ```c
-     id<MTLFunction> function = [library newFunctionWithName:@"update_neurons"];
-     ```
-   - **Description**: The activation function is defined in the shader code and applied during the forward pass. This corresponds to the "Activation Function (tanh)" node.
-
-5. **Weight Update (Hebbian Learning)**:
-   - **Code**:
-     ```c
-     id<MTLComputePipelineState> weightPipelineState = [device newComputePipelineStateWithFunction:weightFunction error:&error];
-     ```
-   - **Description**: Weights are updated using a Hebbian learning approach, implemented in the shader pipeline. This aligns with the "Weight Update (Hebbian Learning)" node.
-
-6. **Memory Management**:
-   - **Code**:
+   - **Memory System**:
      ```c
      MemorySystem *memorySystem = loadMemorySystem("memory_system.dat");
+     if (memorySystem == NULL) {
+       memorySystem = createMemorySystem(MEMORY_BUFFER_SIZE);
+     }
      ```
-   - **Description**: The memory system is loaded or created to manage memories, corresponding to the "Memory Management" node.
 
-7. **Generate Memory Vector**:
-   - **Code**:
+2. **Loading and Creating Shaders**:
+
+   - **Shader Source and Library**:
      ```c
-     addMemory(memorySystem, working_memory, updatedNeurons, input_tensor, lastTimestamp + step + 1, feature_projection_matrix);
+     NSString *shaderSource = @"neuron_update.metal";
+     NSString *sourceCode = [NSString stringWithContentsOfFile:shaderSource encoding:NSUTF8StringEncoding error:&error];
+     id<MTLLibrary> library = [device newLibraryWithSource:sourceCode options:nil error:&error];
      ```
-   - **Description**: New memories are generated and added to the memory system, aligning with the "Generate Memory Vector" node.
-
-8. **Hierarchical Memory**:
-   - **Code**:
+   - **Pipeline States**:
      ```c
-     loadHierarchicalMemory(memorySystem, "hierarchical_memory.dat");
+     id<MTLFunction> function = [library newFunctionWithName:@"update_neurons"];
+     id<MTLComputePipelineState> pipelineState = [device newComputePipelineStateWithFunction:function error:&error];
      ```
-   - **Description**: The memory system is hierarchical, with short-term, medium-term, and long-term memories. This corresponds to the "Hierarchical Memory" node.
 
-9. **Memory Retrieval**:
-   - **Code**:
+3. **Neural Network Initialization**:
+
+   - **Neurons and Connections**:
      ```c
-     MemoryEntry *relevantMemory = retrieveMemory(memorySystem);
+     Neuron neurons[MAX_NEURONS];
+     uint connections[MAX_NEURONS * MAX_CONNECTIONS] = {0};
+     float weights[MAX_NEURONS * MAX_CONNECTIONS] = {0};
      ```
-   - **Description**: Relevant memories are retrieved from the memory system, aligning with the "Memory Retrieval" node.
+   - **Buffers**:
+     ```c
+     id<MTLBuffer> neuronBuffer = [device newBufferWithBytes:neurons length:sizeof(neurons) options:MTLResourceStorageModeShared];
+     id<MTLBuffer> connectionBuffer = [device newBufferWithBytes:connections length:sizeof(connections) options:MTLResourceStorageModeShared];
+     id<MTLBuffer> weightBuffer = [device newBufferWithBytes:weights length:sizeof(weights) options:MTLResourceStorageModeShared];
+     ```
 
-10. **Memory Merging**:
-    - **Code**:
-      ```c
-      mergeSimilarMemories(memorySystem);
-      ```
-    - **Description**: Similar memories are merged to optimize storage, corresponding to the "Memory Merging" node.
+4. **Main Simulation Loop**:
 
-11. **Predictive Coding**:
-    - **Code**:
-      ```c
-      initPredictiveCodingParams(max_neurons);
-      ```
-    - **Description**: Predictive coding parameters are initialized and used to generate predictive inputs, aligning with the "Predictive Coding" node.
+   - **Task Prompt and Memory Management**:
+     ```c
+     for (int step = 0; step < STEPS; step++) {
+       TaskPrompt current_prompt;
+       generateTaskPrompt(&current_prompt, step);
+       if (step % 10 == 0) {
+         decayMemorySystem(memorySystem);
+         mergeSimilarMemories(memorySystem);
+       }
+     }
+     ```
+   - **Forward and Backward Pass**:
+     ```c
+     id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+     id<MTLComputeCommandEncoder> forwardEncoder = [commandBuffer computeCommandEncoder];
+     [forwardEncoder setComputePipelineState:pipelineState];
+     [forwardEncoder setBuffer:neuronBuffer offset:0 atIndex:0];
+     [forwardEncoder setBuffer:weightBuffer offset:0 atIndex:1];
+     [forwardEncoder setBuffer:connectionBuffer offset:0 atIndex:2];
+     [forwardEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+     [forwardEncoder endEncoding];
+     ```
 
-12. **Memory Importance Update**:
-    - **Code**:
-      ```c
-      decayMemorySystem(memorySystem);
-      ```
-    - **Description**: The importance of memories is updated through decay and consolidation, corresponding to the "Memory Importance Update" node.
+5. **Performance Metrics and Optimization**:
 
-13. **Working Memory**:
-    - **Code**:
-      ```c
-      WorkingMemorySystem *working_memory = createWorkingMemorySystem(200);
-      ```
-    - **Description**: A working memory system is created to assist with temporary storage and active processing, aligning with the "Working Memory" node.
+   - **Compute Loss and Update Weights**:
+     ```c
+     float loss = computeMSELoss(updatedNeurons, target_outputs, max_neurons);
+     updateWeights(weights, updatedNeurons, connections, learning_rate);
+     ```
+   - **Optimize Parameters**:
+     ```c
+     if (step % OPTIMIZATION_WINDOW == 0 && step > 0) {
+       optimizeParameters(&opt_state, performance_history, step + 1);
+     }
+     ```
 
-14. **Global Context Manager**:
-    - **Code**:
-      ```c
-      GlobalContextManager *contextManager = initializeGlobalContextManager(MAX_NEURONS);
-      ```
-    - **Description**: The global context manager provides context to neurons and influences memory importance, corresponding to the "Global Context Manager" node.
-
-15. **Motivation System**:
-    - **Code**:
-      ```c
-      IntrinsicMotivation *motivation = initializeMotivationSystem();
-      ```
-    - **Description**: The motivation system drives learning and action, prioritizing memory and attention, aligning with the "Motivation System" node.
-
-16. **Dynamic Adaptation**:
-    - **Code**:
-      ```c
-      DynamicParameters params = initDynamicParameters();
-      ```
-    - **Description**: Dynamic parameters are used to adapt the network's learning rate and stability, corresponding to the "Dynamic Adaptation" node.
-
-17. **Performance Optimization**:
-    - **Code**:
-      ```c
-      optimizeParameters(&opt_state, performance_history, step + 1);
-      ```
-    - **Description**: Parameters are optimized to enhance performance, aligning with the "Performance Optimization" node.
-
-18. **Network Stability Measurement**:
-    - **Code**:
-      ```c
-      float stability = measureNetworkStability(updatedNeurons, previous_states);
-      ```
-    - **Description**: Network stability is measured to monitor and improve adaptation, corresponding to the "Network Stability Measurement" node.
-
-19. **Text Output / Action**:
-    - **Code**:
-      ```c
-      char outputText[4096];
-      transformOutputsToText(previous_outputs, MAX_NEURONS, outputText, sizeof(outputText));
-      ```
-    - **Description**: The network's output is transformed into text or action, corresponding to the "Text Output / Action" node.
-
+6. **Cleanup and Saving State**:
+   - **Save States**:
+     ```c
+     saveNetworkStates(stateHistory, STEPS);
+     saveMemorySystem(memorySystem, "memory_system.dat");
+     saveHierarchicalMemory(memorySystem, "hierarchical_memory.dat");
+     saveSystemParameters(system_params, "system_parameters.dat");
+     ```
+   - **Free Memory**:
+     ```c
+     freeMemorySystem(memorySystem);
+     free(stateHistory);
+     free(system_params);
+     ```
 
 ### Structuring `int main()`
 
@@ -696,7 +668,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 4. **Cleanup and Saving State**:
    - Save the final states of the neural network, memory system, and system parameters.
    - Free allocated memory.
-     
+
 ### Example
 
 Example of the training can be seen in the MacOS/neural_web.m file in int main or if you are not familiar with metal 86\64/neural_web64CPU.c
@@ -713,5 +685,3 @@ neuron update shader and the code must be in the same directory.
 To modify number of neurons change MAX_NEURONS
 
 Only for unix type systems
-
-Cuda version might not work the best
