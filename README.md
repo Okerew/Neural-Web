@@ -226,13 +226,86 @@ typedef struct {
 
 The reflection system evaluates the quality of outputs and suggests improvements. It helps in continuously refining the network's performance by identifying areas that need enhancement.
 
+```c
+typedef struct {
+  float confidence_score;
+  float coherence_score;
+  float novelty_score;
+  float consistency_score;
+  char reasoning[1024];
+  bool potentially_confabulated;
+} ReflectionMetrics;
+
+typedef struct {
+  float historical_confidence[100];
+  float historical_coherence[100];
+  float historical_consistency[100];
+  int history_index;
+  float confidence_threshold;
+  float coherence_threshold;
+  float consistency_threshold;
+} ReflectionHistory;
+
+typedef struct {
+  float current_adaptation_rate;
+  float input_noise_scale;
+  float weight_noise_scale;
+  float plasticity;
+  float noise_tolerance;
+  float learning_rate;
+} ReflectionParameters;
+```
 ### Self-Identification System
 
 The self-identification system helps the neural web assess its own state and biases. This allows the AI to form an identity of sorts, enabling it to understand its capabilities and limitations better.
 
+```c
+typedef struct {
+  float *core_values;         // Stable personality traits/values
+  float *belief_system;       // Current belief states
+  float *identity_markers;    // Unique identifying characteristics
+  float *experience_history;  // Compressed history of experiences
+  float *behavioral_patterns; // Consistent behavior patterns
+
+  uint32_t num_core_values;
+  uint32_t num_beliefs;
+  uint32_t num_markers;
+  uint32_t history_size;
+  uint32_t pattern_size;
+
+  float consistency_score; // Measure of identity stability
+  float adaptation_rate;   // Rate of identity evolution
+  float confidence_level;  // Self-confidence in identity
+
+  // Temporal consistency tracking
+  float *temporal_coherence; // Track consistency over time
+  uint32_t coherence_window; // Time window for coherence analysis
+
+  // Identity verification system
+  struct {
+    float threshold;        // Minimum consistency threshold
+    float *reference_state; // Reference identity state
+    uint32_t state_size;    // Size of reference state
+  } verification;
+
+} SelfIdentitySystem;
+```
+
 ### Knowledge Filter
 
 The knowledge filter ensures that only relevant and high-quality information is processed. This component is crucial for maintaining the integrity and efficiency of the neural web by filtering out noise and irrelevant data.
+
+```c
+typedef struct {
+  KnowledgeCategory *categories;
+  uint32_t num_categories;
+  uint32_t capacity;
+  ProblemInstance *problem_history;
+  uint32_t num_problems;
+  uint32_t problem_capacity;
+  float *category_similarity_matrix;
+} KnowledgeFilter;
+```
 
 ## Usage
 
