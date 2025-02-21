@@ -4914,35 +4914,39 @@ void updateCategorySimilarityMatrix(KnowledgeFilter *filter) {
 
 KnowledgeCategory *categorizeInput(KnowledgeFilter *filter, float *input_vector,
                                    float threshold) {
-  KnowledgeCategory *best_match = NULL;
-  float best_similarity = threshold;
+    KnowledgeCategory *best_match = NULL;
+    float best_similarity = threshold;
 
-  for (uint32_t i = 0; i < filter->num_categories; i++) {
-    float similarity = computeCategorySimilarity(
-        input_vector, filter->categories[i].feature_vector);
 
-    if (similarity > best_similarity) {
-      best_similarity = similarity;
-      best_match = &filter->categories[i];
+    for (uint32_t i = 0; i < filter->num_categories; i++) {
+        float similarity = computeCategorySimilarity(
+            input_vector, filter->categories[i].feature_vector);
+
+        if (similarity > best_similarity) {
+            best_similarity = similarity;
+            best_match = &filter->categories[i];
+        }
     }
-  }
 
-  if (best_match) {
-    // Update usage statistics
-    best_match->usage_count++;
-    best_match->last_accessed = time(NULL);
+    if (best_match) {
+        
+        // Update usage statistics
+        best_match->usage_count++;
+        best_match->last_accessed = time(NULL);
 
-    // Update confidence based on similarity score
-    best_match->confidence =
-        (best_match->confidence * 0.9f + best_similarity * 0.1f);
+        // Update confidence based on similarity score
+        best_match->confidence =
+            (best_match->confidence * 0.9f + best_similarity * 0.1f);
 
-    // Adjust importance based on usage and confidence
-    best_match->importance =
-        (best_match->usage_count / (float)MAX_USAGE_COUNT) * 0.5f +
-        best_match->confidence * 0.5f;
-  }
+        // Adjust importance based on usage and confidence
+        best_match->importance =
+            (best_match->usage_count / (float)MAX_USAGE_COUNT) * 0.5f +
+            best_match->confidence * 0.5f;
+    } else {
+        printf("\nNo category matched above threshold (%.2f)\n", threshold);
+    }
 
-  return best_match;
+    return best_match;
 }
 
 void recordProblemInstance(KnowledgeFilter *filter, const char *description,
@@ -5002,36 +5006,86 @@ CategoryStatistics analyzeCategory(KnowledgeFilter *filter,
   return stats;
 }
 
-float *extractFeatureVector(Neuron *neurons, float *input_tensor) {
-  float *feature_vector = (float *)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
-
-  // Initialize feature vector
-  memset(feature_vector, 0, FEATURE_VECTOR_SIZE * sizeof(float));
-
-  // Extract neuron activation patterns
-  for (int i = 0; i < MAX_NEURONS && i < FEATURE_VECTOR_SIZE / 2; i++) {
-    feature_vector[i] = neurons[i].output;
-  }
-
-  // Extract input patterns
-  for (int i = 0; i < MAX_NEURONS && i < FEATURE_VECTOR_SIZE / 2; i++) {
-    feature_vector[i + FEATURE_VECTOR_SIZE / 2] = input_tensor[i];
-  }
-
-  // Normalize feature vector
-  float norm = 0.0f;
-  for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
-    norm += feature_vector[i] * feature_vector[i];
-  }
-  norm = sqrt(norm);
-
-  if (norm > 0) {
+void analyzeFeatureVector(float *feature_vector, const char *label) {
+    float sum = 0.0f;
+    float min = 1.0f;
+    float max = 0.0f;
+    float nonzero = 0.0f;
+    
     for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
-      feature_vector[i] /= norm;
+        sum += feature_vector[i];
+        min = fmin(min, feature_vector[i]);
+        max = fmax(max, feature_vector[i]);
+        if (feature_vector[i] != 0.0f) {
+            nonzero += 1.0f;
+        }
     }
-  }
+    
+    printf("\nFeature Vector Analysis (%s):\n", label);
+    printf("Average value: %.4f\n", sum / FEATURE_VECTOR_SIZE);
+    printf("Range: %.4f to %.4f\n", min, max);
+    printf("Non-zero elements: %.0f (%.1f%%)\n", 
+           nonzero, (nonzero / FEATURE_VECTOR_SIZE) * 100);
+}
 
-  return feature_vector;
+// Modify extractFeatureVector to be more robust
+float *extractFeatureVector(Neuron *neurons, float *input_tensor) {
+    float *feature_vector = (float *)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+    
+    // Initialize feature vector
+    memset(feature_vector, 0, FEATURE_VECTOR_SIZE * sizeof(float));
+    
+    // Extract neuron activation patterns with averaging
+    int neurons_per_feature = MAX_NEURONS / (FEATURE_VECTOR_SIZE / 2);
+    for (int i = 0; i < FEATURE_VECTOR_SIZE / 2; i++) {
+        float sum = 0.0f;
+        int count = 0;
+        for (int j = 0; j < neurons_per_feature; j++) {
+            int idx = i * neurons_per_feature + j;
+            if (idx < MAX_NEURONS) {
+                sum += neurons[idx].output;
+                count++;
+            }
+        }
+        feature_vector[i] = count > 0 ? sum / count : 0.0f;
+    }
+    
+    // Extract input patterns with averaging
+    for (int i = 0; i < FEATURE_VECTOR_SIZE / 2; i++) {
+        float sum = 0.0f;
+        int count = 0;
+        for (int j = 0; j < neurons_per_feature; j++) {
+            int idx = i * neurons_per_feature + j;
+            if (idx < MAX_NEURONS) {
+                sum += input_tensor[idx];
+                count++;
+            }
+        }
+        feature_vector[i + FEATURE_VECTOR_SIZE / 2] = count > 0 ? sum / count : 0.0f;
+    }
+    
+    // Add some noise to prevent zero vectors
+    for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+        feature_vector[i] += ((float)rand() / RAND_MAX) * 0.01f;
+    }
+    
+    // Normalize feature vector
+    float norm = 0.0f;
+    for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+        norm += feature_vector[i] * feature_vector[i];
+    }
+    norm = sqrt(norm);
+    
+    if (norm > 0) {
+        for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+            feature_vector[i] /= norm;
+        }
+    }
+    
+    // Analyze the generated feature vector
+    analyzeFeatureVector(feature_vector, "Extracted Features");
+    
+    return feature_vector;
 }
 
 // Comparison function for memory sorting
@@ -5149,6 +5203,82 @@ void printCategoryInsights(KnowledgeFilter *filter) {
 
     printf("%-20s %-12.2f %-12.2f %-12u %s\n", cat->name, cat->confidence,
            cat->importance, cat->usage_count, time_str);
+  }
+}
+
+void updateKnowledgeSystem(Neuron *neurons, float *input_tensor,
+                           MemorySystem *memory_system, KnowledgeFilter *filter,
+                           float current_performance) {
+
+  // Integrate knowledge filter with current network state
+  integrateKnowledgeFilter(filter, memory_system, neurons, input_tensor);
+
+  // Extract feature vector for problem instance
+  float *feature_vector = extractFeatureVector(neurons, input_tensor);
+
+  // Categorize current input
+  KnowledgeCategory *category = categorizeInput(filter, feature_vector, 0.7f);
+
+  if (category) {
+    // Record this as a problem instance
+    char description[256];
+    snprintf(description, sizeof(description),
+             "Network state analysis at performance level %.2f",
+             current_performance);
+
+    // Calculate difficulty based on neuron activation patterns
+    float difficulty = 0.0f;
+    for (int i = 0; i < MAX_NEURONS; i++) {
+      if (neurons[i].output > 0.8f) {
+        difficulty += 0.1f;
+      }
+    }
+    difficulty = fmin(1.0f, difficulty);
+
+    // Record the problem instance
+    recordProblemInstance(filter, description, feature_vector, difficulty,
+                          current_performance, category);
+
+    // Update category usage statistics
+    category->usage_count++;
+    category->last_accessed = time(NULL);
+
+    // Update confidence based on performance
+    category->confidence =
+        category->confidence * 0.9f + current_performance * 0.1f;
+
+    // Update importance based on multiple factors
+    CategoryStatistics stats = analyzeCategory(filter, category);
+    float usage_factor = (float)category->usage_count / MAX_USAGE_COUNT;
+    float recency_factor =
+        1.0f / (1.0f + (time(NULL) - stats.last_encounter) / 86400.0f);
+
+    category->importance = usage_factor * 0.3f + stats.avg_difficulty * 0.3f +
+                           recency_factor * 0.2f + category->confidence * 0.2f;
+  }
+
+  free(feature_vector);
+
+  // Periodically update similarity matrix
+  static time_t last_matrix_update = 0;
+  if (time(NULL) - last_matrix_update > 3600) { // Update every hour
+    updateCategorySimilarityMatrix(filter);
+    last_matrix_update = time(NULL);
+  }
+}
+
+void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
+  for (uint32_t i = 0; i < filter->num_categories; i++) {
+    // Start with moderate values instead of extremes
+    filter->categories[i].importance = 0.5f;
+    filter->categories[i].confidence = 0.5f;
+    filter->categories[i].usage_count = 0;
+    filter->categories[i].last_accessed = time(NULL);
+
+    // Initialize feature vector with small random values
+    for (int j = 0; j < FEATURE_VECTOR_SIZE; j++) {
+      filter->categories[i].feature_vector[j] = (float)rand() / RAND_MAX * 0.1f;
+    }
   }
 }
 
@@ -5422,7 +5552,7 @@ int main() {
       );
 
   KnowledgeFilter *knowledge_filter = initializeKnowledgeFilter(100);
-
+  initializeKnowledgeMetrics(knowledge_filter);
   addGoal(goalSystem, "Minimize prediction error", 1.0f);
   addGoal(goalSystem, "Develop stable representations", 0.8f);
   addGoal(goalSystem, "Maximize information gain", 0.7f);
@@ -5629,6 +5759,10 @@ int main() {
 
     integrateKnowledgeFilter(knowledge_filter, memorySystem, updatedNeurons,
                              input_tensor);
+
+    void updateKnowledgeSystem(
+        Neuron * neurons, float *input_tensor, MemorySystem *memory_system,
+        KnowledgeFilter *filter, float current_performance);
 
     // Add periodic insights printing
     if (step % 50 == 0) {
