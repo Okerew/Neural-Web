@@ -24,13 +24,16 @@
 Video explanation:
 <a href="https://youtu.be/watUi5B4ANI"><img src="structure.png" alt_text="watch the video"></a>
 
-This documentation provides a comprehensive guide to the decentralized neural web architecture implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization. The goal of this architecture is to present an alternative to modern neural models, which are often complex and resource-intensive, taking inspiration from our brains. Neurons are decentralized, organized in layers, allowing them to interact with themselves and change themselves over time in more than just states and weights, while also creating a dynamic memory system.
+This documentation provides a comprehensive guide to the decentralized neural web architecture implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization.
+The goal of this architecture is to present an alternative to modern neural models, which are often complex and resource-intensive, taking inspiration from our brains, neurons are decentralized organized in layers, allowing them to interact with themselves and change themselves overtime in more than just sates and weights, while also creating a dynamic memory system.
 
 ## Requirements:
 
 json-c library
 
 for metal macos version metal api
+
+for cuda version cuda
 
 ## Compilation
 
@@ -58,9 +61,17 @@ For cpu 86/64 unix version
 clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web64.c
 ```
 
+### Cuda version 64/86
+
+For cuda version
+
+```sh
+nvcc -o neural_web neural_web.cu -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c
+```
+
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
 
-1. Note: the performance of other cpu versions than metal might be off as the gpu is far more efficient than cpu
+1. Note: the performance of other cpu versions than metal and cuda might be off as the gpu is far more efficient than cpu
 2. Note: the actual code is located in src so you should either unpack files from there into your folder or just compile there
 
 ## Architecture Overview
@@ -226,86 +237,13 @@ typedef struct {
 
 The reflection system evaluates the quality of outputs and suggests improvements. It helps in continuously refining the network's performance by identifying areas that need enhancement.
 
-```c
-typedef struct {
-  float confidence_score;
-  float coherence_score;
-  float novelty_score;
-  float consistency_score;
-  char reasoning[1024];
-  bool potentially_confabulated;
-} ReflectionMetrics;
-
-typedef struct {
-  float historical_confidence[100];
-  float historical_coherence[100];
-  float historical_consistency[100];
-  int history_index;
-  float confidence_threshold;
-  float coherence_threshold;
-  float consistency_threshold;
-} ReflectionHistory;
-
-typedef struct {
-  float current_adaptation_rate;
-  float input_noise_scale;
-  float weight_noise_scale;
-  float plasticity;
-  float noise_tolerance;
-  float learning_rate;
-} ReflectionParameters;
-```
 ### Self-Identification System
 
 The self-identification system helps the neural web assess its own state and biases. This allows the AI to form an identity of sorts, enabling it to understand its capabilities and limitations better.
 
-```c
-typedef struct {
-  float *core_values;         // Stable personality traits/values
-  float *belief_system;       // Current belief states
-  float *identity_markers;    // Unique identifying characteristics
-  float *experience_history;  // Compressed history of experiences
-  float *behavioral_patterns; // Consistent behavior patterns
-
-  uint32_t num_core_values;
-  uint32_t num_beliefs;
-  uint32_t num_markers;
-  uint32_t history_size;
-  uint32_t pattern_size;
-
-  float consistency_score; // Measure of identity stability
-  float adaptation_rate;   // Rate of identity evolution
-  float confidence_level;  // Self-confidence in identity
-
-  // Temporal consistency tracking
-  float *temporal_coherence; // Track consistency over time
-  uint32_t coherence_window; // Time window for coherence analysis
-
-  // Identity verification system
-  struct {
-    float threshold;        // Minimum consistency threshold
-    float *reference_state; // Reference identity state
-    uint32_t state_size;    // Size of reference state
-  } verification;
-
-} SelfIdentitySystem;
-```
-
 ### Knowledge Filter
 
 The knowledge filter ensures that only relevant and high-quality information is processed. This component is crucial for maintaining the integrity and efficiency of the neural web by filtering out noise and irrelevant data.
-
-```c
-typedef struct {
-  KnowledgeCategory *categories;
-  uint32_t num_categories;
-  uint32_t capacity;
-  ProblemInstance *problem_history;
-  uint32_t num_problems;
-  uint32_t problem_capacity;
-  float *category_similarity_matrix;
-} KnowledgeFilter;
-```
 
 ## Usage
 
