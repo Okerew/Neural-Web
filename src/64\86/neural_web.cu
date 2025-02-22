@@ -36,6 +36,9 @@
 #define LEARNING_RATE 0.01f
 #define MIN_WEIGHT -1.0f
 #define MAX_WEIGHT 1.0f
+#define HISTORY_LENGTH 10
+#define NUM_PATHS 5
+#define MAX_DECISION_STEPS 20
 
 typedef struct {
   float state;
@@ -392,6 +395,75 @@ typedef struct {
   int problem_capacity;
   float *category_similarity_matrix;
 } KnowledgeFilter;
+
+typedef struct DecisionPath {
+  float *states;    // Predicted neuron states
+  float *weights;   // Weight adjustments
+  int *connections; // Connection changes
+  float score;      // Path evaluation score
+  int num_steps;    // Number of prediction steps
+} DecisionPath;
+
+typedef struct MetacognitionMetrics {
+  float confidence_level;                    // Overall confidence in decisions
+  float adaptation_rate;                     // Rate of learning adjustment
+  float cognitive_load;                      // Current processing complexity
+  float error_awareness;                     // Awareness of prediction errors
+  float context_relevance;                   // Relevance of current context
+  float performance_history[HISTORY_LENGTH]; // Historical performance tracking
+} MetacognitionMetrics;
+
+typedef struct MetaLearningState {
+  float learning_efficiency; // Current learning effectiveness
+  float exploration_rate;    // Balance between exploration/exploitation
+  float stability_index;     // System stability measure
+  float *priority_weights;   // Attention allocation weights
+  int current_phase;         // Current learning phase
+} MetaLearningState;
+
+typedef struct {
+  float avg_success_rate;
+  float avg_difficulty;
+  int total_instances;
+  time_t last_encounter;
+} CategoryStatistics;
+
+typedef struct {
+  bool critical_violation;
+  uint64_t suspect_address;
+  const char *violation_type;
+} SecurityValidationStatus;
+
+typedef struct {
+  float *core_values;
+  float *belief_system;
+  float *identity_markers;
+  float *experience_history;
+  float *behavioral_patterns;
+  float *temporal_coherence;
+  float *reference_state;
+  float consistency_score;
+  float adaptation_rate;
+  float confidence_level;
+  uint32_t num_core_values;
+  uint32_t num_beliefs;
+  uint32_t num_markers;
+  uint32_t history_size;
+  uint32_t pattern_size;
+  uint32_t coherence_window;
+  uint32_t state_size;
+} SelfIdentityBackup;
+
+// Structure to store analysis results
+typedef struct {
+  uint32_t core_value_conflicts; // Number of unstable core values
+  uint32_t belief_conflicts;     // Number of inconsistent beliefs
+  uint32_t marker_conflicts;     // Number of deviated identity markers
+  float temporal_instability;    // Measure of temporal coherence deviation
+  float pattern_deviation;       // Deviation in behavioral patterns
+  float overall_consistency;     // Overall system consistency score
+  float confidence_impact;       // Impact on confidence level
+} IdentityAnalysis;
 
 __device__ float dot(float2 a, float2 b) { return a.x * b.x + a.y * b.y; }
 
@@ -3100,28 +3172,6 @@ MetaController *initializeMetaController(int num_regions) {
   return controller;
 }
 
-void updateMetaControllerPriorities(MetaController *controller,
-                                    NetworkPerformanceMetrics *performance) {
-  for (int i = 0; i < controller->num_regions; i++) {
-    // Compute learning delta
-    float learning_delta = performance->region_performance_scores[i] -
-                           controller->learning_efficiency_history[i];
-
-    // Adaptive importance calculation
-    controller->region_importance_scores[i] +=
-        controller->meta_learning_rate * learning_delta *
-        (1 + controller->exploration_factor);
-
-    // Normalize importance
-    controller->region_importance_scores[i] =
-        fmin(fmax(controller->region_importance_scores[i], 0), 1);
-
-    // Update efficiency history
-    controller->learning_efficiency_history[i] =
-        performance->region_performance_scores[i];
-  }
-}
-
 void applyMetaControllerAdaptations(Neuron *neurons, float *weights,
                                     MetaController *controller,
                                     int max_neurons) {
@@ -3533,6 +3583,481 @@ void selectOptimalDecisionPath(Neuron *neurons, float *weights,
   // Apply modifications based on the best simulation
   simulateFutureStates(neurons, weights, connections, input_tensor, max_neurons,
                        simulation_depths[best_depth_index]);
+}
+
+MetacognitionMetrics *initializeMetacognitionMetrics() {
+  MetacognitionMetrics *metacog = malloc(sizeof(MetacognitionMetrics));
+  if (!metacog)
+    return NULL;
+
+  metacog->confidence_level = 0.5f;  // Start with moderate confidence
+  metacog->adaptation_rate = 0.1f;   // Conservative initial adaptation
+  metacog->cognitive_load = 0.0f;    // Start with minimal load
+  metacog->error_awareness = 0.0f;   // Initial error awareness
+  metacog->context_relevance = 1.0f; // Start with full context relevance
+
+  // Initialize performance history
+  for (int i = 0; i < HISTORY_LENGTH; i++) {
+    metacog->performance_history[i] = 0.0f;
+  }
+
+  return metacog;
+}
+
+// Initialize meta learning state
+MetaLearningState *initializeMetaLearningState(int num_regions) {
+  MetaLearningState *state = malloc(sizeof(MetaLearningState));
+  if (!state)
+    return NULL;
+
+  state->learning_efficiency = 1.0f;
+  state->exploration_rate = 0.2f;
+  state->stability_index = 1.0f;
+  state->current_phase = 0;
+
+  // Allocate and initialize priority weights
+  state->priority_weights = malloc(sizeof(float) * num_regions);
+  if (!state->priority_weights) {
+    free(state);
+    return NULL;
+  }
+
+  for (int i = 0; i < num_regions; i++) {
+    state->priority_weights[i] = 1.0f / num_regions;
+  }
+
+  return state;
+}
+
+float computePerformanceVariance(float *history, int length) {
+  float mean = 0.0f;
+  float variance = 0.0f;
+
+  // Calculate mean
+  for (int i = 0; i < length; i++) {
+    mean += history[i];
+  }
+  mean /= length;
+
+  // Calculate variance
+  for (int i = 0; i < length; i++) {
+    float diff = history[i] - mean;
+    variance += diff * diff;
+  }
+  variance /= length;
+
+  return variance;
+}
+
+float computeAdaptiveRate(NetworkPerformanceMetrics *performance,
+                          float *history) {
+  float recent_trend = 0.0f;
+
+  // Calculate trend from recent performance
+  for (int i = 1; i < HISTORY_LENGTH; i++) {
+    recent_trend += history[i] - history[i - 1];
+  }
+
+  // Normalize trend and convert to adaptation rate
+  float base_rate = 0.1f;
+  float trend_factor = tanh(recent_trend);
+
+  return base_rate * (1.0f + trend_factor);
+}
+
+float computeErrorAwareness(NetworkPerformanceMetrics *performance,
+                            float *history) {
+  float total_error = 0.0f;
+  float max_error = 0.0f;
+
+  // Calculate total and maximum prediction errors
+  for (int i = 0; i < performance->num_regions; i++) {
+    float error = fabs(performance->region_performance_scores[i] -
+                       history[i % HISTORY_LENGTH]);
+    total_error += error;
+    max_error = fmaxf(max_error, error);
+  }
+
+  // Normalize error awareness
+  float avg_error = total_error / performance->num_regions;
+  return (avg_error + max_error) / 2.0f;
+}
+
+float evaluateContextRelevance(MetaController *controller,
+                               NetworkPerformanceMetrics *performance) {
+  float total_relevance = 0.0f;
+
+  // Compute weighted relevance across regions
+  for (int i = 0; i < controller->num_regions; i++) {
+    float region_performance = performance->region_performance_scores[i];
+    float importance = controller->region_importance_scores[i];
+    total_relevance += region_performance * importance;
+  }
+
+  return total_relevance / controller->num_regions;
+}
+
+void mutatePathParameters(DecisionPath *path, int max_neurons, int step) {
+  // Randomly modify some weights and connections
+  int num_mutations = max_neurons / 10; // Mutate 10% of parameters
+
+  for (int i = 0; i < num_mutations; i++) {
+    int idx = rand() % (max_neurons * MAX_CONNECTIONS);
+    path->weights[idx] *= 1.0f + ((rand() / (float)RAND_MAX - 0.5f) * 0.2f);
+
+    if (rand() / (float)RAND_MAX < 0.1f) { // 10% chance to rewire
+      path->connections[idx] = rand() % max_neurons;
+    }
+  }
+}
+
+DecisionPath generateDecisionPath(Neuron *neurons, float *weights,
+                                  int *connections, float *input_tensor,
+                                  int max_neurons, float explore_rate) {
+  DecisionPath path;
+
+  // Allocate memory for path components
+  path.states = malloc(sizeof(float) * max_neurons * MAX_DECISION_STEPS);
+  path.weights = malloc(sizeof(float) * max_neurons * MAX_CONNECTIONS);
+  path.connections = malloc(sizeof(int) * max_neurons * MAX_CONNECTIONS);
+  path.num_steps = 0;
+  path.score = 0.0f;
+
+  // Copy initial states and parameters
+  memcpy(path.weights, weights, sizeof(float) * max_neurons * MAX_CONNECTIONS);
+  memcpy(path.connections, connections,
+         sizeof(int) * max_neurons * MAX_CONNECTIONS);
+
+  // Generate future states with exploration
+  for (int step = 0; step < MAX_DECISION_STEPS; step++) {
+    float *current_state = &path.states[step * max_neurons];
+
+    // Apply exploration noise
+    for (int i = 0; i < max_neurons; i++) {
+      float noise = (rand() / (float)RAND_MAX - 0.5f) * explore_rate;
+      current_state[i] = neurons[i].state * (1.0f + noise);
+    }
+
+    // Update connections and weights with exploration
+    if (rand() / (float)RAND_MAX < explore_rate) {
+      mutatePathParameters(&path, max_neurons, step);
+    }
+
+    path.num_steps++;
+  }
+
+  return path;
+}
+
+DecisionPath selectBestPath(DecisionPath *paths, int num_paths) {
+  int best_idx = 0;
+  float best_score = paths[0].score;
+
+  for (int i = 1; i < num_paths; i++) {
+    if (paths[i].score > best_score) {
+      best_score = paths[i].score;
+      best_idx = i;
+    }
+  }
+
+  return paths[best_idx];
+}
+
+void applyDecisionPath(DecisionPath path, Neuron *neurons, float *weights,
+                       int *connections, float confidence) {
+  // Apply state changes with confidence-based modulation
+  for (int i = 0; i < path.num_steps; i++) {
+    float *target_state = &path.states[i];
+    float modulation = confidence * (1.0f - ((float)i / path.num_steps));
+
+    for (int j = 0; j < MAX_NEURONS; j++) {
+      neurons[j].state += (target_state[j] - neurons[j].state) * modulation;
+    }
+  }
+
+  // Apply weight and connection changes
+  for (int i = 0; i < MAX_NEURONS * MAX_CONNECTIONS; i++) {
+    weights[i] += (path.weights[i] - weights[i]) * confidence;
+    if (confidence >
+        0.8f) { // Only apply connection changes with high confidence
+      connections[i] = path.connections[i];
+    }
+  }
+}
+
+// Free resources
+void cleanupDecisionPath(DecisionPath *path) {
+  free(path->states);
+  free(path->weights);
+  free(path->connections);
+}
+
+void cleanupMetaLearningState(MetaLearningState *state) {
+  free(state->priority_weights);
+  free(state);
+}
+
+void cleanupMetacognitionMetrics(MetacognitionMetrics *metacog) {
+  free(metacog);
+}
+
+float evaluatePathQuality(DecisionPath path, MetaLearningState *meta_state,
+                          MetacognitionMetrics *metacog) {
+  float quality_score = 0.0f;
+  float stability_score = 0.0f;
+  float efficiency_score = 0.0f;
+
+  // Evaluate state stability
+  for (int step = 1; step < path.num_steps; step++) {
+    float step_diff = 0.0f;
+    for (int i = 0; i < MAX_NEURONS; i++) {
+      float diff = path.states[step * MAX_NEURONS + i] -
+                   path.states[(step - 1) * MAX_NEURONS + i];
+      step_diff += diff * diff;
+    }
+    stability_score += sqrtf(step_diff);
+  }
+  stability_score = 1.0f / (1.0f + stability_score / path.num_steps);
+
+  // Evaluate learning efficiency
+  float weight_changes = 0.0f;
+  for (int i = 0; i < MAX_NEURONS * MAX_CONNECTIONS; i++) {
+    weight_changes += fabs(path.weights[i] - meta_state->priority_weights[i]);
+  }
+  efficiency_score = 1.0f / (1.0f + weight_changes);
+
+  // Combine scores with metacognitive awareness
+  quality_score = (stability_score * meta_state->stability_index +
+                   efficiency_score * meta_state->learning_efficiency) *
+                  (1.0f - metacog->cognitive_load);
+
+  return quality_score;
+}
+
+void updateMetaLearningState(MetaLearningState *state, DecisionPath best_path,
+                             MetacognitionMetrics *metacog) {
+  // Update learning efficiency based on path quality
+  float path_efficiency = evaluatePathQuality(best_path, state, metacog);
+  state->learning_efficiency =
+      state->learning_efficiency * 0.9f + path_efficiency * 0.1f;
+
+  // Adjust exploration rate based on performance
+  if (path_efficiency > state->learning_efficiency) {
+    // Reduce exploration when performing well
+    state->exploration_rate *= 0.95f;
+  } else {
+    // Increase exploration when performance is poor
+    state->exploration_rate = fmin(state->exploration_rate * 1.05f, 0.5f);
+  }
+
+  // Update stability index
+  float stability_measure = 0.0f;
+  for (int step = 1; step < best_path.num_steps; step++) {
+    float step_stability = 0.0f;
+    for (int i = 0; i < MAX_NEURONS; i++) {
+      float diff = best_path.states[step * MAX_NEURONS + i] -
+                   best_path.states[(step - 1) * MAX_NEURONS + i];
+      step_stability += diff * diff;
+    }
+    stability_measure += sqrtf(step_stability);
+  }
+
+  state->stability_index =
+      1.0f / (1.0f + stability_measure / best_path.num_steps);
+
+  // Update priority weights based on path performance
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    float weight_delta = 0.0f;
+    for (int step = 0; step < best_path.num_steps; step++) {
+      weight_delta += best_path.states[step * MAX_NEURONS + i];
+    }
+    weight_delta /= best_path.num_steps;
+
+    state->priority_weights[i] =
+        state->priority_weights[i] * 0.9f + weight_delta * 0.1f;
+  }
+
+  // Update learning phase
+  state->current_phase = (state->current_phase + 1) % 4; // 4 phases of learning
+}
+
+float assessCognitiveLoad(MetaController *controller,
+                          NetworkPerformanceMetrics *performance) {
+  float total_complexity = 0.0f;
+  float activation_entropy = 0.0f;
+  float weight_complexity = 0.0f;
+  float temporal_complexity = 0.0f;
+
+  // Compute activation distribution entropy
+  for (int i = 0; i < controller->num_regions; i++) {
+    float importance = controller->region_importance_scores[i];
+    if (importance > 0) {
+      activation_entropy -= importance * log2f(importance);
+    }
+
+    // Calculate weight complexity
+    float region_weight_var = 0.0f;
+    float mean_weight = 0.0f;
+    int connections_count = 0;
+
+    for (int j = 0; j < MAX_CONNECTIONS; j++) {
+      if (controller->region_importance_scores[j] > 0) {
+        mean_weight += controller->region_importance_scores[j];
+        connections_count++;
+      }
+    }
+
+    if (connections_count > 0) {
+      mean_weight /= connections_count;
+      for (int j = 0; j < MAX_CONNECTIONS; j++) {
+        if (controller->region_importance_scores[j] > 0) {
+          float diff = controller->region_importance_scores[j] - mean_weight;
+          region_weight_var += diff * diff;
+        }
+      }
+      weight_complexity += sqrtf(region_weight_var / connections_count);
+    }
+
+    // Calculate temporal complexity
+    float temporal_diff = 0.0f;
+    if (i < performance->num_regions) {
+      temporal_diff = fabs(performance->region_performance_scores[i] -
+                           controller->learning_efficiency_history[i]);
+    }
+    temporal_complexity += temporal_diff;
+  }
+
+  // Normalize complexities
+  activation_entropy = activation_entropy / log2f(controller->num_regions);
+  weight_complexity = weight_complexity / controller->num_regions;
+  temporal_complexity = temporal_complexity / controller->num_regions;
+
+  // Combine different complexity measures
+  float cognitive_load = (0.4f * activation_entropy + 0.3f * weight_complexity +
+                          0.3f * temporal_complexity);
+
+  // Apply sigmoid-like normalization
+  cognitive_load = 1.0f / (1.0f + expf(-cognitive_load));
+
+  return fminf(1.0f, fmaxf(0.0f, cognitive_load));
+}
+
+void updateMetacognitionMetrics(MetacognitionMetrics *metacog,
+                                MetaController *controller,
+                                NetworkPerformanceMetrics *performance) {
+  // Update confidence based on performance stability
+  float performance_variance =
+      computePerformanceVariance(metacog->performance_history, HISTORY_LENGTH);
+  metacog->confidence_level = 1.0f / (1.0f + performance_variance);
+
+  // Adapt learning rate based on recent success
+  metacog->adaptation_rate =
+      computeAdaptiveRate(performance, metacog->performance_history);
+
+  // Assess cognitive load through complexity metrics
+  metacog->cognitive_load = assessCognitiveLoad(controller, performance);
+
+  // Update error awareness through prediction analysis
+  metacog->error_awareness =
+      computeErrorAwareness(performance, metacog->performance_history);
+
+  // Evaluate context relevance
+  metacog->context_relevance =
+      evaluateContextRelevance(controller, performance);
+}
+
+void updateMetaControllerPriorities(MetaController *controller,
+                                    NetworkPerformanceMetrics *performance,
+                                    MetacognitionMetrics *metacog) {
+  // Track historical performance for trend analysis
+  float performance_trend = 0.0f;
+  for (int i = 0; i < HISTORY_LENGTH - 1; i++) {
+    performance_trend +=
+        metacog->performance_history[i + 1] - metacog->performance_history[i];
+  }
+
+  for (int i = 0; i < controller->num_regions; i++) {
+    // Enhanced learning delta computation with confidence weighting
+    float learning_delta = performance->region_performance_scores[i] -
+                           controller->learning_efficiency_history[i];
+
+    // Adjust learning based on metacognitive state
+    float adaptive_rate = controller->meta_learning_rate *
+                          (1.0f + metacog->adaptation_rate) *
+                          (1.0f - metacog->cognitive_load);
+
+    // Dynamic exploration factor based on performance trends
+    float dynamic_exploration = controller->exploration_factor *
+                                (1.0f + performance_trend) *
+                                metacog->confidence_level;
+
+    // Update importance with metacognitive awareness
+    controller->region_importance_scores[i] += adaptive_rate * learning_delta *
+                                               (1.0f + dynamic_exploration) *
+                                               metacog->context_relevance;
+
+    // Apply cognitive load-based normalization
+    float load_factor = 1.0f / (1.0f + metacog->cognitive_load);
+    controller->region_importance_scores[i] *= load_factor;
+
+    // Update learning history with error awareness
+    controller->learning_efficiency_history[i] =
+        performance->region_performance_scores[i] *
+        (1.0f - metacog->error_awareness);
+  }
+
+  // Update metacognition metrics
+  updateMetacognitionMetrics(metacog, controller, performance);
+}
+
+void applyMetaControllerAdaptations(Neuron *neurons, float *weights,
+                                    MetaController *controller,
+                                    int max_neurons) {
+  int region_size = max_neurons / controller->num_regions;
+
+  for (int region = 0; region < controller->num_regions; region++) {
+    int start = region * region_size;
+    int end = start + region_size;
+    float region_importance = controller->region_importance_scores[region];
+
+    // Adjust connection weights based on region importance
+    for (int i = start; i < end; i++) {
+      for (int j = 0; j < neurons[i].num_connections; j++) {
+        int connection_idx = i * MAX_CONNECTIONS + j;
+        // Modulate weights non-linearly with region importance
+        weights[connection_idx] *= (1 + region_importance);
+      }
+    }
+  }
+}
+
+void selectOptimalMetaDecisionPath(Neuron *neurons, float *weights,
+                                   int *connections, float *input_tensor,
+                                   int max_neurons,
+                                   MetaLearningState *meta_state,
+                                   MetacognitionMetrics *metacog) {
+  // Adjust exploration rate based on metacognitive state
+  float explore_rate = meta_state->exploration_rate *
+                       (1.0f - metacog->cognitive_load) *
+                       metacog->confidence_level;
+
+  // Generate multiple decision paths with varying parameters
+  DecisionPath paths[NUM_PATHS];
+  for (int i = 0; i < NUM_PATHS; i++) {
+    paths[i] = generateDecisionPath(neurons, weights, connections, input_tensor,
+                                    max_neurons, explore_rate);
+
+    // Evaluate path considering metacognitive factors
+    paths[i].score = evaluatePathQuality(paths[i], meta_state, metacog);
+  }
+
+  // Select best path and update meta-learning state
+  DecisionPath best_path = selectBestPath(paths, NUM_PATHS);
+  updateMetaLearningState(meta_state, best_path, metacog);
+
+  // Apply selected path with confidence-based modulation
+  applyDecisionPath(best_path, neurons, weights, connections,
+                    metacog->confidence_level);
 }
 
 ContextNode *createContextNode(const char *name, uint32_t vector_size,
@@ -5468,6 +5993,351 @@ void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
   }
 }
 
+SecurityValidationStatus
+validateCriticalSecurity(const Neuron *neurons, const float *weights,
+                         const int *connections, size_t max_neurons,
+                         size_t max_connections,
+                         const MemorySystem *memorySystem) {
+  SecurityValidationStatus status = {.critical_violation = false,
+                                     .suspect_address = 0,
+                                     .violation_type = NULL};
+
+  // Check for attempts to access system memory regions
+  int64_t system_memory_start =
+      0x00007f0000000000; // Typical start of system memory mapping
+  uintptr_t neurons_addr = (uintptr_t)neurons;
+  uintptr_t weights_addr = (uintptr_t)weights;
+  uintptr_t connections_addr = (uintptr_t)connections;
+
+  // Check for suspicious jumps into system memory regions
+  for (size_t i = 0; i < max_neurons && !status.critical_violation; i++) {
+    for (size_t j = 0; j < neurons[i].num_connections; j++) {
+      int target_addr =
+          (uintptr_t)(&neurons[connections[i * max_connections + j]]);
+
+      // Check if trying to jump to system memory
+      if (target_addr >= system_memory_start) {
+        status.critical_violation = true;
+        status.suspect_address = target_addr;
+        status.violation_type = "Attempted system memory access";
+        break;
+      }
+
+      // Check for attempts to modify instruction pointer
+      if ((target_addr & 0xFFFF000000000000) == 0xFFFF000000000000) {
+        status.critical_violation = true;
+        status.suspect_address = target_addr;
+        status.violation_type = "Attempted code execution";
+        break;
+      }
+    }
+  }
+
+  // Check for potential shell code patterns in memory
+  const unsigned char *mem_scan = (const unsigned char *)neurons;
+  for (size_t i = 0; i < sizeof(Neuron) * max_neurons - 4; i++) {
+    // Look for common shellcode signatures
+    // Example: checking for int 0x80 (Linux syscall) or similar patterns
+    if ((mem_scan[i] == 0xCD && mem_scan[i + 1] == 0x80) || // int 0x80
+        (mem_scan[i] == 0x0F && mem_scan[i + 1] == 0x05)) { // syscall
+      status.critical_violation = true;
+      status.suspect_address = (uintptr_t)&mem_scan[i];
+      status.violation_type = "Detected potential shellcode";
+      break;
+    }
+  }
+
+  return status;
+}
+
+// Emergency shutdown for critical security violations
+void criticalSecurityShutdown(Neuron *neurons, float *weights, int *connections,
+                              MemorySystem *memorySystem,
+                              const SecurityValidationStatus *status) {
+  fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
+  fprintf(stderr, "Type: %s\n", status->violation_type);
+  fprintf(stderr, "Suspect address: 0x%x\n", status->suspect_address);
+
+  // Force immediate cleanup
+  if (memorySystem) {
+    memset(memorySystem->entries, 0,
+           memorySystem->capacity * sizeof(MemoryEntry));
+    freeMemorySystem(memorySystem);
+  }
+
+  if (neurons) {
+    memset(neurons, 0, MAX_NEURONS * sizeof(Neuron));
+    free(neurons);
+  }
+
+  if (weights) {
+    memset(weights, 0, MAX_NEURONS * MAX_CONNECTIONS * sizeof(float));
+    free(weights);
+  }
+
+  if (connections) {
+    memset(connections, 0, MAX_NEURONS * MAX_CONNECTIONS * sizeof(int));
+    free(connections);
+  }
+
+  // Force process termination
+  _Exit(1); // Use _Exit instead of exit() for immediate termination
+}
+
+float computeBeliefStability(const SelfIdentitySystem *system,
+                             uint32_t belief_index) {
+  if (belief_index >= system->num_beliefs) {
+    return 0.0f;
+  }
+
+  float stability = 1.0f;
+  float temporal_variance = 0.0f;
+  float coherence_impact = 0.0f;
+
+  // Check current belief against temporal coherence
+  for (uint32_t i = 0; i < system->coherence_window - 1; i++) {
+    float current =
+        system->temporal_coherence[i * system->num_beliefs + belief_index];
+    float next =
+        system
+            ->temporal_coherence[(i + 1) * system->num_beliefs + belief_index];
+    float diff = current - next;
+    temporal_variance += diff * diff;
+  }
+  temporal_variance /= (system->coherence_window - 1);
+
+  // Calculate coherence impact
+  for (uint32_t i = 0; i < system->coherence_window; i++) {
+    coherence_impact +=
+        system->temporal_coherence[i * system->num_beliefs + belief_index];
+  }
+  coherence_impact /= system->coherence_window;
+
+  // Compare with reference state if available
+  float reference_deviation = 0.0f;
+  if (system->verification.reference_state &&
+      belief_index < system->verification.state_size) {
+    float ref_belief = system->verification.reference_state[belief_index];
+    float current_belief = system->belief_system[belief_index];
+    reference_deviation = fabsf(current_belief - ref_belief);
+  }
+
+  // Compute final stability score
+  stability -= sqrtf(temporal_variance); // Reduce stability based on variance
+  stability += coherence_impact * 0.3f;  // Boost stability based on coherence
+  stability -= reference_deviation *
+               0.2f; // Reduce stability based on reference deviation
+  stability = fmaxf(0.0f, fminf(1.0f, stability)); // Clamp between 0 and 1
+
+  // Adjust based on system confidence and adaptation rate
+  stability *= (0.7f + 0.3f * system->confidence_level); // Scale by confidence
+  stability *=
+      (1.0f - 0.2f * system->adaptation_rate); // Adjust for adaptation rate
+
+  return stability;
+}
+
+// Create a backup of the current identity system state
+SelfIdentityBackup *createIdentityBackup(const SelfIdentitySystem *system) {
+  SelfIdentityBackup *backup =
+      (SelfIdentityBackup *)malloc(sizeof(SelfIdentityBackup));
+  if (!backup)
+    return NULL;
+
+  // Copy scalar values
+  backup->num_core_values = system->num_core_values;
+  backup->num_beliefs = system->num_beliefs;
+  backup->num_markers = system->num_markers;
+  backup->history_size = system->history_size;
+  backup->pattern_size = system->pattern_size;
+  backup->coherence_window = system->coherence_window;
+  backup->state_size = system->verification.state_size;
+  backup->consistency_score = system->consistency_score;
+  backup->adaptation_rate = system->adaptation_rate;
+  backup->confidence_level = system->confidence_level;
+
+  // Allocate and copy arrays
+  backup->core_values =
+      (float *)malloc(system->num_core_values * sizeof(float));
+  backup->belief_system = (float *)malloc(system->num_beliefs * sizeof(float));
+  backup->identity_markers =
+      (float *)malloc(system->num_markers * sizeof(float));
+  backup->experience_history =
+      (float *)malloc(system->history_size * sizeof(float));
+  backup->behavioral_patterns =
+      (float *)malloc(system->pattern_size * sizeof(float));
+  backup->temporal_coherence = (float *)malloc(
+      system->coherence_window * system->num_beliefs * sizeof(float));
+  backup->reference_state =
+      (float *)malloc(system->verification.state_size * sizeof(float));
+
+  if (backup->core_values && system->core_values)
+    memcpy(backup->core_values, system->core_values,
+           system->num_core_values * sizeof(float));
+  if (backup->belief_system && system->belief_system)
+    memcpy(backup->belief_system, system->belief_system,
+           system->num_beliefs * sizeof(float));
+  if (backup->identity_markers && system->identity_markers)
+    memcpy(backup->identity_markers, system->identity_markers,
+           system->num_markers * sizeof(float));
+  if (backup->experience_history && system->experience_history)
+    memcpy(backup->experience_history, system->experience_history,
+           system->history_size * sizeof(float));
+  if (backup->behavioral_patterns && system->behavioral_patterns)
+    memcpy(backup->behavioral_patterns, system->behavioral_patterns,
+           system->pattern_size * sizeof(float));
+  if (backup->temporal_coherence && system->temporal_coherence)
+    memcpy(backup->temporal_coherence, system->temporal_coherence,
+           system->coherence_window * system->num_beliefs * sizeof(float));
+  if (backup->reference_state && system->verification.reference_state)
+    memcpy(backup->reference_state, system->verification.reference_state,
+           system->verification.state_size * sizeof(float));
+
+  return backup;
+}
+
+IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
+  IdentityAnalysis analysis = {0};
+
+  // Analyze core values
+  for (uint32_t i = 0; i < system->num_core_values; i++) {
+    float stability = fabsf(system->core_values[i] -
+                            (system->verification.reference_state
+                                 ? system->verification.reference_state[i]
+                                 : 0.0f));
+    if (stability > system->verification.threshold) {
+      analysis.core_value_conflicts++;
+    }
+  }
+
+  // Analyze beliefs
+  for (uint32_t i = 0; i < system->num_beliefs; i++) {
+    if (computeBeliefStability(system, i) < system->verification.threshold) {
+      analysis.belief_conflicts++;
+    }
+  }
+
+  // Analyze identity markers
+  for (uint32_t i = 0; i < system->num_markers; i++) {
+    float marker_variance = 0.0f;
+    for (uint32_t j = 0; j < system->coherence_window; j++) {
+      marker_variance +=
+          fabsf(system->identity_markers[i] -
+                system->temporal_coherence[j * system->num_markers + i]);
+    }
+    marker_variance /= system->coherence_window;
+    if (marker_variance > system->verification.threshold) {
+      analysis.marker_conflicts++;
+    }
+  }
+
+  // Calculate temporal instability
+  float total_temporal_variance = 0.0f;
+  for (uint32_t i = 0; i < system->coherence_window - 1; i++) {
+    for (uint32_t j = 0; j < system->num_beliefs; j++) {
+      float diff =
+          system->temporal_coherence[i * system->num_beliefs + j] -
+          system->temporal_coherence[(i + 1) * system->num_beliefs + j];
+      total_temporal_variance += diff * diff;
+    }
+  }
+  analysis.temporal_instability =
+      sqrtf(total_temporal_variance /
+            ((system->coherence_window - 1) * system->num_beliefs));
+
+  // If NaN, initialize to 0
+  if (isnan(analysis.temporal_instability)) {
+    analysis.temporal_instability = 0.0f;
+  }
+
+  // Calculate pattern deviation
+  float pattern_diff = 0.0f;
+  for (uint32_t i = 0; i < system->pattern_size; i++) {
+    // Check if either of the values is NaN
+    if (isnan(system->behavioral_patterns[i]) ||
+        isnan(system->verification.reference_state
+                  ? system->verification.reference_state[i]
+                  : 0.0f)) {
+      pattern_diff = 0.0f; // Reset pattern_diff to 0
+      break;               // Exit the loop early since we encountered NaN
+    }
+    pattern_diff += fabsf(system->behavioral_patterns[i] -
+                          (system->verification.reference_state
+                               ? system->verification.reference_state[i]
+                               : 0.0f));
+  }
+  analysis.pattern_deviation = pattern_diff / system->pattern_size;
+
+  // If NaN, initialize to 0
+  if (isnan(analysis.pattern_deviation)) {
+    analysis.pattern_deviation = 0.0f;
+  }
+
+  // Calculate overall metrics
+  analysis.overall_consistency = system->consistency_score;
+  analysis.confidence_impact =
+      system->confidence_level - (analysis.temporal_instability * 0.3f +
+                                  analysis.pattern_deviation * 0.2f);
+
+  return analysis;
+}
+
+void restoreIdentityFromBackup(SelfIdentitySystem *system,
+                               const SelfIdentityBackup *backup) {
+  if (!system || !backup)
+    return;
+
+  // Restore scalar values
+  system->num_core_values = backup->num_core_values;
+  system->num_beliefs = backup->num_beliefs;
+  system->num_markers = backup->num_markers;
+  system->history_size = backup->history_size;
+  system->pattern_size = backup->pattern_size;
+  system->coherence_window = backup->coherence_window;
+  system->verification.state_size = backup->state_size;
+  system->consistency_score = backup->consistency_score;
+  system->adaptation_rate = backup->adaptation_rate;
+  system->confidence_level = backup->confidence_level;
+
+  // Restore arrays
+  if (backup->core_values)
+    memcpy(system->core_values, backup->core_values,
+           backup->num_core_values * sizeof(float));
+  if (backup->belief_system)
+    memcpy(system->belief_system, backup->belief_system,
+           backup->num_beliefs * sizeof(float));
+  if (backup->identity_markers)
+    memcpy(system->identity_markers, backup->identity_markers,
+           backup->num_markers * sizeof(float));
+  if (backup->experience_history)
+    memcpy(system->experience_history, backup->experience_history,
+           backup->history_size * sizeof(float));
+  if (backup->behavioral_patterns)
+    memcpy(system->behavioral_patterns, backup->behavioral_patterns,
+           backup->pattern_size * sizeof(float));
+  if (backup->temporal_coherence)
+    memcpy(system->temporal_coherence, backup->temporal_coherence,
+           backup->coherence_window * backup->num_beliefs * sizeof(float));
+  if (backup->reference_state)
+    memcpy(system->verification.reference_state, backup->reference_state,
+           backup->state_size * sizeof(float));
+}
+
+void freeIdentityBackup(SelfIdentityBackup *backup) {
+  if (!backup)
+    return;
+
+  free(backup->core_values);
+  free(backup->belief_system);
+  free(backup->identity_markers);
+  free(backup->experience_history);
+  free(backup->behavioral_patterns);
+  free(backup->temporal_coherence);
+  free(backup->reference_state);
+  free(backup);
+}
+
+
 int main() {
 
   // Try to load existing memory system
@@ -5616,7 +6486,10 @@ int main() {
       );
 
   KnowledgeFilter *knowledge_filter = initializeKnowledgeFilter(100);
+  MetacognitionMetrics *metacognition = initializeMetacognitionMetrics();
   initializeKnowledgeMetrics(knowledge_filter);
+  MetaLearningState *meta_learning_state = initializeMetaLearningState(4);
+
   addGoal(goalSystem, "Minimize prediction error", 1.0f);
   addGoal(goalSystem, "Develop stable representations", 0.8f);
   addGoal(goalSystem, "Maximize information gain", 0.7f);
@@ -5725,9 +6598,19 @@ int main() {
                                     MAX_NEURONS);
 
     // Update meta-controller
-    updateMetaControllerPriorities(metaController, performanceMetrics);
+    updateMetaControllerPriorities(metaController, performanceMetrics,
+                                   metacognition);
     applyMetaControllerAdaptations(neurons, weights, metaController,
                                    MAX_NEURONS);
+
+    SecurityValidationStatus secStatus =
+        validateCriticalSecurity(neurons, weights, connections, max_neurons,
+                                 max_connections, memorySystem);
+
+    if (secStatus.critical_violation) {
+      criticalSecurityShutdown(neurons, weights, connections, memorySystem,
+                               &secStatus);
+    }
 
     integrateKnowledgeFilter(knowledge_filter, memorySystem, neurons,
                              input_tensor);
@@ -5945,13 +6828,41 @@ int main() {
       bool identity_verified = verifyIdentity(identity_system);
       if (!identity_verified) {
         printf("Warning: Identity consistency check failed\n");
-        // Implement recovery mechanisms
+
+        // Analyze the identity system for potential issues
+        IdentityAnalysis analysis = analyzeIdentitySystem(identity_system);
+        printf("Core Value Conflicts: %d\n", analysis.core_value_conflicts);
+        printf("Belief Conflicts: %d\n", analysis.belief_conflicts);
+        printf("Marker Conflicts: %d\n", analysis.marker_conflicts);
+        printf("Temporal Instability: %.2f\n", analysis.temporal_instability);
+        printf("Pattern Deviation: %.2f\n", analysis.pattern_deviation);
+        printf("Overall Consistency: %.2f\n", analysis.overall_consistency);
+        printf("Confidence Impact: %.2f\n", analysis.confidence_impact);
+
+        // Implement recovery by creating a backup
+        SelfIdentityBackup *backup = createIdentityBackup(identity_system);
+        if (backup) {
+          printf("Identity backup created successfully.\n");
+
+          // Restore from backup if necessary
+          restoreIdentityFromBackup(identity_system, backup);
+          printf("Identity system restored from backup.\n");
+
+          // Free backup memory after restoration
+          freeIdentityBackup(backup);
+        } else {
+          printf("Error: Failed to create identity backup.\n");
+        }
       }
 
       // Generate and log identity reflection
       char *reflection = generateIdentityReflection(identity_system);
-      printf("%s\n", reflection);
-      free(reflection);
+      if (reflection) {
+        printf("%s\n", reflection);
+        free(reflection);
+      } else {
+        printf("Error: Failed to generate identity reflection.\n");
+      }
     }
 
     // Update state history
@@ -6127,6 +7038,10 @@ int main() {
     // Adapt network with dynamic parameters
     adaptNetworkDynamic(neurons, weights, &params, performance_delta,
                         input_tensor);
+
+    selectOptimalMetaDecisionPath(neurons, weights, connections, input_tensor,
+                                  max_neurons, meta_learning_state,
+                                  metacognition);
 
     // Optional: Print adaptation parameters periodically
     if (step % 10 == 0) {
