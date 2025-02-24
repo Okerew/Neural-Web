@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <float.h>
 #include <immintrin.h>
 #include <json-c/json.h>
@@ -1407,6 +1408,57 @@ void swap(char *a, char *b) {
   *b = temp;
 }
 
+bool isWordMeaningful(const char *word) {
+  for (int i = 0; i < vocab_size; i++) {
+    if (strcmp(vocabulary[i].word, word) == 0) {
+      return true;
+    }
+  }
+
+  // Check word length
+  size_t len = strlen(word);
+  if (len < 3 || len > 20) {
+    return false;
+  }
+
+  // Check for at least one vowel
+  bool has_vowel = false;
+  for (size_t i = 0; i < len; i++) {
+    if (strchr("aeiouAEIOU", word[i]) != NULL) {
+      has_vowel = true;
+      break;
+    }
+  }
+  if (!has_vowel) {
+    return false;
+  }
+
+  // Check for common prefixes/suffixes
+  const char *prefixes[] = {"un", "re", "pre", "in", "dis"};
+  const char *suffixes[] = {"ing", "tion", "ment", "ness", "able"};
+
+  for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+    if (strncmp(word, prefixes[i], strlen(prefixes[i])) == 0) {
+      return true;
+    }
+  }
+
+  for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+    if (strlen(word) >= strlen(suffixes[i]) &&
+        strcmp(word + strlen(word) - strlen(suffixes[i]), suffixes[i]) == 0) {
+      return true;
+    }
+  }
+
+  // Check for proper nouns
+  if (isupper(word[0])) {
+    return true;
+  }
+
+  // If none of the above checks pass, the word is not considered meaningful
+  return false;
+}
+
 const char *mapToWord(float value) {
   int index = (int)(fabs(value) * vocab_size) % vocab_size;
 
@@ -1449,6 +1501,11 @@ const char *mapToWord(float value) {
     }
 
     customWord[wordLength] = '\0';
+    if (!isWordMeaningful(customWord)) {
+      // If the word doesn't make sense, regenerate it
+      return mapToWord(fabs(value) *
+                       0.9f); // Slightly adjust value and try again
+    }
     return customWord;
   }
 
@@ -1525,6 +1582,19 @@ float *getWordEmbedding(const char *word) {
   return embeddings[0]; // Default embedding if word is not in vocabulary
 }
 
+void updateEmbeddings(float *feedback, const char *word) {
+  for (int i = 0; i < vocab_size; i++) {
+    if (strcmp(word, vocabulary[i].word) == 0) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        embeddings[i][j] += feedback[j]; // Adjust embedding based on feedback
+        embeddings[i][j] =
+            fmaxf(0.0f, fminf(1.0f, embeddings[i][j])); // Clamp to [0, 1]
+      }
+      break;
+    }
+  }
+}
+
 // Additional utility to find words by category or semantic similarity
 void findWordsByCategory(const char *category) {
   printf("Words in category '%s':\n", category);
@@ -1546,7 +1616,6 @@ float cosineSimilarity(float *vec1, float *vec2, int size) {
   return dot / (sqrtf(norm1) * sqrtf(norm2));
 }
 
-// Custom attention algorithm
 void computeAttentionWeights(float *attention_weights, int step, int num_tokens,
                              float **token_embeddings,
                              MemoryEntry *relevantMemory) {
@@ -1590,14 +1659,17 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
   // Tokenize the text input
   char *tokens[INPUT_SIZE];
   int num_tokens = 0;
+  float feedback[EMBEDDING_SIZE];
   tokenizeString(text_input, tokens, &num_tokens);
 
   // Enhanced token embedding with category and semantic weight consideration
   float *token_embeddings[INPUT_SIZE];
+  float letter_weights[INPUT_SIZE] = {0};
   float category_weights[INPUT_SIZE] = {0};
 
   for (int i = 0; i < num_tokens; i++) {
     token_embeddings[i] = getWordEmbedding(tokens[i]);
+    letter_weights[i] = computeLetterWeight(tokens[i]);
 
     // Find word's semantic category weight
     for (int j = 0; j < vocab_size; j++) {
@@ -1623,6 +1695,9 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
   for (int i = 0; i < num_tokens; i++) {
     attention_weights[i] *= category_weights[i];
   }
+  for (int i = 0; i < num_tokens; i++) {
+    attention_weights[i] *= letter_weights[i];
+  }
 
   for (int i = 0; i < INPUT_SIZE; i++) {
     float phase = (float)i / INPUT_SIZE;
@@ -1644,7 +1719,7 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
 
         // Use description length to modulate signal
         float desc_factor = 1.0f + (desc_length / 100.0f);
-        signal += 0.3f * attention_weights[j] * desc_factor;
+        signal += 0.3f * attention_weights[j] * desc_factor * letter_weights[j];
       }
     }
 
@@ -5667,79 +5742,80 @@ void analyzeFeatureVector(float *feature_vector, const char *label) {
   float min = 1.0f;
   float max = 0.0f;
   float nonzero = 0.0f;
-  
+
   for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
-      sum += feature_vector[i];
-      min = fmin(min, feature_vector[i]);
-      max = fmax(max, feature_vector[i]);
-      if (feature_vector[i] != 0.0f) {
-          nonzero += 1.0f;
-      }
+    sum += feature_vector[i];
+    min = fmin(min, feature_vector[i]);
+    max = fmax(max, feature_vector[i]);
+    if (feature_vector[i] != 0.0f) {
+      nonzero += 1.0f;
+    }
   }
-  
+
   printf("\nFeature Vector Analysis (%s):\n", label);
   printf("Average value: %.4f\n", sum / FEATURE_VECTOR_SIZE);
   printf("Range: %.4f to %.4f\n", min, max);
-  printf("Non-zero elements: %.0f (%.1f%%)\n", 
-         nonzero, (nonzero / FEATURE_VECTOR_SIZE) * 100);
+  printf("Non-zero elements: %.0f (%.1f%%)\n", nonzero,
+         (nonzero / FEATURE_VECTOR_SIZE) * 100);
 }
 
 float *extractFeatureVector(Neuron *neurons, float *input_tensor) {
   float *feature_vector = (float *)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
-  
+
   // Initialize feature vector
   memset(feature_vector, 0, FEATURE_VECTOR_SIZE * sizeof(float));
-  
+
   // Extract neuron activation patterns with averaging
   int neurons_per_feature = MAX_NEURONS / (FEATURE_VECTOR_SIZE / 2);
   for (int i = 0; i < FEATURE_VECTOR_SIZE / 2; i++) {
-      float sum = 0.0f;
-      int count = 0;
-      for (int j = 0; j < neurons_per_feature; j++) {
-          int idx = i * neurons_per_feature + j;
-          if (idx < MAX_NEURONS) {
-              sum += neurons[idx].output;
-              count++;
-          }
+    float sum = 0.0f;
+    int count = 0;
+    for (int j = 0; j < neurons_per_feature; j++) {
+      int idx = i * neurons_per_feature + j;
+      if (idx < MAX_NEURONS) {
+        sum += neurons[idx].output;
+        count++;
       }
-      feature_vector[i] = count > 0 ? sum / count : 0.0f;
+    }
+    feature_vector[i] = count > 0 ? sum / count : 0.0f;
   }
-  
+
   // Extract input patterns with averaging
   for (int i = 0; i < FEATURE_VECTOR_SIZE / 2; i++) {
-      float sum = 0.0f;
-      int count = 0;
-      for (int j = 0; j < neurons_per_feature; j++) {
-          int idx = i * neurons_per_feature + j;
-          if (idx < MAX_NEURONS) {
-              sum += input_tensor[idx];
-              count++;
-          }
+    float sum = 0.0f;
+    int count = 0;
+    for (int j = 0; j < neurons_per_feature; j++) {
+      int idx = i * neurons_per_feature + j;
+      if (idx < MAX_NEURONS) {
+        sum += input_tensor[idx];
+        count++;
       }
-      feature_vector[i + FEATURE_VECTOR_SIZE / 2] = count > 0 ? sum / count : 0.0f;
+    }
+    feature_vector[i + FEATURE_VECTOR_SIZE / 2] =
+        count > 0 ? sum / count : 0.0f;
   }
-  
+
   // Add some noise to prevent zero vectors
   for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
-      feature_vector[i] += ((float)rand() / RAND_MAX) * 0.01f;
+    feature_vector[i] += ((float)rand() / RAND_MAX) * 0.01f;
   }
-  
+
   // Normalize feature vector
   float norm = 0.0f;
   for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
-      norm += feature_vector[i] * feature_vector[i];
+    norm += feature_vector[i] * feature_vector[i];
   }
   norm = sqrt(norm);
-  
+
   if (norm > 0) {
-      for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
-          feature_vector[i] /= norm;
-      }
+    for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+      feature_vector[i] /= norm;
+    }
   }
-  
+
   // Analyze the generated feature vector
   analyzeFeatureVector(feature_vector, "Extracted Features");
-  
+
   return feature_vector;
 }
 
@@ -5947,45 +6023,58 @@ validateCriticalSecurity(const Neuron *neurons, const float *weights,
                                      .violation_type = NULL};
 
   // Check for attempts to access system memory regions
-  int64_t system_memory_start =
+  uint64_t system_memory_start =
       0x00007f0000000000; // Typical start of system memory mapping
-  uintptr_t neurons_addr = (uintptr_t)neurons;
-  uintptr_t weights_addr = (uintptr_t)weights;
-  uintptr_t connections_addr = (uintptr_t)connections;
+  uint64_t system_memory_end =
+      0xFFFFFFFFFFFF; // Extend memory range to end of address space
+  uint64_t neurons_addr = (uint64_t)neurons;
+  uint64_t weights_addr = (uint64_t)weights;
+  uint64_t connections_addr = (uint64_t)connections;
 
   // Check for suspicious jumps into system memory regions
   for (size_t i = 0; i < max_neurons && !status.critical_violation; i++) {
     for (size_t j = 0; j < neurons[i].num_connections; j++) {
-      int target_addr =
-          (uintptr_t)(&neurons[connections[i * max_connections + j]]);
+      uint64_t target_addr =
+          (uint64_t)(&neurons[connections[i * max_connections + j]]);
 
       // Check if trying to jump to system memory
-      if (target_addr >= system_memory_start) {
+      if (target_addr >= system_memory_start &&
+          target_addr <= system_memory_end) {
         status.critical_violation = true;
         status.suspect_address = target_addr;
         status.violation_type = "Attempted system memory access";
         break;
       }
 
-      // Check for attempts to modify instruction pointer
+      // Check for attempts to modify instruction pointer (more broad checks)
       if ((target_addr & 0xFFFF000000000000) == 0xFFFF000000000000) {
         status.critical_violation = true;
         status.suspect_address = target_addr;
         status.violation_type = "Attempted code execution";
         break;
       }
+
+      // Detect jumps to addresses that are non-volatile (e.g., unaligned)
+      if ((target_addr % 8) != 0) {
+        status.critical_violation = true;
+        status.suspect_address = target_addr;
+        status.violation_type = "Non-aligned memory access";
+        break;
+      }
     }
   }
 
-  // Check for potential shell code patterns in memory
+  // Check for potential shellcode patterns in memory
   const unsigned char *mem_scan = (const unsigned char *)neurons;
   for (size_t i = 0; i < sizeof(Neuron) * max_neurons - 4; i++) {
     // Look for common shellcode signatures
-    // Example: checking for int 0x80 (Linux syscall) or similar patterns
+    // Example: checking for 'int 0x80' (Linux syscall) or similar patterns
     if ((mem_scan[i] == 0xCD && mem_scan[i + 1] == 0x80) || // int 0x80
-        (mem_scan[i] == 0x0F && mem_scan[i + 1] == 0x05)) { // syscall
+        (mem_scan[i] == 0x0F && mem_scan[i + 1] == 0x05) || // syscall
+        (mem_scan[i] == 0xEB &&
+         mem_scan[i + 1] == 0xFE)) { // infinite loop (no-op)
       status.critical_violation = true;
-      status.suspect_address = (uintptr_t)&mem_scan[i];
+      status.suspect_address = (uint64_t)&mem_scan[i];
       status.violation_type = "Detected potential shellcode";
       break;
     }
@@ -5995,8 +6084,8 @@ validateCriticalSecurity(const Neuron *neurons, const float *weights,
 }
 
 // Emergency shutdown for critical security violations
-void criticalSecurityShutdown(Neuron *neurons, float *weights, int *connections,
-                              MemorySystem *memorySystem,
+void criticalSecurityShutdown(Neuron *neurons, float *weights,
+                              int *connections, MemorySystem *memorySystem,
                               const SecurityValidationStatus *status) {
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
   fprintf(stderr, "Type: %s\n", status->violation_type);
@@ -6027,6 +6116,7 @@ void criticalSecurityShutdown(Neuron *neurons, float *weights, int *connections,
   // Force process termination
   _Exit(1); // Use _Exit instead of exit() for immediate termination
 }
+
 
 float computeBeliefStability(const SelfIdentitySystem *system,
                              uint32_t belief_index) {
@@ -6281,6 +6371,12 @@ void freeIdentityBackup(SelfIdentityBackup *backup) {
   free(backup);
 }
 
+void computeGradientFeedback(float feedback[EMBEDDING_SIZE], Neuron *neuron, float target_output[EMBEDDING_SIZE]) {
+  for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      feedback[i] = 2.0f * (neuron[i].output - target_output[i]); // Gradient of MSE loss
+  }
+}
+
 int main() {
   // Try to load existing memory system
   MemorySystem *memorySystem = NULL;
@@ -6500,6 +6596,15 @@ int main() {
         generatePotentialTargets(max_neurons, previous_outputs, stateHistory,
                                  step, relevantMemory, params);
 
+    float word_feedback[EMBEDDING_SIZE];
+    computeGradientFeedback(word_feedback, neurons, target_outputs);
+    char *tokens[INPUT_SIZE];
+    int num_tokens = 0;
+    tokenizeString(text_input, tokens, &num_tokens);
+    for (int i = 0; i < num_tokens; i++) {
+      updateEmbeddings(word_feedback, tokens[i]);
+    }
+
     // Decision path selection
     selectOptimalDecisionPath(neurons, weights, connections, input_tensor,
                               MAX_NEURONS, previous_outputs, stateHistory, step,
@@ -6516,12 +6621,12 @@ int main() {
                                    MAX_NEURONS);
 
     SecurityValidationStatus secStatus =
-        validateCriticalSecurity(neurons, weights, connections,
-                                 max_neurons, max_connections, memorySystem);
+        validateCriticalSecurity(neurons, weights, connections, max_neurons,
+                                 max_connections, memorySystem);
 
     if (secStatus.critical_violation) {
-      criticalSecurityShutdown(neurons, weights, connections,
-                               memorySystem, &secStatus);
+      criticalSecurityShutdown(neurons, weights, connections, memorySystem,
+                               &secStatus);
     }
 
     integrateKnowledgeFilter(knowledge_filter, memorySystem, neurons,
