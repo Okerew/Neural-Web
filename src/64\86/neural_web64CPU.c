@@ -45,6 +45,8 @@
 #define HISTORY_LENGTH 10
 #define NUM_PATHS 5
 #define MAX_DECISION_STEPS 20
+#define MAX_SYMBOLS 100
+#define MAX_QUESTIONS 10
 
 typedef struct {
   float state;
@@ -470,6 +472,22 @@ typedef struct {
   float overall_consistency;     // Overall system consistency score
   float confidence_impact;       // Impact on confidence level
 } IdentityAnalysis;
+
+typedef struct {
+  int symbol_id;
+  char description[256];
+} InternalSymbol;
+
+typedef struct {
+  int question_id;
+  int symbol_ids[MAX_SYMBOLS];
+  int num_symbols;
+} InternalQuestion;
+
+InternalSymbol symbol_table[MAX_SYMBOLS];
+InternalQuestion question_table[MAX_QUESTIONS];
+int num_symbols = 0;
+int num_questions = 0;
 
 DynamicParameters initDynamicParameters() {
   DynamicParameters params = {.input_noise_scale = 0.1f,
@@ -6084,8 +6102,8 @@ validateCriticalSecurity(const Neuron *neurons, const float *weights,
 }
 
 // Emergency shutdown for critical security violations
-void criticalSecurityShutdown(Neuron *neurons, float *weights,
-                              int *connections, MemorySystem *memorySystem,
+void criticalSecurityShutdown(Neuron *neurons, float *weights, int *connections,
+                              MemorySystem *memorySystem,
                               const SecurityValidationStatus *status) {
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
   fprintf(stderr, "Type: %s\n", status->violation_type);
@@ -6116,7 +6134,6 @@ void criticalSecurityShutdown(Neuron *neurons, float *weights,
   // Force process termination
   _Exit(1); // Use _Exit instead of exit() for immediate termination
 }
-
 
 float computeBeliefStability(const SelfIdentitySystem *system,
                              uint32_t belief_index) {
@@ -6371,9 +6388,135 @@ void freeIdentityBackup(SelfIdentityBackup *backup) {
   free(backup);
 }
 
-void computeGradientFeedback(float feedback[EMBEDDING_SIZE], Neuron *neuron, float target_output[EMBEDDING_SIZE]) {
+void computeGradientFeedback(float feedback[EMBEDDING_SIZE], Neuron *neuron,
+                             float target_output[EMBEDDING_SIZE]) {
   for (int i = 0; i < EMBEDDING_SIZE; i++) {
-      feedback[i] = 2.0f * (neuron[i].output - target_output[i]); // Gradient of MSE loss
+    feedback[i] =
+        2.0f * (neuron[i].output - target_output[i]); // Gradient of MSE loss
+  }
+}
+
+void addSymbol(int symbol_id, const char *description) {
+  if (num_symbols < MAX_SYMBOLS) {
+    symbol_table[num_symbols].symbol_id = symbol_id;
+    strncpy(symbol_table[num_symbols].description, description, 255);
+    num_symbols++;
+  }
+}
+
+void addQuestion(int question_id, int symbol_ids[], int num_symbols) {
+  if (num_questions < MAX_QUESTIONS) {
+    question_table[num_questions].question_id = question_id;
+    memcpy(question_table[num_questions].symbol_ids, symbol_ids,
+           num_symbols * sizeof(int));
+    question_table[num_questions].num_symbols = num_symbols;
+    num_questions++;
+  }
+}
+
+void askQuestion(int question_id, Neuron *neurons, float *input_tensor,
+                 MemorySystem *memorySystem, float *learning_rate) {
+  if (question_id < 0 || question_id >= num_questions) {
+    printf("Invalid question ID\n");
+    return;
+  }
+
+  InternalQuestion *question = &question_table[question_id];
+  for (int i = 0; i < question->num_symbols; i++) {
+    int symbol_id = question->symbol_ids[i];
+    if (symbol_id < 0 || symbol_id >= num_symbols) {
+      printf("Invalid symbol ID\n");
+      continue;
+    }
+
+    InternalSymbol *symbol = &symbol_table[symbol_id];
+    printf("Question: %s\n", symbol->description);
+
+    // Retrieve answer based on the symbol
+    if (symbol_id == 0) {
+      printf("Answer: Current task is to minimize prediction error.\n");
+    } else if (symbol_id == 1) {
+      float error_rate = computeErrorRate(neurons, input_tensor);
+      printf("Answer: Current error rate is %.2f\n", error_rate);
+    } else if (symbol_id == 2) {
+      printf("Answer: Current learning rate is %.4f\n", *learning_rate);
+    } else if (symbol_id == 3) {
+      printf("Answer: Current memory usage is %u/%u\n", memorySystem->size,
+             memorySystem->capacity);
+    }
+  }
+}
+
+void expandMemoryCapacity(MemorySystem *memorySystem) {
+  unsigned int new_capacity =
+      memorySystem->capacity * 1.5; // Increase capacity by 50%
+  MemoryEntry *new_entries =
+      (MemoryEntry *)malloc(new_capacity * sizeof(MemoryEntry));
+  if (!new_entries) {
+    fprintf(stderr, "Failed to expand memory capacity.\n");
+    return;
+  }
+
+  // Copy existing entries to the new memory
+  for (int i = 0; i < memorySystem->size; i++) {
+    new_entries[i] =
+        memorySystem
+            ->entries[(memorySystem->head + i) % memorySystem->capacity];
+  }
+
+  // Update memory system
+  free(memorySystem->entries);
+  memorySystem->entries = new_entries;
+  memorySystem->capacity = new_capacity;
+  memorySystem->head = 0; // Reset head to the beginning
+}
+
+void adjustBehaviorBasedOnAnswers(Neuron *neurons, float *input_tensor,
+                                  MemorySystem *memorySystem,
+                                  float *learning_rate,
+                                  float *input_noise_scale,
+                                  float *weight_noise_scale) {
+  float error_rate = computeErrorRate(neurons, input_tensor);
+  if (error_rate > 0.5) {
+    printf("Error rate is high. Increasing learning rate.\n");
+    *learning_rate *= 1.1f;
+  }
+
+  // Adjust input noise scaling based on error rate
+  if (error_rate > 0.5) {
+    printf(
+        "Error rate is high (%.2f). Increasing input noise for exploration.\n",
+        error_rate);
+    *input_noise_scale =
+        fmin(1.0f, *input_noise_scale + 0.1f); // Increase input noise
+  } else if (error_rate < 0.2) {
+    printf("Error rate is low (%.2f). Decreasing input noise.\n", error_rate);
+    *input_noise_scale =
+        fmax(0.0f, *input_noise_scale - 0.1f); // Decrease input noise
+  }
+
+  // Adjust weight noise scaling based on error rate
+  if (error_rate > 0.5) {
+    printf(
+        "Error rate is high (%.2f). Increasing weight noise for exploration.\n",
+        error_rate);
+    *weight_noise_scale =
+        fmin(1.0f, *weight_noise_scale + 0.1f); // Increase weight noise
+  } else if (error_rate < 0.2) {
+    printf("Error rate is low (%.2f). Decreasing weight noise.\n", error_rate);
+    *weight_noise_scale =
+        fmax(0.0f, *weight_noise_scale - 0.1f); // Decrease weight noise
+  }
+
+  // Memory management
+  if (memorySystem->size > memorySystem->capacity * 0.8) {
+    printf("Memory usage is high (%.2f%%). Consolidating memories.\n",
+           (float)memorySystem->size / memorySystem->capacity * 100.0f);
+    consolidateMemory(memorySystem); // Consolidate memories
+  } else if (memorySystem->size < memorySystem->capacity * 0.2) {
+    printf("Memory usage is low (%.2f%%). Expanding memory capacity.\n",
+           (float)memorySystem->size / memorySystem->capacity * 100.0f);
+    expandMemoryCapacity(memorySystem); // Expand memory capacity
   }
 }
 
@@ -7079,6 +7222,17 @@ int main() {
     }
 
     learning_rate = opt_state.optimal_learning_rate;
+     // Use optimized parameters
+     learning_rate = opt_state.optimal_learning_rate;
+     if (step % 50 == 0) {
+         askQuestion(0, neurons, input_tensor, memorySystem, &learning_rate); // What is the current task?
+         askQuestion(1, neurons, input_tensor, memorySystem, &learning_rate); // What is the current error rate?
+         askQuestion(2, neurons, input_tensor, memorySystem, &learning_rate); // What is the current learning rate?
+         askQuestion(3, neurons, input_tensor, memorySystem, &learning_rate); // What is the current memory usage?
+     }
+     if (step % 50 == 0) {
+         adjustBehaviorBasedOnAnswers(neurons, input_tensor, memorySystem, &learning_rate, &params.input_noise_scale, &params.weight_noise_scale);
+     }
     updateNeuronsWithPredictiveCoding(neurons, input_tensor, max_neurons,
                                       learning_rate);
 
