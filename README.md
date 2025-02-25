@@ -254,9 +254,52 @@ typedef struct {
 
 ### Reflection System
 
+```c
+typedef struct {
+  float current_adaptation_rate;
+  float input_noise_scale;
+  float weight_noise_scale;
+  float plasticity;
+  float noise_tolerance;
+  float learning_rate;
+} ReflectionParameters;
+```
+
 The reflection system evaluates the quality of outputs and suggests improvements. It helps in continuously refining the network's performance by identifying areas that need enhancement.
 
 ### Self-Identification System
+
+```c
+typedef struct {
+  float *core_values;         // Stable personality traits/values
+  float *belief_system;       // Current belief states
+  float *identity_markers;    // Unique identifying characteristics
+  float *experience_history;  // Compressed history of experiences
+  float *behavioral_patterns; // Consistent behavior patterns
+
+  uint32_t num_core_values;
+  uint32_t num_beliefs;
+  uint32_t num_markers;
+  uint32_t history_size;
+  uint32_t pattern_size;
+
+  float consistency_score; // Measure of identity stability
+  float adaptation_rate;   // Rate of identity evolution
+  float confidence_level;  // Self-confidence in identity
+
+  // Temporal consistency tracking
+  float *temporal_coherence; // Track consistency over time
+  uint32_t coherence_window; // Time window for coherence analysis
+
+  // Identity verification system
+  struct {
+    float threshold;        // Minimum consistency threshold
+    float *reference_state; // Reference identity state
+    uint32_t state_size;    // Size of reference state
+  } verification;
+
+} SelfIdentitySystem;
+```
 
 The self-identification system helps the neural web assess its own state and biases. This allows the AI to form an identity of sorts, enabling it to understand its capabilities and limitations better.
 
@@ -264,6 +307,69 @@ The self-identification system helps the neural web assess its own state and bia
 
 The knowledge filter ensures that only relevant and high-quality information is processed. This component is crucial for maintaining the integrity and efficiency of the neural web by filtering out noise and irrelevant data.
 
+```c
+typedef struct {
+  KnowledgeCategory *categories;
+  uint32_t num_categories;
+  uint32_t capacity;
+  ProblemInstance *problem_history;
+  uint32_t num_problems;
+  uint32_t problem_capacity;
+  float *category_similarity_matrix;
+} KnowledgeFilter;
+```
+
+### Metacognition
+
+The metacognition system evaluates the performance of the neural web and suggests improvements. It helps in continuously refining the network's performance by identifying areas that need enhancement.
+
+```c
+typedef struct MetacognitionMetrics {
+  float confidence_level;                    // Overall confidence in decisions
+  float adaptation_rate;                     // Rate of learning adjustment
+  float cognitive_load;                      // Current processing complexity
+  float error_awareness;                     // Awareness of prediction errors
+  float context_relevance;                   // Relevance of current context
+  float performance_history[HISTORY_LENGTH]; // Historical performance tracking
+} MetacognitionMetrics;
+
+typedef struct MetaLearningState {
+  float learning_efficiency; // Current learning effectiveness
+  float exploration_rate;    // Balance between exploration/exploitation
+  float stability_index;     // System stability measure
+  float *priority_weights;   // Attention allocation weights
+  uint32_t current_phase;    // Current learning phase
+} MetaLearningState;
+```
+
+### Security system 
+
+The security system evaluates it the network is trying to access the system. It helps in preventing unauthorized access to the system.
+
+```c
+typedef struct {
+  bool critical_violation;
+  uint64_t suspect_address;
+  const char *violation_type;
+} SecurityValidationStatus;
+```
+
+### Internal self expression system
+
+The internal self expression system allows the network to express itself. It allows the network to ask questions about it self and get answers
+
+```c
+typedef struct {
+    int symbol_id;
+    char description[256];
+} InternalSymbol;
+
+typedef struct {
+    int question_id;
+    int symbol_ids[MAX_SYMBOLS];
+    int num_symbols;
+} InternalQuestion;
+```
 ## Key Functions: 
 
 ### Memory System
@@ -335,6 +441,14 @@ The knowledge filter ensures that only relevant and high-quality information is 
 - **updateKnowledgeSystem(Neuron* neurons, float* input_tensor, MemorySystem* memory_system, KnowledgeFilter* filter, float current_performance)**: Updates the knowledge system based on current performance.
 - **printCategoryInsights(KnowledgeFilter* knowledge_filter)**: Prints insights from the knowledge filter.
 
+### Internal Self-Expression System 
+
+- **addSymbol(int symbol_id, const char* description);** adds a symbol to the internal self-expression system.
+- **addQuestion(int question_id, int symbol_ids[], int num_symbols)** adds a question to the internal self-expression system.
+- **askQuestion(int question_id, Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float* learning_rate)** asks a question to the internal self-expression system.
+- **expandMemoryCapacity(MemorySystem *memorySystem)** expands the memory capacity of the memory system
+- **adjustBehaviorBasedOnAnswers(Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float *learning_rate, float *input_noise_scale, float *weight_noise_scale);** adjusts the behavior based on answers from the internal self-expression system.
+
 ### Utility Functions
 
 - **getCurrentTime()**: Returns the current time.
@@ -348,6 +462,8 @@ The knowledge filter ensures that only relevant and high-quality information is 
 - **printReplayStatistics(MemorySystem* memorySystem)**: Prints statistics related to memory replay.
 - **addEmbedding(const char* text, float* embedding)**: Adds an embedding for a given text.
 - **initializeEmbeddings()**: Initializes embeddings for text inputs.
+- **updateEmbeddings(float* embeddings, float* input_tensor, int max_embeddings, int max_neurons)**: Updates embeddings based on input tensor.
+- **isWordMeaningful(const char* word)**: Checks if a word is meaningful.
 
 ## Initialization Functions
 
@@ -777,7 +893,7 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 
 ### Example
 
-Example of the training can be seen in the MacOS/neural_web.m file in int main or if you are not familiar with metal 86\64/neural_web64CPU.c
+Example of the training can be seen in the MacOS\Arm/neural_web.m file in int main or if you are not familiar with metal 86\64/neural_web64CPU.c and 86\64/neural_web.cu
 
 ## Needed information
 
@@ -792,4 +908,4 @@ To modify number of neurons change MAX_NEURONS
 
 Only for unix type systems
 
-Remember to use the security feature
+Remember to use the security feature it shouldn't be needed on cpu versions though.
