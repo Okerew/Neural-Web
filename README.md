@@ -906,6 +906,6 @@ neuron update shader and the code must be in the same directory.
 
 To modify number of neurons change MAX_NEURONS
 
-Only for unix type systems
+Only for unix and windows type systems
 
 Remember to use the security feature it shouldn't be needed on cpu versions though.
