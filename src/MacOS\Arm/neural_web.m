@@ -461,14 +461,14 @@ typedef struct {
 } IdentityAnalysis;
 
 typedef struct {
-    int symbol_id;
-    char description[256];
+  int symbol_id;
+  char description[256];
 } InternalSymbol;
 
 typedef struct {
-    int question_id;
-    int symbol_ids[MAX_SYMBOLS];
-    int num_symbols;
+  int question_id;
+  int symbol_ids[MAX_SYMBOLS];
+  int num_symbols;
 } InternalQuestion;
 
 InternalSymbol symbol_table[MAX_SYMBOLS];
@@ -6231,57 +6231,62 @@ void computeGradientFeedback(float feedback[EMBEDDING_SIZE], Neuron *neuron,
   }
 }
 
-void addSymbol(int symbol_id, const char* description) {
-    if (num_symbols < MAX_SYMBOLS) {
-        symbol_table[num_symbols].symbol_id = symbol_id;
-        strncpy(symbol_table[num_symbols].description, description, 255);
-        num_symbols++;
-    }
+void addSymbol(int symbol_id, const char *description) {
+  if (num_symbols < MAX_SYMBOLS) {
+    symbol_table[num_symbols].symbol_id = symbol_id;
+    strncpy(symbol_table[num_symbols].description, description, 255);
+    num_symbols++;
+  }
 }
 
 void addQuestion(int question_id, int symbol_ids[], int num_symbols) {
-    if (num_questions < MAX_QUESTIONS) {
-        question_table[num_questions].question_id = question_id;
-        memcpy(question_table[num_questions].symbol_ids, symbol_ids, num_symbols * sizeof(int));
-        question_table[num_questions].num_symbols = num_symbols;
-        num_questions++;
-    }
+  if (num_questions < MAX_QUESTIONS) {
+    question_table[num_questions].question_id = question_id;
+    memcpy(question_table[num_questions].symbol_ids, symbol_ids,
+           num_symbols * sizeof(int));
+    question_table[num_questions].num_symbols = num_symbols;
+    num_questions++;
+  }
 }
 
-void askQuestion(int question_id, Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float* learning_rate) {
-    if (question_id < 0 || question_id >= num_questions) {
-        printf("Invalid question ID\n");
-        return;
+void askQuestion(int question_id, Neuron *neurons, float *input_tensor,
+                 MemorySystem *memorySystem, float *learning_rate) {
+  if (question_id < 0 || question_id >= num_questions) {
+    printf("Invalid question ID\n");
+    return;
+  }
+
+  InternalQuestion *question = &question_table[question_id];
+  for (int i = 0; i < question->num_symbols; i++) {
+    int symbol_id = question->symbol_ids[i];
+    if (symbol_id < 0 || symbol_id >= num_symbols) {
+      printf("Invalid symbol ID\n");
+      continue;
     }
 
-    InternalQuestion* question = &question_table[question_id];
-    for (int i = 0; i < question->num_symbols; i++) {
-        int symbol_id = question->symbol_ids[i];
-        if (symbol_id < 0 || symbol_id >= num_symbols) {
-            printf("Invalid symbol ID\n");
-            continue;
-        }
+    InternalSymbol *symbol = &symbol_table[symbol_id];
+    printf("Question: %s\n", symbol->description);
 
-        InternalSymbol* symbol = &symbol_table[symbol_id];
-        printf("Question: %s\n", symbol->description);
-
-        // Retrieve answer based on the symbol
-        if (symbol_id == 0) {
-            printf("Answer: Current task is to minimize prediction error.\n");
-        } else if (symbol_id == 1) {
-            float error_rate = computeErrorRate(neurons, input_tensor);
-            printf("Answer: Current error rate is %.2f\n", error_rate);
-        } else if (symbol_id == 2) {
-           printf("Answer: Current learning rate is %.4f\n", *learning_rate);
-        } else if (symbol_id == 3) {
-            printf("Answer: Current memory usage is %u/%u\n", memorySystem->size, memorySystem->capacity);
-        }
+    // Retrieve answer based on the symbol
+    if (symbol_id == 0) {
+      printf("Answer: Current task is to minimize prediction error.\n");
+    } else if (symbol_id == 1) {
+      float error_rate = computeErrorRate(neurons, input_tensor);
+      printf("Answer: Current error rate is %.2f\n", error_rate);
+    } else if (symbol_id == 2) {
+      printf("Answer: Current learning rate is %.4f\n", *learning_rate);
+    } else if (symbol_id == 3) {
+      printf("Answer: Current memory usage is %u/%u\n", memorySystem->size,
+             memorySystem->capacity);
     }
+  }
 }
 
 void expandMemoryCapacity(MemorySystem *memorySystem) {
-  unsigned int new_capacity = memorySystem->capacity * 1.5; // Increase capacity by 50%
-  MemoryEntry *new_entries = (MemoryEntry *)malloc(new_capacity * sizeof(MemoryEntry));
+  unsigned int new_capacity =
+      memorySystem->capacity * 1.5; // Increase capacity by 50%
+  MemoryEntry *new_entries =
+      (MemoryEntry *)malloc(new_capacity * sizeof(MemoryEntry));
   if (!new_entries) {
     fprintf(stderr, "Failed to expand memory capacity.\n");
     return;
@@ -6289,7 +6294,9 @@ void expandMemoryCapacity(MemorySystem *memorySystem) {
 
   // Copy existing entries to the new memory
   for (int i = 0; i < memorySystem->size; i++) {
-    new_entries[i] = memorySystem->entries[(memorySystem->head + i) % memorySystem->capacity];
+    new_entries[i] =
+        memorySystem
+            ->entries[(memorySystem->head + i) % memorySystem->capacity];
   }
 
   // Update memory system
@@ -6299,29 +6306,41 @@ void expandMemoryCapacity(MemorySystem *memorySystem) {
   memorySystem->head = 0; // Reset head to the beginning
 }
 
-void adjustBehaviorBasedOnAnswers(Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float *learning_rate, float *input_noise_scale, float *weight_noise_scale) {
-    float error_rate = computeErrorRate(neurons, input_tensor);
-    if (error_rate > 0.5) {
-        printf("Error rate is high. Increasing learning rate.\n");
-        *learning_rate *= 1.1f;
-    }
-
-     // Adjust input noise scaling based on error rate
+void adjustBehaviorBasedOnAnswers(Neuron *neurons, float *input_tensor,
+                                  MemorySystem *memorySystem,
+                                  float *learning_rate,
+                                  float *input_noise_scale,
+                                  float *weight_noise_scale) {
+  float error_rate = computeErrorRate(neurons, input_tensor);
   if (error_rate > 0.5) {
-    printf("Error rate is high (%.2f). Increasing input noise for exploration.\n", error_rate);
-    *input_noise_scale = fmin(1.0f, *input_noise_scale + 0.1f); // Increase input noise
+    printf("Error rate is high. Increasing learning rate.\n");
+    *learning_rate *= 1.1f;
+  }
+
+  // Adjust input noise scaling based on error rate
+  if (error_rate > 0.5) {
+    printf(
+        "Error rate is high (%.2f). Increasing input noise for exploration.\n",
+        error_rate);
+    *input_noise_scale =
+        fmin(1.0f, *input_noise_scale + 0.1f); // Increase input noise
   } else if (error_rate < 0.2) {
     printf("Error rate is low (%.2f). Decreasing input noise.\n", error_rate);
-    *input_noise_scale = fmax(0.0f, *input_noise_scale - 0.1f); // Decrease input noise
+    *input_noise_scale =
+        fmax(0.0f, *input_noise_scale - 0.1f); // Decrease input noise
   }
 
   // Adjust weight noise scaling based on error rate
   if (error_rate > 0.5) {
-    printf("Error rate is high (%.2f). Increasing weight noise for exploration.\n", error_rate);
-    *weight_noise_scale = fmin(1.0f, *weight_noise_scale + 0.1f); // Increase weight noise
+    printf(
+        "Error rate is high (%.2f). Increasing weight noise for exploration.\n",
+        error_rate);
+    *weight_noise_scale =
+        fmin(1.0f, *weight_noise_scale + 0.1f); // Increase weight noise
   } else if (error_rate < 0.2) {
     printf("Error rate is low (%.2f). Decreasing weight noise.\n", error_rate);
-    *weight_noise_scale = fmax(0.0f, *weight_noise_scale - 0.1f); // Decrease weight noise
+    *weight_noise_scale =
+        fmax(0.0f, *weight_noise_scale - 0.1f); // Decrease weight noise
   }
 
   // Memory management
@@ -6531,7 +6550,7 @@ int main() {
                           length:sizeof(input_tensor)
                          options:MTLResourceStorageModeShared];
   float learning_rate = 0.01f;
-  
+
   id<MTLBuffer> learningRateBuffer =
       [device newBufferWithBytes:&learning_rate
                           length:sizeof(float)
@@ -6611,15 +6630,15 @@ int main() {
   initializeKnowledgeMetrics(knowledge_filter);
   MetaLearningState *meta_learning_state = initializeMetaLearningState(4);
   addSymbol(0, "What is the current task?");
-    addSymbol(1, "What is the current error rate?");
-    addSymbol(2, "What is the current learning rate?");
-    addSymbol(3, "What is the current memory usage?");
+  addSymbol(1, "What is the current error rate?");
+  addSymbol(2, "What is the current learning rate?");
+  addSymbol(3, "What is the current memory usage?");
 
-    // Example questions
-    addQuestion(0, (int[]){0}, 1); // What is the current task?
-    addQuestion(1, (int[]){1}, 1); // What is the current error rate?
-    addQuestion(2, (int[]){2}, 1); // What is the current learning rate?
-    addQuestion(3, (int[]){3}, 1); // What is the current memory usage?
+  // Example questions
+  addQuestion(0, (int[]){0}, 1); // What is the current task?
+  addQuestion(1, (int[]){1}, 1); // What is the current error rate?
+  addQuestion(2, (int[]){2}, 1); // What is the current learning rate?
+  addQuestion(3, (int[]){3}, 1); // What is the current memory usage?
   addGoal(goalSystem, "Minimize prediction error", 1.0f);
   addGoal(goalSystem, "Develop stable representations", 0.8f);
   addGoal(goalSystem, "Maximize information gain", 0.7f);
@@ -7358,13 +7377,19 @@ int main() {
     // Use optimized parameters
     learning_rate = opt_state.optimal_learning_rate;
     if (step % 50 == 0) {
-        askQuestion(0, neurons, input_tensor, memorySystem, &learning_rate); // What is the current task?
-        askQuestion(1, neurons, input_tensor, memorySystem, &learning_rate); // What is the current error rate?
-        askQuestion(2, neurons, input_tensor, memorySystem, &learning_rate); // What is the current learning rate?
-        askQuestion(3, neurons, input_tensor, memorySystem, &learning_rate); // What is the current memory usage?
+      askQuestion(0, neurons, input_tensor, memorySystem,
+                  &learning_rate); // What is the current task?
+      askQuestion(1, neurons, input_tensor, memorySystem,
+                  &learning_rate); // What is the current error rate?
+      askQuestion(2, neurons, input_tensor, memorySystem,
+                  &learning_rate); // What is the current learning rate?
+      askQuestion(3, neurons, input_tensor, memorySystem,
+                  &learning_rate); // What is the current memory usage?
     }
     if (step % 50 == 0) {
-        adjustBehaviorBasedOnAnswers(neurons, input_tensor, memorySystem, &learning_rate, &params.input_noise_scale, &params.weight_noise_scale);
+      adjustBehaviorBasedOnAnswers(neurons, input_tensor, memorySystem,
+                                   &learning_rate, &params.input_noise_scale,
+                                   &params.weight_noise_scale);
     }
     updateNeuronsWithPredictiveCoding(neurons, input_tensor, max_neurons,
                                       learning_rate);
