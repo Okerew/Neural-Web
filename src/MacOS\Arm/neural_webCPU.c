@@ -4626,7 +4626,7 @@ float estimateTaskDifficulty(TaskPrompt current_prompt, float error_rate) {
 float addRandomNoise(float value, float noise_level) {
   // Generate random noise within the range [-noise_level, noise_level]
   float noise =
-      ((float)arc4random() / UINT32_MAX) * 2.0f * noise_level - noise_level;
+      ((float)rand() / UINT32_MAX) * 2.0f * noise_level - noise_level;
   return value + noise;
 }
 
@@ -6712,6 +6712,16 @@ int main() {
   MetacognitionMetrics *metacognition = initializeMetacognitionMetrics();
   initializeKnowledgeMetrics(knowledge_filter);
   MetaLearningState *meta_learning_state = initializeMetaLearningState(4);
+  addSymbol(0, "What is the current task?");
+  addSymbol(1, "What is the current error rate?");
+  addSymbol(2, "What is the current learning rate?");
+  addSymbol(3, "What is the current memory usage?");
+
+  // Example questions
+  addQuestion(0, (int[]){0}, 1); // What is the current task?
+  addQuestion(1, (int[]){1}, 1); // What is the current error rate?
+  addQuestion(2, (int[]){2}, 1); // What is the current learning rate?
+  addQuestion(3, (int[]){3}, 1); // What is the current memory usage?
 
   addGoal(goalSystem, "Minimize prediction error", 1.0f);
   addGoal(goalSystem, "Develop stable representations", 0.8f);
