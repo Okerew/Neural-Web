@@ -3,7 +3,6 @@
 #include <immintrin.h>
 #include <json-c/json.h>
 #include <math.h>
-#include <simd/simd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1889,28 +1888,6 @@ void decayMemorySystem(MemorySystem *system) {
 
   // Remove decayed memories
   removeDecayedMemories(system);
-}
-
-// Function to apply element-wise tanh using SIMD
-simd_float4 simd_tanh(simd_float4 input) {
-  simd_float4 result;
-  for (int i = 0; i < 4; i++) {
-    result[i] = tanhf(input[i]);
-  }
-  return result;
-}
-
-simd_float4 simd_add(simd_float4 a, simd_float4 b) {
-  return a + b; // SIMD supports operator overloading for addition
-}
-
-// Helper function for element-wise multiplication of simd_float4
-simd_float4 simd_mul(simd_float4 a, simd_float4 b) {
-  simd_float4 result;
-  for (int i = 0; i < 4; i++) {
-    result[i] = a[i] * b[i];
-  }
-  return result;
 }
 
 __m128 _mm_tanh_ps(__m128 x) {
