@@ -88,6 +88,22 @@ For cuda version
 nvcc -o neural_web neural_web.cu -I/usr/include -ljson-c      
 ```
 
+### Windows
+
+
+For cuda version
+
+```sh
+nvcc -o neural_web.exe neural_webWINDOWS.cu -I/path/to/json/c -ljson-c      
+```
+
+For cpu 86/64 unix version
+
+```sh
+clang -o neural_web.exe neural_webWINDOWSoCPU.c  -I/path/to/json/c -ljson-c -lm
+```
+
+
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
 
 1. Note: the performance of other cpu versions than metal and cuda might be off as the gpu is far more efficient than cpu
@@ -910,3 +926,5 @@ To modify number of neurons change MAX_NEURONS
 Only for unix and windows type systems
 
 Remember to use the security feature it shouldn't be needed on cpu versions though.
+
+If you can just use the unix version, the windows version is way to big of a headache to use by using wsl.
