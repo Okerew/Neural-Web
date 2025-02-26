@@ -102,7 +102,7 @@ nvcc -o neural_web.exe neural_webWINDOWS.cu -I/path/to/json/c -ljson-c
 For cpu 86/64 unix version
 
 ```sh
-clang -o neural_web.exe neural_webWINDOWSoCPU.c  -I/path/to/json/c -ljson-c -lm
+cl /Fe:neural_web.exe neural_webWINDOWSoCPU.c /I"path\to\json\c" /link json-c.lib
 ```
 
 
