@@ -927,6 +927,8 @@ To modify number of neurons change MAX_NEURONS
 
 Only for unix and windows type systems
 
+The metal version is better because it uses better algorithms so the text and the model makes more sense.
+
 Remember to use the security feature it shouldn't be needed on cpu versions though.
 
 If you can just use the unix version, the windows version is way to big of a headache to use by using wsl.
