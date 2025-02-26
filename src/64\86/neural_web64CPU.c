@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/resource.h>
 
 #define MAX_NEURONS 8
 #define MAX_CONNECTIONS 2
