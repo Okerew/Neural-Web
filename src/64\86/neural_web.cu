@@ -7344,13 +7344,13 @@ void updateContextAnswer(GlobalContextManager *contextManager,
   if (!found) {
     if (currentNode->num_children < currentNode->max_children) {
       // Create new node
-      ContextNode *newNode = malloc(sizeof(ContextNode));
+      ContextNode *newNode = (ContextNode *)malloc(sizeof(ContextNode));
       newNode->name = strdup(contextName);
       newNode->importance = 0.7f; // QA interactions are important
 
       // Initialize state vector
       newNode->vector_size = contextManager->vector_size;
-      newNode->state_vector = malloc(sizeof(float) * newNode->vector_size);
+      newNode->state_vector = (float *)malloc(sizeof(float) * newNode->vector_size);
       for (uint32_t i = 0; i < newNode->vector_size; i++) {
         newNode->state_vector[i] = 0.0f;
       }
@@ -7370,9 +7370,7 @@ void updateContextAnswer(GlobalContextManager *contextManager,
       newNode->last_updated = time(NULL);
 
       // Add to parent's children
-      currentNode->children =
-          realloc(currentNode->children,
-                  sizeof(ContextNode *) * (currentNode->num_children + 1));
+      currentNode->children = (ContextNode **)realloc(currentNode->children, sizeof(ContextNode *) * (currentNode->num_children + 1));
       currentNode->children[currentNode->num_children] = newNode;
       currentNode->num_children++;
 
@@ -7536,10 +7534,10 @@ void addQuestionAndAnswerToMemory(
     // Add to focused attention
     if (workingMemory->focus.size < workingMemory->focus.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      enhanced.features = (float *)malloc(128 * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      enhanced.context_vector = (float *)malloc(256 * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->focus.entries[workingMemory->focus.size++] = enhanced;
@@ -7549,10 +7547,10 @@ void addQuestionAndAnswerToMemory(
     // Add to active memory
     if (workingMemory->active.size < workingMemory->active.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      enhanced.features = (float *)malloc(128 * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      enhanced.context_vector = (float *)malloc(256 * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->active.entries[workingMemory->active.size++] = enhanced;
