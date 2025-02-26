@@ -60,7 +60,7 @@ change updatedNeurons to neurons if using any other version than metal not only 
 
 To compile the code, run the following command in the root directory of the project:
 
-### arch64 MacOS
+### arch64
 
 For metal version
 
