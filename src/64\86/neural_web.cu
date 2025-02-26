@@ -7235,21 +7235,394 @@ void addQuestion(int question_id, int symbol_ids[], int num_symbols)
   }
 }
 
-void askQuestion(int question_id, Neuron *neurons, float *input_tensor,
-                 MemorySystem *memorySystem, float *learning_rate)
-{
-  if (question_id < 0 || question_id >= num_questions)
-  {
+void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
+                            const char *answer, int timestamp) {
+  // Only proceed if we have space or can consolidate
+  if (memorySystem->size >= memorySystem->capacity) {
+    // Try to consolidate first
+    consolidateMemory(memorySystem);
+
+    // If still full, we need to overwrite oldest memory
+    if (memorySystem->size >= memorySystem->capacity) {
+      printf("Warning: Memory system full. Overwriting oldest entry.\n");
+    }
+  }
+
+  // Create a new memory entry
+  MemoryEntry newEntry;
+
+  // Convert question and answer into a memory vector representation
+  // This is a simplified implementation - in a real system this would involve
+  // semantic encoding of the text
+  for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+    // Simple hash-based encoding as placeholder
+    newEntry.vector[i] = (float)((question[i % strlen(question)] * 31 +
+                                  answer[i % strlen(answer)] * 17) %
+                                 100) /
+                         100.0f;
+  }
+
+  // Set importance based on question complexity and answer quality
+  newEntry.importance =
+      0.5f + (strlen(question) * 0.01f) + (strlen(answer) * 0.005f);
+
+  // Set timestamp
+  newEntry.timestamp = timestamp;
+
+  // Add to memory system
+  if (memorySystem->size < memorySystem->capacity) {
+    memorySystem->entries[memorySystem->size] = newEntry;
+    memorySystem->size++;
+  } else {
+    // Find least important memory to replace
+    int replace_idx = 0;
+    float min_importance = memorySystem->entries[0].importance;
+
+    for (int i = 1; i < memorySystem->size; i++) {
+      if (memorySystem->entries[i].importance < min_importance) {
+        min_importance = memorySystem->entries[i].importance;
+        replace_idx = i;
+      }
+    }
+
+    // Replace least important memory
+    memorySystem->entries[replace_idx] = newEntry;
+  }
+
+  // Determine if this memory should also be in short-term memory
+  if (newEntry.importance >
+      memorySystem->hierarchy.short_term.importance_threshold) {
+    // Check if we have space in short-term memory
+    if (memorySystem->hierarchy.short_term.size <
+        memorySystem->hierarchy.short_term.capacity) {
+      memorySystem->hierarchy.short_term
+          .entries[memorySystem->hierarchy.short_term.size] = newEntry;
+      memorySystem->hierarchy.short_term.size++;
+    } else {
+      // Find least important short-term memory to replace
+      int st_replace_idx = 0;
+      float st_min_importance =
+          memorySystem->hierarchy.short_term.entries[0].importance;
+
+      for (int i = 1; i < memorySystem->hierarchy.short_term.size; i++) {
+        if (memorySystem->hierarchy.short_term.entries[i].importance <
+            st_min_importance) {
+          st_min_importance =
+              memorySystem->hierarchy.short_term.entries[i].importance;
+          st_replace_idx = i;
+        }
+      }
+
+      // Replace if new memory is more important
+      if (newEntry.importance > st_min_importance) {
+        memorySystem->hierarchy.short_term.entries[st_replace_idx] = newEntry;
+      }
+    }
+  }
+}
+
+void updateContextAnswer(GlobalContextManager *contextManager,
+                         const char *question, const char *answer) {
+  // Find or create a context node for this type of interaction
+  ContextNode *currentNode = contextManager->root;
+
+  // Simple context identification - in a real system this would involve
+  // NLP-based topic identification
+  char contextName[64] = "QA_Interaction";
+
+  // Check if we already have this context
+  bool found = false;
+  for (uint32_t i = 0; i < currentNode->num_children; i++) {
+    if (strcmp(currentNode->children[i]->name, contextName) == 0) {
+      currentNode = currentNode->children[i];
+      found = true;
+      break;
+    }
+  }
+
+  // If not found, create a new context node
+  if (!found) {
+    if (currentNode->num_children < currentNode->max_children) {
+      // Create new node
+      ContextNode *newNode = malloc(sizeof(ContextNode));
+      newNode->name = strdup(contextName);
+      newNode->importance = 0.7f; // QA interactions are important
+
+      // Initialize state vector
+      newNode->vector_size = contextManager->vector_size;
+      newNode->state_vector = malloc(sizeof(float) * newNode->vector_size);
+      for (uint32_t i = 0; i < newNode->vector_size; i++) {
+        newNode->state_vector[i] = 0.0f;
+      }
+
+      // Initialize children
+      newNode->children = NULL;
+      newNode->num_children = 0;
+      newNode->max_children = contextManager->max_children_per_node;
+
+      // Set parent
+      newNode->parent = currentNode;
+
+      // Set temporal relevance to high (it's happening now)
+      newNode->temporal_relevance = 1.0f;
+
+      // Set timestamp
+      newNode->last_updated = time(NULL);
+
+      // Add to parent's children
+      currentNode->children =
+          realloc(currentNode->children,
+                  sizeof(ContextNode *) * (currentNode->num_children + 1));
+      currentNode->children[currentNode->num_children] = newNode;
+      currentNode->num_children++;
+
+      // Update total nodes count
+      contextManager->total_nodes++;
+
+      // Set current node to new node
+      currentNode = newNode;
+    }
+  }
+
+  // Update context state vector based on question and answer
+  if (currentNode != contextManager->root) {
+    // Simple update based on question and answer content
+    for (uint32_t i = 0; i < currentNode->vector_size; i++) {
+      // Mix in new information (very simplified)
+      float questionInfluence =
+          (i < strlen(question)) ? (float)question[i] / 255.0f : 0.0f;
+      float answerInfluence =
+          (i < strlen(answer)) ? (float)answer[i] / 255.0f : 0.0f;
+
+      // Update state with decay
+      currentNode->state_vector[i] =
+          (currentNode->state_vector[i] * (1.0f - contextManager->decay_rate)) +
+          ((questionInfluence + answerInfluence) * 0.5f *
+           contextManager->decay_rate);
+    }
+
+    // Update last accessed time
+    currentNode->last_updated = time(NULL);
+
+    // Update temporal relevance to maximum
+    currentNode->temporal_relevance = 1.0f;
+
+    // Update global context
+    for (uint32_t i = 0; i < contextManager->vector_size; i++) {
+      contextManager->global_context_vector[i] =
+          (contextManager->global_context_vector[i] *
+           (1.0f - contextManager->decay_rate)) +
+          (currentNode->state_vector[i] * currentNode->importance *
+           contextManager->decay_rate);
+    }
+  }
+}
+
+void computeMemoryVectorFromText(float *memory_vector, const char *question,
+                                 const char *answer) {
+  // Initialize the memory vector to zero
+  memset(memory_vector, 0, MEMORY_VECTOR_SIZE * sizeof(float));
+
+  // Combine the question and answer into a single text
+  char combined_text[2048];
+  snprintf(combined_text, sizeof(combined_text), "%s %s", question, answer);
+
+  // Tokenize the text (simple space-based tokenization)
+  char *tokens[256];
+  int num_tokens = 0;
+  char *token = strtok(combined_text, " ");
+  while (token != NULL && num_tokens < 256) {
+    tokens[num_tokens++] = token;
+    token = strtok(NULL, " ");
+  }
+
+  // Create a simple bag-of-words representation
+  // This is a placeholder for a more sophisticated feature extraction method
+  for (int i = 0; i < num_tokens; i++) {
+    // Hash the token to an index in the memory vector
+    unsigned int hash = 0;
+    for (int j = 0; tokens[i][j] != '\0'; j++) {
+      hash = (hash * 31) + tokens[i][j];
+    }
+    int index = hash % MEMORY_VECTOR_SIZE;
+
+    // Increment the value at the hashed index
+    memory_vector[index] += 1.0f;
+  }
+
+  // Normalize the memory vector (optional)
+  float norm = 0.0f;
+  for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+    norm += memory_vector[i] * memory_vector[i];
+  }
+  norm = sqrtf(norm);
+  if (norm > 0.0f) {
+    for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+      memory_vector[i] /= norm;
+    }
+  }
+}
+
+float computeImportanceFromText(const char *question, const char *answer) {
+  float importance = 0.0f;
+
+  int question_length = strlen(question);
+  int answer_length = strlen(answer);
+  importance +=
+      0.1f * (question_length + answer_length); 
+
+  const char *keywords[] = {"error", "goal", "priority", "critical",
+                            "important"};
+  int num_keywords = sizeof(keywords) / sizeof(keywords[0]);
+  for (int i = 0; i < num_keywords; i++) {
+    if (strstr(question, keywords[i])) {
+      importance += 5.0f; // Increase importance if keyword is found
+    }
+    if (strstr(answer, keywords[i])) {
+      importance += 5.0f;
+    }
+  }
+
+  if (strstr(answer, "Pattern Recognition")) {
+    importance +=
+        8.0f; // Increase importance for pattern recognition-related content
+  }
+  if (strstr(answer, "Numerical Computation")) {
+    importance +=
+        7.5f; // Increase importance for numerical computation-related content
+  }
+  if (strstr(answer, "Sequence Learning")) {
+    importance += 9.0f; // High importance for sequence learning
+  }
+  if (strstr(answer, "Classification")) {
+    importance += 7.0f; // Moderate importance for classification
+  }
+  if (strstr(answer, "Prediction")) {
+    importance += 10.0f; // High importance for prediction-related content
+  }
+  if (strstr(answer, "Optimization")) {
+    importance += 8.5f; // Important for optimization problems
+  }
+  if (strstr(answer, "Error Correction")) {
+    importance += 9.5f; // Important for error correction-related content
+  }
+  if (strstr(answer, "Memory Consolidation")) {
+    importance += 6.0f; // Memory-related topics have moderate importance
+  }
+
+  // Normalize importance to a reasonable range (e.g., 0 to 100)
+  importance = fminf(importance, 100.0f);
+  importance = fmaxf(importance, 0.0f);
+
+  return importance;
+}
+
+void addQuestionAndAnswerToMemory(
+    MemorySystem *memorySystem, WorkingMemorySystem *workingMemory,
+    const char *question, const char *answer,
+    float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE]) {
+  // Create a memory entry for the question and answer
+  MemoryEntry entry;
+  entry.timestamp =
+      getCurrentTime(); // Assuming a function to get the current timestamp
+  entry.importance = computeImportanceFromText(
+      question, answer); // Assuming a function to compute importance from text
+
+  // Convert the question and answer into a memory vector
+  computeMemoryVectorFromText(entry.vector, question, answer);
+
+  // Handle Working Memory System first
+  if (entry.importance > workingMemory->focus.attention_threshold) {
+    // Add to focused attention
+    if (workingMemory->focus.size < workingMemory->focus.capacity) {
+      WorkingMemoryEntry enhanced;
+      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      extractSemanticFeatures(entry.vector, enhanced.features,
+                              feature_projection_matrix);
+      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      memcpy(enhanced.context_vector, workingMemory->global_context,
+             CONTEXT_VECTOR_SIZE * sizeof(float));
+      workingMemory->focus.entries[workingMemory->focus.size++] = enhanced;
+      updateSemanticClusters(workingMemory, &enhanced);
+    }
+  } else {
+    // Add to active memory
+    if (workingMemory->active.size < workingMemory->active.capacity) {
+      WorkingMemoryEntry enhanced;
+      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      extractSemanticFeatures(entry.vector, enhanced.features,
+                              feature_projection_matrix);
+      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      memcpy(enhanced.context_vector, workingMemory->global_context,
+             CONTEXT_VECTOR_SIZE * sizeof(float));
+      workingMemory->active.entries[workingMemory->active.size++] = enhanced;
+      updateSemanticClusters(workingMemory, &enhanced);
+    }
+  }
+
+  // Update global context
+  updateContext(workingMemory);
+
+  // Then handle original hierarchical storage
+  if (entry.importance >=
+      memorySystem->hierarchy.long_term.importance_threshold) {
+    if (memorySystem->hierarchy.long_term.size <
+        memorySystem->hierarchy.long_term.capacity) {
+      memorySystem->hierarchy.long_term
+          .entries[memorySystem->hierarchy.long_term.size++] = entry;
+    } else {
+      int least_important_idx =
+          findLeastImportantMemory(memorySystem->hierarchy.long_term.entries,
+                                   memorySystem->hierarchy.long_term.size);
+      memorySystem->hierarchy.long_term.entries[least_important_idx] = entry;
+    }
+  } else if (entry.importance >=
+             memorySystem->hierarchy.medium_term.importance_threshold) {
+    if (memorySystem->hierarchy.medium_term.size <
+        memorySystem->hierarchy.medium_term.capacity) {
+      memorySystem->hierarchy.medium_term
+          .entries[memorySystem->hierarchy.medium_term.size++] = entry;
+    } else {
+      consolidateToHigherLevel(memorySystem);
+    }
+  } else {
+    if (memorySystem->hierarchy.short_term.size <
+        memorySystem->hierarchy.short_term.capacity) {
+      memorySystem->hierarchy.short_term
+          .entries[memorySystem->hierarchy.short_term.size++] = entry;
+    } else {
+      consolidateToMediumTerm(memorySystem);
+    }
+  }
+
+  // Update original structure for compatibility
+  memorySystem->entries[memorySystem->head] = entry;
+  memorySystem->head = (memorySystem->head + 1) % memorySystem->capacity;
+  if (memorySystem->size < memorySystem->capacity) {
+    memorySystem->size++;
+  }
+}
+
+void askQuestion(
+    int question_id, Neuron *neurons, float *input_tensor,
+    MemorySystem *memorySystem, float *learning_rate,
+    NetworkStateSnapshot *stateSnapshot, GlobalContextManager *contextManager,
+    IntrinsicMotivation *motivation, GoalSystem *goalSystem,
+    WorkingMemorySystem *workingMemory, SelfIdentitySystem *identitySystem,
+    MetacognitionMetrics *metacognition, KnowledgeFilter *filter,
+    float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE]) {
+  if (question_id < 0 || question_id >= num_questions) {
     printf("Invalid question ID\n");
     return;
   }
 
   InternalQuestion *question = &question_table[question_id];
-  for (int i = 0; i < question->num_symbols; i++)
-  {
+  char fullQuestionStr[1024] = "";
+  char fullAnswerStr[1024] = "";
+
+  for (int i = 0; i < question->num_symbols; i++) {
     int symbol_id = question->symbol_ids[i];
-    if (symbol_id < 0 || symbol_id >= num_symbols)
-    {
+    if (symbol_id < 0 || symbol_id >= num_symbols) {
       printf("Invalid symbol ID\n");
       continue;
     }
@@ -7257,43 +7630,171 @@ void askQuestion(int question_id, Neuron *neurons, float *input_tensor,
     InternalSymbol *symbol = &symbol_table[symbol_id];
     printf("Question: %s\n", symbol->description);
 
-    // Retrieve answer based on the symbol
-    if (symbol_id == 0)
-    {
-      printf("Answer: Current task is to minimize prediction error.\n");
-    }
-    else if (symbol_id == 1)
-    {
+    // Accumulate the question text
+    strcat(fullQuestionStr, symbol->description);
+    strcat(fullQuestionStr, " ");
+
+    char answerBuffer[256] = "";
+
+    if (symbol_id == 0) {
+      if (filter->num_categories > 0) {
+        // Find the last accessed category
+        KnowledgeCategory *last_category = &filter->categories[0];
+        for (uint32_t i = 1; i < filter->num_categories; i++) {
+          if (filter->categories[i].last_accessed >
+              last_category->last_accessed) {
+            last_category = &filter->categories[i];
+          }
+        }
+
+        // Store the last accessed category name in answerBuffer
+        snprintf(answerBuffer, sizeof(last_category->name), "%s",
+                 last_category->name);
+      } 
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 1) {
       float error_rate = computeErrorRate(neurons, input_tensor);
-      printf("Answer: Current error rate is %.2f\n", error_rate);
+      sprintf(answerBuffer, "Current error rate is %.2f", error_rate);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 2) {
+      sprintf(answerBuffer, "Current learning rate is %.4f", *learning_rate);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 3) {
+      sprintf(answerBuffer, "Current memory usage is %u/%u", memorySystem->size,
+              memorySystem->capacity);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 4) {
+      sprintf(answerBuffer, "Short-term memory has %u/%u entries",
+              memorySystem->hierarchy.short_term.size,
+              memorySystem->hierarchy.short_term.capacity);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 5) {
+      sprintf(answerBuffer, "Long-term memory has %u/%u entries",
+              memorySystem->hierarchy.long_term.size,
+              memorySystem->hierarchy.long_term.capacity);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 6) {
+      sprintf(answerBuffer, "Current network step is %d", stateSnapshot->step);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 7) {
+      sprintf(answerBuffer,
+              "Global context has %u total nodes with a decay rate of %.4f",
+              contextManager->total_nodes, contextManager->decay_rate);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 8) {
+      float avg_prediction_error = 0.0f;
+      for (int j = 0; j < MAX_NEURONS; j++) {
+        avg_prediction_error += predictive_params[j].prediction_error;
+      }
+      avg_prediction_error /= MAX_NEURONS;
+      sprintf(answerBuffer, "Average prediction error across neurons is %.4f",
+              avg_prediction_error);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 9) {
+      sprintf(answerBuffer,
+              "Working memory focus has %u/%u entries with attention threshold "
+              "%.4f",
+              workingMemory->focus.size, workingMemory->focus.capacity,
+              workingMemory->focus.attention_threshold);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 10) {
+      sprintf(answerBuffer,
+              "Current curiosity drive is %.2f with exploration rate %.2f",
+              motivation->curiosity_drive, motivation->exploration_rate);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 11) {
+      int active_goals = 0;
+      for (int j = 0; j < goalSystem->num_goals; j++) {
+        if (!goalSystem->goals[j].achieved) {
+          active_goals++;
+        }
+      }
+      sprintf(answerBuffer, "System has %d active goals out of %d total goals",
+              active_goals, goalSystem->num_goals);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 12) {
+      float max_priority = -1.0f;
+      int max_idx = -1;
+      for (int j = 0; j < goalSystem->num_goals; j++) {
+        if (goalSystem->goals[j].priority > max_priority &&
+            !goalSystem->goals[j].achieved) {
+          max_priority = goalSystem->goals[j].priority;
+          max_idx = j;
+        }
+      }
+
+      if (max_idx >= 0) {
+        sprintf(answerBuffer,
+                "Highest priority goal is '%s' with progress %.1f%%",
+                goalSystem->goals[max_idx].description,
+                goalSystem->goals[max_idx].progress * 100.0f);
+      } else {
+        sprintf(answerBuffer, "No active goals found");
+      }
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 13) {
+      sprintf(
+          answerBuffer,
+          "Self-identity consistency score is %.2f with confidence level %.2f",
+          identitySystem->consistency_score, identitySystem->confidence_level);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 14) {
+      sprintf(answerBuffer,
+              "Current cognitive load is %.2f with confidence level %.2f",
+              metacognition->cognitive_load, metacognition->confidence_level);
+      printf("Answer: %s\n", answerBuffer);
+    } else if (symbol_id == 15) {
+      sprintf(answerBuffer,
+              "Error awareness level is %.2f with context relevance %.2f",
+              metacognition->error_awareness, metacognition->context_relevance);
+      printf("Answer: %s\n", answerBuffer);
     }
-    else if (symbol_id == 2)
-    {
-      printf("Answer: Current learning rate is %.4f\n", *learning_rate);
+
+    // System pattern matching capabilities
+    else if (symbol_id == 16) {
+      // This would need to be implemented
+      sprintf(
+          answerBuffer,
+          "Pattern matching capability is active with temporal decay of %.2f",
+          0.95f);
+      printf("Answer: %s\n", answerBuffer);
     }
-    else if (symbol_id == 3)
-    {
-      printf("Answer: Current memory usage is %u/%u\n", memorySystem->size,
-             memorySystem->capacity);
+
+    // Unknown symbol handler
+    else {
+      sprintf(answerBuffer, "Information for this symbol is not available.");
+      printf("Answer: %s\n", answerBuffer);
     }
+
+    // Accumulate the answer text
+    strcat(fullAnswerStr, answerBuffer);
+    strcat(fullAnswerStr, " ");
   }
+
+  storeQuestionAndAnswer(memorySystem, fullQuestionStr, fullAnswerStr,
+                         stateSnapshot->step);
+
+  addQuestionAndAnswerToMemory(memorySystem, workingMemory, fullQuestionStr, fullAnswerStr,
+              feature_projection_matrix);
+
+  // Update context based on this interaction
+  updateContextAnswer(contextManager, fullQuestionStr, fullAnswerStr);
+
+  printf("Stored Q&A in memory: %s -> %s\n", fullQuestionStr, fullAnswerStr);
 }
 
-void expandMemoryCapacity(MemorySystem *memorySystem)
-{
+void expandMemoryCapacity(MemorySystem *memorySystem) {
   unsigned int new_capacity =
       memorySystem->capacity * 1.5; // Increase capacity by 50%
   MemoryEntry *new_entries =
       (MemoryEntry *)malloc(new_capacity * sizeof(MemoryEntry));
-  if (!new_entries)
-  {
+  if (!new_entries) {
     fprintf(stderr, "Failed to expand memory capacity.\n");
     return;
   }
 
   // Copy existing entries to the new memory
-  for (int i = 0; i < memorySystem->size; i++)
-  {
+  for (int i = 0; i < memorySystem->size; i++) {
     new_entries[i] =
         memorySystem
             ->entries[(memorySystem->head + i) % memorySystem->capacity];
@@ -7306,63 +7807,265 @@ void expandMemoryCapacity(MemorySystem *memorySystem)
   memorySystem->head = 0; // Reset head to the beginning
 }
 
-void adjustBehaviorBasedOnAnswers(Neuron *neurons, float *input_tensor,
-                                  MemorySystem *memorySystem,
-                                  float *learning_rate,
-                                  float *input_noise_scale,
-                                  float *weight_noise_scale)
-{
-  float error_rate = computeErrorRate(neurons, input_tensor);
-  if (error_rate > 0.5)
-  {
-    printf("Error rate is high. Increasing learning rate.\n");
-    *learning_rate *= 1.1f;
+float calculatePerformanceStability(float *performance_history,
+                                    int history_length) {
+  if (history_length <= 1) {
+    return 1.0f; // Not enough data to determine stability
   }
 
-  // Adjust input noise scaling based on error rate
-  if (error_rate > 0.5)
-  {
+  // Calculate mean performance
+  float mean = 0.0f;
+  for (int i = 0; i < history_length; i++) {
+    mean += performance_history[i];
+  }
+  mean /= history_length;
+
+  // Calculate standard deviation
+  float variance = 0.0f;
+  for (int i = 0; i < history_length; i++) {
+    float diff = performance_history[i] - mean;
+    variance += diff * diff;
+  }
+  variance /= history_length;
+  float std_dev = sqrtf(variance);
+
+  // Calculate coefficient of variation (normalized standard deviation)
+  float cv = (mean != 0.0f) ? std_dev / mean : std_dev;
+
+  // Calculate trend stability (how consistent the direction of change is)
+  int direction_changes = 0;
+  int prev_direction = 0; // 0 = initial, 1 = up, -1 = down
+
+  for (int i = 1; i < history_length; i++) {
+    int current_direction = 0;
+    if (performance_history[i] > performance_history[i - 1]) {
+      current_direction = 1;
+    } else if (performance_history[i] < performance_history[i - 1]) {
+      current_direction = -1;
+    }
+
+    // If there's a change in direction, count it
+    if (prev_direction != 0 && current_direction != 0 &&
+        current_direction != prev_direction) {
+      direction_changes++;
+    }
+
+    // Update previous direction if we had a clear direction
+    if (current_direction != 0) {
+      prev_direction = current_direction;
+    }
+  }
+
+  // Normalize direction changes (0 = many changes, 1 = few changes)
+  float max_possible_changes = history_length - 2;
+  float direction_stability =
+      (max_possible_changes > 0)
+          ? 1.0f - (direction_changes / max_possible_changes)
+          : 1.0f;
+
+  // Calculate recent stability (more weight to recent performance)
+  float recent_stability = 0.0f;
+  int recent_window = history_length / 3;
+  if (recent_window > 1) {
+    float recent_variance = 0.0f;
+    float recent_mean = 0.0f;
+
+    // Calculate mean of recent values
+    for (int i = history_length - recent_window; i < history_length; i++) {
+      recent_mean += performance_history[i];
+    }
+    recent_mean /= recent_window;
+
+    // Calculate variance of recent values
+    for (int i = history_length - recent_window; i < history_length; i++) {
+      float diff = performance_history[i] - recent_mean;
+      recent_variance += diff * diff;
+    }
+    recent_variance /= recent_window;
+
+    float recent_std_dev = sqrtf(recent_variance);
+    float recent_cv =
+        (recent_mean != 0.0f) ? recent_std_dev / recent_mean : recent_std_dev;
+
+    // Normalize recent stability (lower cv = higher stability)
+    recent_stability = (recent_cv <= 0.5f) ? 1.0f - (recent_cv / 0.5f) : 0.0f;
+  } else {
+    recent_stability = 1.0f; // Not enough data for recent analysis
+  }
+
+  // Combine metrics to get overall stability score
+  // Normalize cv (lower cv = higher stability)
+  float cv_stability = (cv <= 0.5f) ? 1.0f - (cv / 0.5f) : 0.0f;
+
+  // Weighted combination of different stability metrics
+  float overall_stability =
+      (0.4f * cv_stability) +        // Overall variation
+      (0.3f * direction_stability) + // Consistency of direction
+      (0.3f * recent_stability);     // Recent stability
+
+  // Ensure result is in valid range
+  overall_stability = fmaxf(0.0f, fminf(1.0f, overall_stability));
+
+  return overall_stability;
+}
+
+void adjustBehaviorBasedOnAnswers(
+    Neuron *neurons, float *input_tensor, MemorySystem *memorySystem,
+    float *learning_rate, float *input_noise_scale, float *weight_noise_scale,
+    NetworkStateSnapshot *stateSnapshot, GlobalContextManager *contextManager,
+    IntrinsicMotivation *motivation, GoalSystem *goalSystem,
+    WorkingMemorySystem *workingMemory, SelfIdentitySystem *identitySystem,
+    MetacognitionMetrics *metacognition, DynamicParameters *dynamicParams,
+    MetaLearningState *metaLearning) {
+  float error_rate = computeErrorRate(neurons, input_tensor);
+  if (error_rate > 0.5) {
+    printf("Error rate is high. Increasing learning rate.\n");
+    *learning_rate *= 1.1f;
+
+    // Also adjust meta-learning parameters
+    metaLearning->learning_efficiency *= 0.9f;
+    printf("Decreased learning efficiency to %.2f due to high error rate.\n",
+           metaLearning->learning_efficiency);
+  } else if (error_rate < 0.2) {
+    // If error rate is good, adjust learning efficiency upward
+    metaLearning->learning_efficiency =
+        fmin(1.0f, metaLearning->learning_efficiency * 1.05f);
+    printf("Increased learning efficiency to %.2f due to low error rate.\n",
+           metaLearning->learning_efficiency);
+  }
+
+  if (error_rate > 0.5) {
     printf(
         "Error rate is high (%.2f). Increasing input noise for exploration.\n",
         error_rate);
     *input_noise_scale =
         fmin(1.0f, *input_noise_scale + 0.1f); // Increase input noise
-  }
-  else if (error_rate < 0.2)
-  {
+
+    // Also adjust exploration rate
+    motivation->exploration_rate =
+        fmin(1.0f, motivation->exploration_rate + 0.05f);
+    printf("Increased exploration rate to %.2f\n",
+           motivation->exploration_rate);
+  } else if (error_rate < 0.2) {
     printf("Error rate is low (%.2f). Decreasing input noise.\n", error_rate);
     *input_noise_scale =
         fmax(0.0f, *input_noise_scale - 0.1f); // Decrease input noise
+
+    // Reduce exploration, increase exploitation
+    motivation->exploration_rate =
+        fmax(0.1f, motivation->exploration_rate - 0.05f);
+    printf("Decreased exploration rate to %.2f\n",
+           motivation->exploration_rate);
   }
 
-  // Adjust weight noise scaling based on error rate
-  if (error_rate > 0.5)
-  {
+  if (error_rate > 0.5) {
     printf(
         "Error rate is high (%.2f). Increasing weight noise for exploration.\n",
         error_rate);
     *weight_noise_scale =
         fmin(1.0f, *weight_noise_scale + 0.1f); // Increase weight noise
-  }
-  else if (error_rate < 0.2)
-  {
+
+    // Increase plasticity for adaptation
+    dynamicParams->plasticity = fmin(1.0f, dynamicParams->plasticity + 0.1f);
+    printf("Increased plasticity to %.2f for better adaptation\n",
+           dynamicParams->plasticity);
+  } else if (error_rate < 0.2) {
     printf("Error rate is low (%.2f). Decreasing weight noise.\n", error_rate);
     *weight_noise_scale =
         fmax(0.0f, *weight_noise_scale - 0.1f); // Decrease weight noise
+
+    // Decrease plasticity to stabilize good performance
+    dynamicParams->plasticity = fmax(0.1f, dynamicParams->plasticity - 0.05f);
+    printf("Decreased plasticity to %.2f to stabilize performance\n",
+           dynamicParams->plasticity);
   }
 
-  // Memory management
-  if (memorySystem->size > memorySystem->capacity * 0.8)
-  {
+  if (memorySystem->size > memorySystem->capacity * 0.8) {
     printf("Memory usage is high (%.2f%%). Consolidating memories.\n",
            (float)memorySystem->size / memorySystem->capacity * 100.0f);
     consolidateMemory(memorySystem); // Consolidate memories
-  }
-  else if (memorySystem->size < memorySystem->capacity * 0.2)
-  {
+
+    // Also adjust consolidation threshold
+    memorySystem->hierarchy.consolidation_threshold *= 0.9f;
+    printf("Lowered consolidation threshold to %.2f to encourage memory "
+           "transfer\n",
+           memorySystem->hierarchy.consolidation_threshold);
+  } else if (memorySystem->size < memorySystem->capacity * 0.2) {
     printf("Memory usage is low (%.2f%%). Expanding memory capacity.\n",
            (float)memorySystem->size / memorySystem->capacity * 100.0f);
     expandMemoryCapacity(memorySystem); // Expand memory capacity
+
+    // Reset consolidation threshold
+    memorySystem->hierarchy.consolidation_threshold = 0.5f;
+    printf("Reset consolidation threshold to %.2f\n",
+           memorySystem->hierarchy.consolidation_threshold);
+  }
+
+  if (metacognition->cognitive_load > 0.7f) {
+    workingMemory->focus.attention_threshold += 0.05f;
+    printf("Cognitive load is high (%.2f). Increased attention threshold to "
+           "%.2f\n",
+           metacognition->cognitive_load,
+           workingMemory->focus.attention_threshold);
+  } else if (metacognition->cognitive_load < 0.3f) {
+    workingMemory->focus.attention_threshold =
+        fmax(0.1f, workingMemory->focus.attention_threshold - 0.05f);
+    printf(
+        "Cognitive load is low (%.2f). Decreased attention threshold to %.2f\n",
+        metacognition->cognitive_load,
+        workingMemory->focus.attention_threshold);
+  }
+
+  if (metacognition->error_awareness > 0.6f) {
+    contextManager->decay_rate =
+        fmin(0.99f, contextManager->decay_rate + 0.05f);
+    printf("Error awareness is high (%.2f). Increasing context decay rate to "
+           "%.2f\n",
+           metacognition->error_awareness, contextManager->decay_rate);
+  } else if (metacognition->error_awareness < 0.3f) {
+    contextManager->decay_rate = fmax(0.2f, contextManager->decay_rate - 0.05f);
+    printf("Error awareness is low (%.2f). Decreasing context decay rate to "
+           "%.2f\n",
+           metacognition->error_awareness, contextManager->decay_rate);
+  }
+
+  if (error_rate < 0.2f && metacognition->confidence_level > 0.7f) {
+    // System is performing well, increase goal complexity
+    int highest_priority_idx = -1;
+    float highest_priority = -1.0f;
+
+    // Find highest priority incomplete goal
+    for (int i = 0; i < goalSystem->num_goals; i++) {
+      if (!goalSystem->goals[i].achieved &&
+          goalSystem->goals[i].priority > highest_priority) {
+        highest_priority = goalSystem->goals[i].priority;
+        highest_priority_idx = i;
+      }
+    }
+
+    if (highest_priority_idx >= 0) {
+      // Increase reward value for challenging goal
+      goalSystem->goals[highest_priority_idx].reward_value *= 1.1f;
+      printf("Increased reward value for goal '%s' to %.2f\n",
+             goalSystem->goals[highest_priority_idx].description,
+             goalSystem->goals[highest_priority_idx].reward_value);
+    }
+  }
+  float performance_stability = calculatePerformanceStability(
+      metacognition->performance_history, HISTORY_LENGTH);
+  if (performance_stability > 0.8f) {
+    // Stable performance, slow down identity adaptation
+    identitySystem->adaptation_rate *= 0.95f;
+    printf("Performance is stable (%.2f). Decreased identity adaptation rate "
+           "to %.4f\n",
+           performance_stability, identitySystem->adaptation_rate);
+  } else if (performance_stability < 0.3f) {
+    // Unstable performance, speed up identity adaptation
+    identitySystem->adaptation_rate =
+        fmin(0.2f, identitySystem->adaptation_rate * 1.1f);
+    printf("Performance is unstable (%.2f). Increased identity adaptation rate "
+           "to %.4f\n",
+           performance_stability, identitySystem->adaptation_rate);
   }
 }
 
@@ -8184,6 +8887,53 @@ int main()
 
     // Use optimized parameters
     learning_rate = opt_state.optimal_learning_rate;
+    int question_to_ask = 0;
+    if (performance_history[step].error_rate > loss) {
+      question_to_ask = 1;
+    }
+    if (learning_rate > learning_rate) {
+      question_to_ask = 2;
+    }
+
+    if (question_to_ask > 0) {
+      askQuestion(question_to_ask, neurons, input_tensor, memorySystem,
+                  &learning_rate, stateHistory, contextManager, motivation,
+                  goalSystem, working_memory, identity_system, metacognition, knowledge_filter,
+                  feature_projection_matrix);
+      adjustBehaviorBasedOnAnswers(
+          neurons, input_tensor, memorySystem, &learning_rate,
+          &params.input_noise_scale, &params.weight_noise_scale, stateHistory,
+          contextManager, motivation, goalSystem, working_memory,
+          identity_system, metacognition, &params, meta_learning_state);
+    }
+
+    if (step % 50 == 0) {
+      askQuestion(0, neurons, input_tensor, memorySystem, &learning_rate,
+                  stateHistory, contextManager, motivation, goalSystem,
+                  working_memory, identity_system, metacognition,knowledge_filter,
+                  feature_projection_matrix); // What is the current task?
+      askQuestion(1, neurons, input_tensor, memorySystem, &learning_rate,
+                  stateHistory, contextManager, motivation, goalSystem,
+                  working_memory, identity_system, metacognition, knowledge_filter,
+                  feature_projection_matrix); // What is the current error rate?
+      askQuestion(
+          2, neurons, input_tensor, memorySystem, &learning_rate, stateHistory,
+          contextManager, motivation, goalSystem, working_memory,
+          identity_system, metacognition, knowledge_filter,
+          feature_projection_matrix); // What is the current learning rate?
+      askQuestion(
+          3, neurons, input_tensor, memorySystem, &learning_rate, stateHistory,
+          contextManager, motivation, goalSystem, working_memory,
+          identity_system, metacognition, knowledge_filter,
+          feature_projection_matrix); // What is the current memory usage?
+    }
+    if (step % 50 == 0) {
+      adjustBehaviorBasedOnAnswers(
+          neurons, input_tensor, memorySystem, &learning_rate,
+          &params.input_noise_scale, &params.weight_noise_scale, stateHistory,
+          contextManager, motivation, goalSystem, working_memory,
+          identity_system, metacognition, &params, meta_learning_state);
+    }
     updateNeuronsWithPredictiveCoding(neurons, input_tensor, max_neurons,
                                       learning_rate);
     updateWorkingMemory(working_memory, neurons, input_tensor, target_outputs,
