@@ -32,6 +32,8 @@ The goal of this architecture is to present an alternative to modern neural mode
 
 json-c library
 
+gnuplot library 
+
 for metal macos version metal api
 
 for cuda version cuda
