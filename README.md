@@ -941,4 +941,4 @@ To modify number of neurons change MAX_NEURONS
 
 Only for unix type and windows systems
 
-Remember to use the security feature it shouldn't be needed on cpu versions though.
+Remember to use the security feature
