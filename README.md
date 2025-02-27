@@ -109,7 +109,7 @@ clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/
 For cuda version
 
 ```sh
-nvcc -o neural_web neural_web.cu -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c
+nvcc -o neural_web neural_web.cu -I/usr/include -ljson-c      
 ```
 
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
