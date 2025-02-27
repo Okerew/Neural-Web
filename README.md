@@ -30,6 +30,8 @@ The goal of this architecture is to present an alternative to modern neural mode
 
 ## Requirements:
 
+gnuplot library
+
 json-c library
 
 for metal macos version metal api
@@ -60,6 +62,9 @@ change updatedNeurons to neurons if using any other version than metal not only 
 
 Find the correct version you want to build by downloading the whole repo `git clone https://github.com/Okerew/Neural-Web.git` and navigating to the correct version you want to build.
 
+#### Firstly
+Start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
+
 #### Than to build do
 
 ```sh
@@ -79,6 +84,9 @@ docker pull okerew/neural_web64
 ```
 
 ### Compilation
+
+#### Firstly
+Start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
 
 To compile the code, run the following command in the root directory of the project:
 
@@ -488,6 +496,7 @@ typedef struct {
 - **initializeEmbeddings()**: Initializes embeddings for text inputs.
 - **updateEmbeddings(float* embeddings, float* input_tensor, int max_embeddings, int max_neurons)**: Updates embeddings based on input tensor.
 - **isWordMeaningful(const char* word)**: Checks if a word is meaningful.
+- **importPretrainedEmbeddings(const char* embedding_file)** Import pretrained embeddings
 
 ## Initialization Functions
 
@@ -930,6 +939,6 @@ neuron update shader and the code must be in the same directory.
 
 To modify number of neurons change MAX_NEURONS
 
-Only for unix type systems
+Only for unix type and windows systems
 
 Remember to use the security feature it shouldn't be needed on cpu versions though.
