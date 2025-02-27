@@ -109,7 +109,7 @@ clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/
 For cpu 86/64 unix version
 
 ```sh
-clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web64.c
+clang -o neural_web neural_web64.c I/usr/include -ljson-c -lm
 ```
 
 #### Cuda version 64/86
