@@ -2101,50 +2101,346 @@ void initializeVocabularyWeights()
   }
 }
 
-void initializeEmbeddings()
-{
-  for (int i = 0; i < vocab_size; i++)
-  {
-    for (int j = 0; j < EMBEDDING_SIZE; j++)
-    {
-      embeddings[i][j] =
-          (float)rand() / RAND_MAX; // Random values between 0 and 1
-    }
-  }
-}
+void importPretrainedEmbeddings(const char *embedding_file) {
+  FILE *file = fopen(embedding_file, "r");
+  if (!file) {
+    fprintf(stderr, "Error: Could not open embedding file: %s\n",
+            embedding_file);
 
-float *getWordEmbedding(const char *word)
-{
-  for (int i = 0; i < vocab_size; i++)
-  {
-    if (strcmp(word, vocabulary[i].word) == 0)
-    {
-      float *base_embedding = embeddings[i];
-      float complexity_factor =
-          strlen(vocabulary[i].description) /
-          50.0f; // More detailed descriptions increase complexity
-
-      // Scale embedding by semantic weight and description complexity
-      for (int j = 0; j < EMBEDDING_SIZE; j++)
-      {
-        base_embedding[j] *=
-            (vocabulary[i].semantic_weight + vocabulary[i].letter_weight) *
-            (1.0f + complexity_factor);
+    // Fall back to random initialization if file can't be opened
+    printf("Falling back to random initialization...\n");
+    for (int i = 0; i < vocab_size; i++) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        // Initialize with Gaussian distribution (standard practice)
+        float u1 = (float)rand() / RAND_MAX;
+        float u2 = (float)rand() / RAND_MAX;
+        float z = sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
+        // Scale to be small (typical for initialization)
+        embeddings[i][j] = z * 0.02f;
       }
-      return base_embedding;
+    }
+    return;
+  }
+
+  printf("Loading pre-trained word embeddings from %s...\n", embedding_file);
+
+  // Initialize vocab_found array to track which words were found in the
+  // pre-trained file
+  bool vocab_found[vocab_size];
+  memset(vocab_found, 0, vocab_size * sizeof(bool));
+
+  // Read header (if GloVe or Word2Vec format)
+  char line[10000]; // Buffer for reading lines (embeddings can be large)
+  if (fgets(line, sizeof(line), file) != NULL) {
+    // Word2Vec format often starts with: <vocab_size> <embedding_dimension>
+    int file_vocab_size, file_dim;
+    if (sscanf(line, "%d %d", &file_vocab_size, &file_dim) == 2) {
+      printf("Word2Vec format detected: %d words, %d dimensions\n",
+             file_vocab_size, file_dim);
+      // If dimensions don't match, we'll need to adjust
+      if (file_dim != EMBEDDING_SIZE) {
+        printf("Warning: File embedding size (%d) doesn't match system "
+               "embedding size (%d)\n",
+               file_dim, EMBEDDING_SIZE);
+        printf("Embeddings will be %s\n",
+               file_dim > EMBEDDING_SIZE ? "truncated" : "padded with zeros");
+      }
+    } else {
+      // If not a header, rewind to read the first embedding
+      rewind(file);
     }
   }
-  return embeddings[0]; // Default embedding if word is not in vocabulary
+
+  // Process each line of the embedding file
+  int loaded_count = 0;
+  while (fgets(line, sizeof(line), file) != NULL) {
+    char *word = strtok(line, " \t");
+    if (!word)
+      continue;
+
+    // Find this word in our vocabulary
+    int vocab_idx = -1;
+    for (int i = 0; i < vocab_size; i++) {
+      if (strcmp(word, vocabulary[i].word) == 0) {
+        vocab_idx = i;
+        break;
+      }
+    }
+
+    // Skip this word if not in our vocabulary
+    if (vocab_idx == -1)
+      continue;
+
+    // Mark as found
+    vocab_found[vocab_idx] = true;
+    loaded_count++;
+
+    // Parse the embedding values
+    float *current_embedding = embeddings[vocab_idx];
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      char *token = strtok(NULL, " \t\n");
+      if (token) {
+        current_embedding[j] = atof(token);
+      } else {
+        // If we run out of values, pad with zeros
+        current_embedding[j] = 0.0f;
+      }
+    }
+  }
+
+  fclose(file);
+  printf(
+      "Successfully loaded %d/%d vocabulary words from pretrained embeddings\n",
+      loaded_count, vocab_size);
+
+  // For words not found in the pre-trained file, initialize with random values
+  // and try to infer from similar words in our vocabulary that were found
+  for (int i = 0; i < vocab_size; i++) {
+    if (!vocab_found[i]) {
+      printf("Word '%s' not found in pretrained embeddings, generating...\n",
+             vocabulary[i].word);
+
+      // Check if we can find words in the same category that were loaded
+      bool found_category_match = false;
+      float category_vector[EMBEDDING_SIZE] = {0};
+      int category_matches = 0;
+
+      for (int j = 0; j < vocab_size; j++) {
+        if (i != j && vocab_found[j] &&
+            strcmp(vocabulary[i].category, vocabulary[j].category) == 0) {
+          // Found a word in the same category, add its embedding
+          for (int k = 0; k < EMBEDDING_SIZE; k++) {
+            category_vector[k] += embeddings[j][k];
+          }
+          category_matches++;
+          found_category_match = true;
+        }
+      }
+
+      if (found_category_match) {
+        // Use average of category embeddings with random noise
+        for (int k = 0; k < EMBEDDING_SIZE; k++) {
+          // Average of category vectors
+          category_vector[k] /= category_matches;
+          // Add some noise for uniqueness
+          float noise = ((float)rand() / RAND_MAX - 0.5f) * 0.1f;
+          embeddings[i][k] = category_vector[k] + noise;
+        }
+      } else {
+        // Completely random initialization
+        for (int j = 0; j < EMBEDDING_SIZE; j++) {
+          float u1 = (float)rand() / RAND_MAX;
+          float u2 = (float)rand() / RAND_MAX;
+          float z = sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
+          embeddings[i][j] = z * 0.02f;
+        }
+      }
+    }
+  }
+
+  // Apply custom modifiers for all words based on vocabulary attributes
+  for (int i = 0; i < vocab_size; i++) {
+    // Apply category-specific modifiers to certain dimensions
+    if (strcmp(vocabulary[i].category, "fruit") == 0) {
+      for (int j = 0; j < 10; j++) {
+        embeddings[i][j] += 0.2f; // Boost fruit-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "action") == 0) {
+      for (int j = 10; j < 20; j++) {
+        embeddings[i][j] += 0.2f; // Boost action-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
+      for (int j = 20; j < 30; j++) {
+        embeddings[i][j] += 0.2f; // Boost emotion-specific dimensions
+      }
+    }
+
+    // Incorporate letter-weight in specific dimensions
+    float letter_weight = vocabulary[i].letter_weight;
+    for (int j = 30; j < 40; j++) {
+      embeddings[i][j] += letter_weight * 0.1f;
+    }
+
+    // Incorporate semantic weight in specific dimensions
+    float semantic_weight = vocabulary[i].semantic_weight;
+    for (int j = 40; j < 50; j++) {
+      embeddings[i][j] += semantic_weight * 0.1f;
+    }
+
+    // Use connections information to modify embedding
+    if (vocabulary[i].connects_to) {
+      // Find the connected word in vocabulary
+      for (int j = 0; j < vocab_size; j++) {
+        if (strcmp(vocabulary[i].connects_to, vocabulary[j].word) == 0) {
+          // Make connected words more similar in specific dimensions
+          for (int k = 50; k < 60; k++) {
+            float avg = (embeddings[i][k] + embeddings[j][k]) * 0.5f;
+            // Move both embeddings slightly toward each other
+            embeddings[i][k] = embeddings[i][k] * 0.8f + avg * 0.2f;
+            embeddings[j][k] = embeddings[j][k] * 0.8f + avg * 0.2f;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Final L2 normalization for all embeddings (industry standard)
+  for (int i = 0; i < vocab_size; i++) {
+    float norm = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      norm += embeddings[i][j] * embeddings[i][j];
+    }
+    norm = sqrt(norm);
+
+    // Prevent division by zero
+    if (norm > 1e-8) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        embeddings[i][j] /= norm;
+      }
+    }
+  }
+
+  printf("Embedding initialization completed with custom modifiers applied\n");
 }
 
-void updateEmbeddings(float *feedback, const char *word)
-{
-  for (int i = 0; i < vocab_size; i++)
-  {
-    if (strcmp(word, vocabulary[i].word) == 0)
-    {
-      for (int j = 0; j < EMBEDDING_SIZE; j++)
-      {
+void initializeEmbeddings(const char *embedding_file) {
+  // Start with pre-trained embeddings (industry standard)
+  importPretrainedEmbeddings(embedding_file);
+
+  // Apply custom initialization on top of pre-trained vectors
+  for (int i = 0; i < vocab_size; i++) {
+
+    // Category encoding (first 10 dimensions)
+    if (strcmp(vocabulary[i].category, "fruit") == 0) {
+      for (int j = 0; j < 10; j++) {
+        embeddings[i][j] += 0.2f; // Boost fruit-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "action") == 0) {
+      for (int j = 10; j < 20; j++) {
+        embeddings[i][j] += 0.2f; // Boost action-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
+      for (int j = 20; j < 30; j++) {
+        embeddings[i][j] += 0.2f; // Boost emotion-specific dimensions
+      }
+    }
+    // Add other categories as needed
+
+    // Incorporate letter-weight in specific dimensions
+    float letter_weight = vocabulary[i].letter_weight;
+    for (int j = 30; j < 40; j++) {
+      embeddings[i][j] += letter_weight * 0.1f;
+    }
+
+    // Incorporate semantic weight in specific dimensions
+    float semantic_weight = vocabulary[i].semantic_weight;
+    for (int j = 40; j < 50; j++) {
+      embeddings[i][j] += semantic_weight * 0.1f;
+    }
+
+    // Re-normalize the embedding after modifications
+    float norm = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      norm += embeddings[i][j] * embeddings[i][j];
+    }
+    norm = sqrt(norm);
+
+    if (norm > 1e-8) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        embeddings[i][j] /= norm;
+      }
+    }
+  }
+}
+
+float *getWordEmbedding(const char *word) {
+  static float contextual_embedding[EMBEDDING_SIZE];
+
+  // Find the word in vocabulary
+  int word_index = -1;
+  for (int i = 0; i < vocab_size; i++) {
+    if (strcmp(word, vocabulary[i].word) == 0) {
+      word_index = i;
+      break;
+    }
+  }
+
+  if (word_index == -1) {
+    // Word not found - use subword tokenization approach (like BERT/GPT)
+    // This is a simplified version of subword tokenization
+    memset(contextual_embedding, 0, EMBEDDING_SIZE * sizeof(float));
+
+    // Generate embedding from character n-grams (industry standard approach for
+    // OOV words)
+    size_t len = strlen(word);
+    for (size_t i = 0; i < len; i++) {
+      for (size_t n = 1; n <= 3 && i + n <= len; n++) {
+        // Use character n-grams to build embedding
+        unsigned int hash = 0;
+        for (size_t j = i; j < i + n; j++) {
+          hash = hash * 101 + word[j];
+        }
+
+        // Use hash to modify embedding (similar to FastText approach)
+        for (int j = 0; j < EMBEDDING_SIZE / 10; j++) {
+          int idx = (hash + j) % EMBEDDING_SIZE;
+          contextual_embedding[idx] +=
+              letter_weights[(word[i] - 'a') % 26] / (float)len;
+        }
+      }
+    }
+
+    // Normalize the embedding
+    float norm = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      norm += contextual_embedding[j] * contextual_embedding[j];
+    }
+    norm = sqrt(norm);
+
+    if (norm > 1e-8) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        contextual_embedding[j] /= norm;
+      }
+    }
+  } else {
+    // Word found - use base embedding and apply custom modifications
+    memcpy(contextual_embedding, embeddings[word_index],
+           EMBEDDING_SIZE * sizeof(float));
+
+    // Apply the custom modifiers as in the original code
+    float complexity_factor =
+        strlen(vocabulary[word_index].description) / 50.0f;
+    float scaling_factor = (vocabulary[word_index].semantic_weight +
+                            vocabulary[word_index].letter_weight) *
+                           (1.0f + complexity_factor);
+
+    // Apply scaling but maintain vector magnitude (more stable)
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      contextual_embedding[j] *= scaling_factor;
+    }
+
+    // Re-normalize (standard practice)
+    float norm = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      norm += contextual_embedding[j] * contextual_embedding[j];
+    }
+    norm = sqrt(norm);
+
+    if (norm > 1e-8) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        contextual_embedding[j] /= norm;
+      }
+    }
+  }
+
+  return contextual_embedding;
+}
+
+void updateEmbeddings(float *feedback, const char *word) {
+  for (int i = 0; i < vocab_size; i++) {
+    if (strcmp(word, vocabulary[i].word) == 0) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
         embeddings[i][j] += feedback[j]; // Adjust embedding based on feedback
         embeddings[i][j] =
             fmaxf(0.0f, fminf(1.0f, embeddings[i][j])); // Clamp to [0, 1]
@@ -2155,24 +2451,19 @@ void updateEmbeddings(float *feedback, const char *word)
 }
 
 // Additional utility to find words by category or semantic similarity
-void findWordsByCategory(const char *category)
-{
+void findWordsByCategory(const char *category) {
   printf("Words in category '%s':\n", category);
-  for (int i = 0; i < vocab_size; i++)
-  {
-    if (strcmp(vocabulary[i].category, category) == 0)
-    {
+  for (int i = 0; i < vocab_size; i++) {
+    if (strcmp(vocabulary[i].category, category) == 0) {
       printf("- %s (semantic weight: %.2f): %s\n", vocabulary[i].word,
              vocabulary[i].semantic_weight, vocabulary[i].description);
     }
   }
 }
 // Compute cosine similarity between two vectors
-float cosineSimilarity(float *vec1, float *vec2, int size)
-{
+float cosineSimilarity(float *vec1, float *vec2, int size) {
   float dot = 0.0f, norm1 = 0.0f, norm2 = 0.0f;
-  for (int i = 0; i < size; i++)
-  {
+  for (int i = 0; i < size; i++) {
     dot += vec1[i] * vec2[i];
     norm1 += vec1[i] * vec1[i];
     norm2 += vec2[i] * vec2[i];
@@ -2182,78 +2473,102 @@ float cosineSimilarity(float *vec1, float *vec2, int size)
 
 void computeAttentionWeights(float *attention_weights, int step, int num_tokens,
                              float **token_embeddings,
-                             MemoryEntry *relevantMemory)
-{
-  // Step-based relevance: Words closer to the current step are more relevant
-  for (int i = 0; i < num_tokens; i++)
-  {
-    float step_relevance = 1.0f / (1.0f + fabsf((float)i - (float)step));
-    attention_weights[i] = step_relevance;
-  }
+                             MemoryEntry *relevantMemory) {
+  // Initialize attention scores
+  float attention_scores[INPUT_SIZE] = {0};
 
-  // Contextual similarity: Words similar to the current context are more
-  // relevant
-  float context[EMBEDDING_SIZE] = {0};
-  if (relevantMemory)
-  {
-    for (int i = 0; i < EMBEDDING_SIZE; i++)
-    {
-      context[i] = relevantMemory->vector[i % MAX_NEURONS];
+  // Calculate attention query vector (simplified version)
+  float query[EMBEDDING_SIZE] = {0};
+  if (relevantMemory) {
+    // Use memory as query
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      query[i] = relevantMemory->vector[i % MAX_NEURONS];
+    }
+  } else {
+    // Default query based on step
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      query[i] = sinf(0.01f * step + 0.1f * i);
     }
   }
 
-  for (int i = 0; i < num_tokens; i++)
-  {
-    float similarity =
-        cosineSimilarity(token_embeddings[i], context, EMBEDDING_SIZE);
-    attention_weights[i] += similarity;
+  // Normalize query vector
+  float query_norm = 0.0f;
+  for (int i = 0; i < EMBEDDING_SIZE; i++) {
+    query_norm += query[i] * query[i];
+  }
+  query_norm = sqrt(query_norm);
+
+  if (query_norm > 1e-8) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      query[i] /= query_norm;
+    }
+  }
+
+  // Calculate dot product attention (scaled dot-product attention)
+  for (int i = 0; i < num_tokens; i++) {
+    // Dot product between query and token embedding
+    float dot_product = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      dot_product += query[j] * token_embeddings[i][j];
+    }
+
+    // Scale by sqrt(dimension) as in transformer attention
+    attention_scores[i] = dot_product / sqrt(EMBEDDING_SIZE);
+  }
+
+  // Apply softmax to get attention weights
+  float max_score = -INFINITY;
+  for (int i = 0; i < num_tokens; i++) {
+    if (attention_scores[i] > max_score) {
+      max_score = attention_scores[i];
+    }
+  }
+
+  float sum_exp = 0.0f;
+  for (int i = 0; i < num_tokens; i++) {
+    attention_weights[i] = expf(attention_scores[i] - max_score);
+    sum_exp += attention_weights[i];
   }
 
   // Normalize attention weights
-  float sum = 0.0f;
-  for (int i = 0; i < num_tokens; i++)
-  {
-    sum += attention_weights[i];
-  }
-  for (int i = 0; i < num_tokens; i++)
-  {
-    attention_weights[i] /= sum;
+  if (sum_exp > 1e-8) {
+    for (int i = 0; i < num_tokens; i++) {
+      attention_weights[i] /= sum_exp;
+    }
   }
 }
 
 void generateInputTensor(float *input_tensor, int step, const char *text_input,
                          MemoryEntry *relevantMemory,
-                         SystemParameters *system_params)
-{
+                         SystemParameters *system_params) {
   float t = step * 0.01f;
   DynamicParameters params = system_params->dynamic_params;
 
-  // Tokenize the text input
+  // Tokenize the text input (modern NLP systems use subword tokenization)
   char *tokens[INPUT_SIZE];
   int num_tokens = 0;
-  float feedback[EMBEDDING_SIZE];
   tokenizeString(text_input, tokens, &num_tokens);
 
-  // Enhanced token embedding with category and semantic weight consideration
+  // Get token embeddings with contextual information
   float *token_embeddings[INPUT_SIZE];
   float letter_weights[INPUT_SIZE] = {0};
   float category_weights[INPUT_SIZE] = {0};
 
-  for (int i = 0; i < num_tokens; i++)
-  {
+  // First pass: get basic embeddings and weights
+  for (int i = 0; i < num_tokens; i++) {
     token_embeddings[i] = getWordEmbedding(tokens[i]);
     letter_weights[i] = computeLetterWeight(tokens[i]);
 
-    // Find word's semantic category weight
-    for (int j = 0; j < vocab_size; j++)
-    {
-      if (strcmp(tokens[i], vocabulary[j].word) == 0)
-      {
+    // Find category weights (preserving custom logic)
+    for (int j = 0; j < vocab_size; j++) {
+      if (strcmp(tokens[i], vocabulary[j].word) == 0) {
         // Weight based on category and semantic significance
         if (strcmp(vocabulary[j].category, "action") == 0)
           category_weights[i] = 1.2f;
         else if (strcmp(vocabulary[j].category, "emotion") == 0)
           category_weights[i] = 1.1f;
+        else if (strcmp(vocabulary[j].category, "fruit") == 0)
+          category_weights[i] = 1.05f;
         else
           category_weights[i] = 1.0f;
         break;
@@ -2261,64 +2576,86 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
     }
   }
 
-  // Compute attention weights with enhanced category sensitivity
+  // Compute attention weights using modern transformer-style attention
   float attention_weights[INPUT_SIZE] = {0};
   computeAttentionWeights(attention_weights, step, num_tokens, token_embeddings,
                           relevantMemory);
 
-  // Adjust attention weights with category influence
-  for (int i = 0; i < num_tokens; i++)
-  {
-    attention_weights[i] *= category_weights[i];
-  }
-  for (int i = 0; i < num_tokens; i++)
-  {
-    attention_weights[i] *= letter_weights[i];
+  // Apply category and letter weight modifiers to attention weights
+  for (int i = 0; i < num_tokens; i++) {
+    attention_weights[i] *= category_weights[i] * letter_weights[i];
   }
 
-  for (int i = 0; i < INPUT_SIZE; i++)
-  {
+  // Position encoding (similar to transformer position encoding)
+  float position_encoding[INPUT_SIZE][EMBEDDING_SIZE];
+  for (int pos = 0; pos < INPUT_SIZE; pos++) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      if (i % 2 == 0) {
+        position_encoding[pos][i] =
+            sinf(pos / powf(10000, i / (float)EMBEDDING_SIZE));
+      } else {
+        position_encoding[pos][i] =
+            cosf(pos / powf(10000, (i - 1) / (float)EMBEDDING_SIZE));
+      }
+    }
+  }
+
+  // Generate the input tensor combining embeddings, attention, and your custom
+  // signal logic
+  for (int i = 0; i < INPUT_SIZE; i++) {
+    // Start with base signal (from original code)
     float phase = (float)i / INPUT_SIZE;
     float signal = 0.4f * sinf(2.0f * M_PI * (t + phase));
     signal += 0.4f * sinf(2.0f * M_PI * (t + phase * 1.5f));
     signal += 0.2f * sinf(5.0f * M_PI * (t + phase * 2.0f));
 
-    // Incorporate word description complexity
-    if (i < EMBEDDING_SIZE)
-    {
-      for (int j = 0; j < num_tokens; j++)
-      {
-        // Find word to get its description length
+    // Add weighted word embeddings (context-aware representation)
+    if (i < EMBEDDING_SIZE) {
+      float weighted_embedding = 0.0f;
+      for (int j = 0; j < num_tokens && j < INPUT_SIZE; j++) {
+        float position_factor = position_encoding[j][i]; // Position encoding
+
+        // Find description length for complexity factor
         int desc_length = 0;
-        for (int k = 0; k < vocab_size; k++)
-        {
-          if (strcmp(tokens[j], vocabulary[k].word) == 0)
-          {
+        for (int k = 0; k < vocab_size; k++) {
+          if (j < num_tokens && strcmp(tokens[j], vocabulary[k].word) == 0) {
             desc_length = strlen(vocabulary[k].description);
             break;
           }
         }
 
-        // Use description length to modulate signal
+        // Incorporate description complexity (custom logic)
         float desc_factor = 1.0f + (desc_length / 100.0f);
-        signal += 0.3f * attention_weights[j] * desc_factor * letter_weights[j];
+
+        // Add weighted contribution from token
+        if (j < num_tokens) {
+          weighted_embedding += attention_weights[j] *
+                                token_embeddings[j][i % EMBEDDING_SIZE] *
+                                desc_factor * position_factor;
+        }
       }
+
+      // Add the weighted embedding contribution
+      signal += 0.3f * weighted_embedding;
     }
 
     // Add memory-based relevance
-    if (relevantMemory)
-    {
+    if (relevantMemory) {
       signal += 0.2f * relevantMemory->vector[i % MAX_NEURONS];
     }
 
-    // Noise and drift management
+    // Noise and drift management (preserved from original)
     float noise = ((float)rand() / RAND_MAX - 0.5f) * params.input_noise_scale;
     float drift = params.plasticity * sinf(0.1f * M_PI * t);
 
+    // Combine all factors and normalize
     input_tensor[i] = (signal + noise + drift + 1.0f) * 0.5f;
+
+    // Clamp to valid range
     input_tensor[i] = fmaxf(0.0f, fminf(1.0f, input_tensor[i]));
   }
 }
+
 
 void captureNetworkState(Neuron *neurons, float *input_tensor,
                          NetworkStateSnapshot *snapshot, float *weights,
@@ -8179,20 +8516,17 @@ void adjustBehaviorBasedOnAnswers(
   }
 }
 
-int main()
-{
+int main() {
 
   // Try to load existing memory system
   MemorySystem *memorySystem = NULL;
   WorkingMemorySystem *working_memory =
       createWorkingMemorySystem(200); // adjust capacity as needed
   FILE *mem_file = fopen("memory_system.dat", "rb");
-  if (mem_file != NULL)
-  {
+  if (mem_file != NULL) {
     fclose(mem_file);
     memorySystem = loadMemorySystem("memory_system.dat");
-    if (memorySystem != NULL)
-    {
+    if (memorySystem != NULL) {
       printf("Loaded existing memory system\n");
 
       loadHierarchicalMemory(memorySystem, "hierarchical_memory.dat");
@@ -8210,34 +8544,29 @@ int main()
              memorySystem->hierarchy.long_term.capacity);
 
       printf("\nMemory Samples:\n");
-      if (memorySystem->hierarchy.long_term.size > 0)
-      {
+      if (memorySystem->hierarchy.long_term.size > 0) {
         printf("Long-term memory sample (importance: %.2f)\n",
                memorySystem->hierarchy.long_term.entries[0].importance);
       }
-      if (memorySystem->hierarchy.medium_term.size > 0)
-      {
+      if (memorySystem->hierarchy.medium_term.size > 0) {
         printf("Medium-term memory sample (importance: %.2f)\n",
                memorySystem->hierarchy.medium_term.entries[0].importance);
       }
-      if (memorySystem->hierarchy.short_term.size > 0)
-      {
+      if (memorySystem->hierarchy.short_term.size > 0) {
         printf("Short-term memory sample (importance: %.2f)\n",
                memorySystem->hierarchy.short_term.entries[0].importance);
       }
     }
   }
 
-  if (memorySystem == NULL)
-  {
+  if (memorySystem == NULL) {
     printf("Creating new hierarchical memory system...\n");
     memorySystem = createMemorySystem(MEMORY_BUFFER_SIZE);
   }
 
   NetworkStateSnapshot *stateHistory =
       (NetworkStateSnapshot *)malloc(STEPS * sizeof(NetworkStateSnapshot));
-  if (stateHistory == NULL)
-  {
+  if (stateHistory == NULL) {
     fprintf(stderr, "Failed to allocate memory for state history\n");
     freeMemorySystem(memorySystem);
     return -1;
@@ -8266,16 +8595,14 @@ int main()
   float *input_tensor = (float *)malloc(max_neurons * sizeof(float));
 
   // Initialize neurons from memory or with default values
-  if (memorySystem->size > 0)
-  {
+  if (memorySystem->size > 0) {
     int lastMemoryIdx = (memorySystem->head - 1 + memorySystem->capacity) %
                         memorySystem->capacity;
     MemoryEntry *lastMemory = &memorySystem->entries[lastMemoryIdx];
 
     printf("\nInitializing neurons from last memory state...\n");
 
-    for (int i = 0; i < MAX_NEURONS; i++)
-    {
+    for (int i = 0; i < MAX_NEURONS; i++) {
       neurons[i].state = lastMemory->vector[i];
       neurons[i].output = lastMemory->vector[i + MAX_NEURONS];
       neurons[i].num_connections = 2;
@@ -8283,23 +8610,19 @@ int main()
     }
 
     // Initialize connections and weights
-    for (int i = 0; i < MAX_NEURONS; i++)
-    {
+    for (int i = 0; i < MAX_NEURONS; i++) {
       connections[i * MAX_CONNECTIONS] = (i + 1) % MAX_NEURONS;
       connections[i * MAX_CONNECTIONS + 1] =
           (i - 1 + MAX_NEURONS) % MAX_NEURONS;
       weights[i * MAX_CONNECTIONS] = 0.6f;
       weights[i * MAX_CONNECTIONS + 1] = -0.4f;
     }
-  }
-  else
-  {
+  } else {
     initializeNeurons(neurons, connections, weights, input_tensor);
   }
 
   float learning_rate = 0.01f;
-  for (int i = 0; i < MAX_NEURONS; i++)
-  {
+  for (int i = 0; i < MAX_NEURONS; i++) {
     // Mirror forward connections with reverse direction
     reverse_connections[i * MAX_CONNECTIONS] =
         (i - 1 + MAX_NEURONS) % MAX_NEURONS;
@@ -8313,14 +8636,13 @@ int main()
   DynamicParameters params = initDynamicParameters();
   SystemParameters *system_params =
       loadSystemParameters("system_parameters.dat");
-  if (system_params)
-  {
+  if (system_params) {
     opt_state = system_params->opt_state;
     params = system_params->dynamic_params;
   }
   const char *text_input =
       "Apple, banana, cherry, date, and elderberry are fruits.";
-  initializeEmbeddings();
+  initializeEmbeddings("custom_embeddings.txt");
 
   int network_regions = 2; // Assuming 2 layers
   MetaController *metaController = initializeMetaController(network_regions);
@@ -8364,8 +8686,7 @@ int main()
   addGoal(goalSystem, "Maximize information gain", 0.7f);
   // Main loop
   printf("\nStarting training with loaded memory state...\n");
-  for (int step = 0; step < STEPS; step++)
-  {
+  for (int step = 0; step < STEPS; step++) {
     double step_start_time = getCurrentTime();
 
     TaskPrompt current_prompt;
@@ -8373,8 +8694,7 @@ int main()
 
     // Store previous outputs for error calculation
     float *previous_outputs = (float *)malloc(max_neurons * sizeof(float));
-    for (int i = 0; i < max_neurons; i++)
-    {
+    for (int i = 0; i < max_neurons; i++) {
       previous_outputs[i] = neurons[i].output;
     }
 
@@ -8403,8 +8723,7 @@ int main()
                         system_params);
 
     // Memory maintenance
-    if (step % 10 == 0)
-    {
+    if (step % 10 == 0) {
       decayMemorySystem(memorySystem);
       mergeSimilarMemories(memorySystem);
       printf("\nMemory System Status (Step %d):\n", step);
@@ -8439,8 +8758,8 @@ int main()
     cudaMemcpy(d_connections, connections,
                max_neurons * max_connections * sizeof(unsigned int),
                cudaMemcpyHostToDevice);
-    cudaMemcpy(d_recurrent_weights, weights,
-               max_neurons * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_recurrent_weights, weights, max_neurons * sizeof(float),
+               cudaMemcpyHostToDevice);
 
     // Calculate grid and block dimensions
     dim3 blockDim(256);
@@ -8465,8 +8784,7 @@ int main()
     char *tokens[INPUT_SIZE];
     int num_tokens = 0;
     tokenizeString(text_input, tokens, &num_tokens);
-    for (int i = 0; i < num_tokens; i++)
-    {
+    for (int i = 0; i < num_tokens; i++) {
       updateEmbeddings(word_feedback, tokens[i]);
     }
 
@@ -8489,8 +8807,7 @@ int main()
         validateCriticalSecurity(neurons, weights, connections, max_neurons,
                                  max_connections, memorySystem);
 
-    if (secStatus.critical_violation)
-    {
+    if (secStatus.critical_violation) {
       criticalSecurityShutdown(neurons, weights, connections, memorySystem,
                                &secStatus);
     }
@@ -8503,17 +8820,14 @@ int main()
         KnowledgeFilter *filter, float current_performance);
 
     // Add periodic insights printing
-    if (step % 50 == 0)
-    {
+    if (step % 50 == 0) {
       printCategoryInsights(knowledge_filter);
     }
 
     // Meta-controller logging
-    if (step % 20 == 0)
-    {
+    if (step % 20 == 0) {
       printf("\nMeta-Controller Insights (Step %d):\n", step);
-      for (int i = 0; i < network_regions; i++)
-      {
+      for (int i = 0; i < network_regions; i++) {
         printf("Region %d:\n", i);
         printf("  Importance Score: %.4f\n",
                metaController->region_importance_scores[i]);
@@ -8558,12 +8872,11 @@ int main()
         d_neurons, d_weights, d_connections, max_neurons, max_connections,
         d_input_tensor, input_size, d_recurrent_weights);
 
-    reverse_process<<<gridDim, blockDim>>>(
-        d_neurons, d_weights, d_connections, max_neurons, max_connections);
+    reverse_process<<<gridDim, blockDim>>>(d_neurons, d_weights, d_connections,
+                                           max_neurons, max_connections);
 
     // Memory replay mechanism
-    if (step % 5 == 0 && memorySystem->size > 10)
-    {
+    if (step % 5 == 0 && memorySystem->size > 10) {
       MemoryEntry *d_memories;
       cudaMalloc(&d_memories, memorySystem->capacity * sizeof(MemoryEntry));
       cudaMemcpy(d_memories, memorySystem->entries,
@@ -8642,13 +8955,11 @@ int main()
         current_outcome, feedback.feedback_history, feedback.history_size);
 
     // Update context weights based on feedback
-    for (int i = 0; i < max_neurons; i++)
-    {
+    for (int i = 0; i < max_neurons; i++) {
       float weight_update = feedback_signal * feedback.adaptation_rate;
 
       // Apply correlation-based adjustments
-      for (int j = 0; j < max_neurons; j++)
-      {
+      for (int j = 0; j < max_neurons; j++) {
         weight_update += adaptation.correlation_matrix[i * max_neurons + j] *
                          adaptation.learning_momentum;
       }
@@ -8669,8 +8980,7 @@ int main()
                         max_neurons);
 
     // Decay historical feedback influence
-    for (int i = 0; i < feedback.history_size; i++)
-    {
+    for (int i = 0; i < feedback.history_size; i++) {
       feedback.feedback_history[i] *= feedback.feedback_decay;
     }
 
@@ -8679,8 +8989,7 @@ int main()
                            max_connections);
 
     // Print context adaptation metrics periodically
-    if (step % 20 == 0)
-    {
+    if (step % 20 == 0) {
       printf("\nContext Adaptation Metrics (Step %d):\n", step);
       printf("Average Feedback Signal: %.4f\n",
              computeAverageFeedback(feedback.feedback_history,
@@ -8711,11 +9020,9 @@ int main()
                    input_tensor);
 
     // Periodically verify identity consistency
-    if (step % 20 == 0)
-    {
+    if (step % 20 == 0) {
       bool identity_verified = verifyIdentity(identity_system);
-      if (!identity_verified)
-      {
+      if (!identity_verified) {
         printf("Warning: Identity consistency check failed\n");
 
         // Analyze the identity system for potential issues
@@ -8730,8 +9037,7 @@ int main()
 
         // Implement recovery by creating a backup
         SelfIdentityBackup *backup = createIdentityBackup(identity_system);
-        if (backup)
-        {
+        if (backup) {
           printf("Identity backup created successfully.\n");
 
           // Restore from backup if necessary
@@ -8740,22 +9046,17 @@ int main()
 
           // Free backup memory after restoration
           freeIdentityBackup(backup);
-        }
-        else
-        {
+        } else {
           printf("Error: Failed to create identity backup.\n");
         }
       }
 
       // Generate and log identity reflection
       char *reflection = generateIdentityReflection(identity_system);
-      if (reflection)
-      {
+      if (reflection) {
         printf("%s\n", reflection);
         free(reflection);
-      }
-      else
-      {
+      } else {
         printf("Error: Failed to generate identity reflection.\n");
       }
     }
@@ -8773,14 +9074,11 @@ int main()
     printNetworkStates(neurons, input_tensor, step);
 
     // Task verification logging
-    if (step % 10 == 0)
-    {
+    if (step % 10 == 0) {
       printf("\nTask Verification (Step %d):\n", step);
       printf("Description: %s\n", current_prompt.task_description);
-      for (int v = 0; v < 5; v++)
-      {
-        if (current_prompt.verifications[v].instruction[0] != '\0')
-        {
+      for (int v = 0; v < 5; v++) {
+        if (current_prompt.verifications[v].instruction[0] != '\0') {
           printf("- %s: %s (Confidence: %.2f)\n",
                  current_prompt.verifications[v].instruction,
                  current_prompt.verifications[v].verified ? "PASSED" : "FAILED",
@@ -8792,8 +9090,7 @@ int main()
     }
 
     // Memory verification
-    if (relevantMemory != NULL)
-    {
+    if (relevantMemory != NULL) {
       PromptVerification memoryVerification = {.instruction =
                                                    "Verify memory integration",
                                                .confidence = 0.0f,
@@ -8812,8 +9109,7 @@ int main()
     }
 
     // Memory consolidation
-    if (step % 10 == 0)
-    {
+    if (step % 10 == 0) {
       consolidateMemory(memorySystem);
     }
 
@@ -8829,8 +9125,7 @@ int main()
     performance_history[step].learning_rate = opt_state.optimal_learning_rate;
 
     // Optimize parameters periodically
-    if (step % OPTIMIZATION_WINDOW == 0 && step > 0)
-    {
+    if (step % OPTIMIZATION_WINDOW == 0 && step > 0) {
       PromptVerification optVerification = {.instruction =
                                                 "Verify parameter optimization",
                                             .confidence = 0.0f,
@@ -8863,18 +9158,15 @@ int main()
     }
 
     float *previous_states = (float *)malloc(max_neurons * sizeof(float));
-    for (int i = 0; i < max_neurons; i++)
-    {
+    for (int i = 0; i < max_neurons; i++) {
       previous_states[i] = neurons[i].state;
     }
 
-    if (system_params != NULL)
-    {
+    if (system_params != NULL) {
       system_params->opt_state = opt_state;
       system_params->dynamic_params = params;
       if (opt_state.best_performance_score >
-          system_params->best_performance_score)
-      {
+          system_params->best_performance_score) {
         system_params->best_performance_score =
             opt_state.best_performance_score;
       }
@@ -8898,8 +9190,7 @@ int main()
                            task_difficulty);
 
     // Update goals and generate rewards
-    for (int i = 0; i < goalSystem->num_goals; i++)
-    {
+    for (int i = 0; i < goalSystem->num_goals; i++) {
       Goal *goal = &goalSystem->goals[i];
       float new_progress = evaluateGoalProgress(goal, neurons, target_outputs);
       float progress_delta = new_progress - goal->progress;
@@ -8914,15 +9205,13 @@ int main()
 
     // Modify exploration vs exploitation based on motivation
     float explore_prob = motivation->exploration_rate;
-    if (rand() / (float)RAND_MAX < explore_prob)
-    {
+    if (rand() / (float)RAND_MAX < explore_prob) {
       // Take exploratory action
       addRandomNoise(*input_tensor, motivation->curiosity_drive * 0.1f);
     }
 
     // Add to periodic logging
-    if (step % 20 == 0)
-    {
+    if (step % 20 == 0) {
       printf("\nMotivation System Status:\n");
       printf("Competence: %.2f\n", motivation->competence_score);
       printf("Curiosity: %.2f\n", motivation->curiosity_drive);
@@ -8930,8 +9219,7 @@ int main()
       printf("Exploration Rate: %.2f\n", motivation->exploration_rate);
 
       printf("\nActive Goals:\n");
-      for (int i = 0; i < goalSystem->num_goals; i++)
-      {
+      for (int i = 0; i < goalSystem->num_goals; i++) {
         printf("%s: %.1f%% complete (Priority: %.2f)\n",
                goalSystem->goals[i].description,
                goalSystem->goals[i].progress * 100.0f,
@@ -8952,8 +9240,7 @@ int main()
                                   metacognition);
 
     // Optional: Print adaptation parameters periodically
-    if (step % 10 == 0)
-    {
+    if (step % 10 == 0) {
       printf("\nDynamic Parameters at step %d:\n", step);
       printf("Current Adaptation Rate: %.4f\n", params.current_adaptation_rate);
       printf("Input Noise Scale: %.4f\n", params.input_noise_scale);
@@ -8962,8 +9249,7 @@ int main()
       printf("Noise Tolerance: %.4f\n", params.noise_tolerance);
     }
 
-    if (step % 50 == 0 && step > 0)
-    { // Every 50 steps
+    if (step % 50 == 0 && step > 0) { // Every 50 steps
       printf("\nPerformance Analysis and Graph Generation at step %d:\n", step);
       analyzeNetworkPerformance(performance_history, step + 1);
       generatePerformanceGraph(performance_history, step + 1);
@@ -8973,8 +9259,7 @@ int main()
                            sizeof(outputText));
     printf("\nStep %d Outputs (Text):\n%s\n", step, outputText);
 
-    if (step % 20 == 0)
-    {
+    if (step % 20 == 0) {
       PatternMatchingParams params = {.similarity_threshold = 0.8f,
                                       .temporal_window = 5,
                                       .temporal_decay = 0.9f,
@@ -8987,8 +9272,7 @@ int main()
           stateHistory[step].current_memory.vector, params.similarity_threshold,
           &num_matches);
 
-      if (num_matches > 0)
-      {
+      if (num_matches > 0) {
         printf("\nFound %d similar patterns in long-term memory\n",
                num_matches);
         free(matches);
@@ -9008,8 +9292,8 @@ int main()
     if (question_to_ask > 0) {
       askQuestion(question_to_ask, neurons, input_tensor, memorySystem,
                   &learning_rate, stateHistory, contextManager, motivation,
-                  goalSystem, working_memory, identity_system, metacognition, knowledge_filter,
-                  feature_projection_matrix);
+                  goalSystem, working_memory, identity_system, metacognition,
+                  knowledge_filter, feature_projection_matrix);
       adjustBehaviorBasedOnAnswers(
           neurons, input_tensor, memorySystem, &learning_rate,
           &params.input_noise_scale, &params.weight_noise_scale, stateHistory,
@@ -9020,11 +9304,13 @@ int main()
     if (step % 50 == 0) {
       askQuestion(0, neurons, input_tensor, memorySystem, &learning_rate,
                   stateHistory, contextManager, motivation, goalSystem,
-                  working_memory, identity_system, metacognition,knowledge_filter,
+                  working_memory, identity_system, metacognition,
+                  knowledge_filter,
                   feature_projection_matrix); // What is the current task?
       askQuestion(1, neurons, input_tensor, memorySystem, &learning_rate,
                   stateHistory, contextManager, motivation, goalSystem,
-                  working_memory, identity_system, metacognition, knowledge_filter,
+                  working_memory, identity_system, metacognition,
+                  knowledge_filter,
                   feature_projection_matrix); // What is the current error rate?
       askQuestion(
           2, neurons, input_tensor, memorySystem, &learning_rate, stateHistory,
@@ -9050,34 +9336,29 @@ int main()
                         step);
 
     // Process in batches
-    for (int b = 0; b < MAX_NEURONS; b += opt_state.optimal_batch_size)
-    {
+    for (int b = 0; b < MAX_NEURONS; b += opt_state.optimal_batch_size) {
       int batch_end = b + opt_state.optimal_batch_size;
       if (batch_end > MAX_NEURONS)
         batch_end = MAX_NEURONS;
 
       // Process batch
-      for (int i = b; i < batch_end; i++)
-      {
+      for (int i = b; i < batch_end; i++) {
         updateNeuronStates(neurons, max_neurons, weights, 1.5f);
       }
     }
     float total_error = 0.0f;
-    for (int i = 0; i < max_neurons; i++)
-    {
+    for (int i = 0; i < max_neurons; i++) {
       float error = fabs(neurons[i].output - target_outputs[i]);
       total_error += error;
     }
-    if (step % 10 == 0)
-    {
+    if (step % 10 == 0) {
       consolidateToLongTermMemory(working_memory, memorySystem, step);
     }
     updateBidirectionalWeights(weights, reverse_weights, neurons, connections,
                                reverse_connections, learning_rate);
 
     float average_error = total_error / max_neurons;
-    if (step % 15 == 0)
-    {
+    if (step % 15 == 0) {
       advancedNeuronManagement(neurons, connections, weights, &max_neurons,
                                MAX_NEURONS, input_tensor, target_outputs,
                                stateHistory, step);
