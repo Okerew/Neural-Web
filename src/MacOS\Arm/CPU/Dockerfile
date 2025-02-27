@@ -28,6 +28,9 @@ USER $USERNAME
 # Copy the C source file with correct ownership
 COPY --chown=$USERNAME:$USERNAME neural_web64.c ./
 
+# Copy the custom_embeddings.txt file with correct ownership
+COPY --chown=$USERNAME:$USERNAME custom_embeddings.txt ./
+
 # Compile the C program using Clang
 RUN clang -o neural_web neural_web.c -I/usr/include -ljson-c -lm
 
