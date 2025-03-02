@@ -52,6 +52,7 @@
 #define MAX_USAGE_COUNT 1000 // Maximum usage count for normalization
 #define MAX_SYMBOLS 100
 #define MAX_QUESTIONS 10
+#define VOCAB_SIZE 100
 
 typedef struct {
   float state;
@@ -194,12 +195,12 @@ typedef struct {
 } NeuronPerformanceMetric;
 
 typedef struct {
-  const char *word;
-  const char *category;    // e.g., "fruit", "common", "action"
-  float semantic_weight;   // How strongly this word relates to its category
-  const char *connects_to; // The most likely word it connects with
-  const char *description; // Detailed description of the word
-  float letter_weight;     // New field for letter-based weight
+  char word[50];
+  char category[50];
+  char *connects_to;
+  float semantic_weight;
+  const char *description;
+  float letter_weight;
 } VocabularyEntry;
 
 typedef struct {
@@ -1543,157 +1544,86 @@ void initializeNeurons(Neuron *neurons, int *connections, float *weights,
   }
 }
 
-const VocabularyEntry vocabulary[] = {
-    // Common English Words
-    {"the", "common", 0.9f, "be",
-     "Definite article identifying a specific noun"},
-    {"be", "common", 0.8f, "to", "Verb expressing existence or state"},
-    {"to", "common", 0.8f, "the", "Indicates direction or purpose"},
-    {"of", "common", 0.9f, "and", "Shows possession or connection"},
-    {"and", "common", 0.8f, "a", "Connects words, phrases, or clauses"},
-    {"a", "common", 0.9f, "the", "Indefinite article for singular nouns"},
-    {"in", "common", 0.7f, "the", "Indicates location or state"},
-    {"that", "common", 0.6f, "have", "Introduces a descriptive clause"},
-    {"have", "common", 0.5f, "it", "Indicates possession or experience"},
-    {"it", "common", 0.6f, "is", "Refers to a previous noun or concept"},
-    {"for", "common", 0.8f, "the", "Indicates purpose or recipient"},
-    {"not", "common", 0.7f, "be", "Negation or denial"},
-    {"on", "common", 0.6f, "the", "Indicates position or contact"},
-    {"with", "common", 0.5f, "you", "Indicates accompaniment or method"},
-    {"he", "common", 0.7f, "is", "Masculine third-person singular pronoun"},
-    {"as", "common", 0.5f, "the", "Comparison or equivalence marker"},
-    {"you", "common", 0.7f, "are", "Second-person pronoun"},
-    {"do", "common", 0.6f, "not", "Auxiliary verb for questions or emphasis"},
-    {"at", "common", 0.6f, "the", "Indicates specific location or time"},
-    {"are", "common", 0.7f, "you", "Plural or second-person form of 'to be'"},
+VocabularyEntry vocabulary[VOCAB_SIZE];
 
-    // Fruits
-    {"apple", "fruit", 1.0f, "banana",
-     "Round, sweet fruit with crisp flesh, red/green/yellow"},
-    {"banana", "fruit", 0.9f, "cherry",
-     "Long curved tropical fruit with soft yellow flesh"},
-    {"cherry", "fruit", 0.8f, "date",
-     "Small round fruit, sweet and slightly tart flavor"},
-    {"date", "fruit", 0.8f, "fig",
-     "Sweet, wrinkled fruit often used in desserts"},
-    {"elderberry", "fruit", 0.7f, "grape",
-     "Small, dark purple berry with tart flavor"},
-    {"fig", "fruit", 0.9f, "grape", "Sweet, soft fruit with unique texture"},
-    {"grape", "fruit", 0.8f, "orange",
-     "Small round fruit that grows in clusters"},
-    {"honeydew", "fruit", 0.7f, "melon",
-     "Pale green melon with sweet, mild flavor"},
-    {"kiwi", "fruit", 0.9f, "mango",
-     "Small oval fruit with fuzzy brown exterior"},
-    {"lemon", "fruit", 0.8f, "lime",
-     "Bright yellow citrus fruit with sour taste"},
-    {"mango", "fruit", 1.0f, "papaya",
-     "Sweet tropical fruit with vibrant orange flesh"},
-    {"nectarine", "fruit", 0.8f, "peach",
-     "Smooth-skinned stone fruit similar to peaches"},
-    {"orange", "fruit", 1.0f, "tangerine",
-     "Bright orange citrus fruit with sweet flavor"},
-    {"papaya", "fruit", 0.9f, "mango",
-     "Soft tropical fruit with green to orange color"},
-    {"quince", "fruit", 0.6f, "apple", "Hard, yellow fruit used in preserves"},
-    {"raspberry", "fruit", 0.8f, "blueberry",
-     "Soft red berry with delicate flavor"},
-    {"strawberry", "fruit", 0.9f, "cream",
-     "Red, heart-shaped berry with sweet taste"},
-    {"tangerine", "fruit", 0.8f, "orange", "Small, sweet citrus fruit"},
-    {"ugli", "fruit", 0.5f, "fruit", "Jamaican hybrid citrus fruit"},
-    {"vanilla", "fruit", 0.7f, "bean", "Flavoring derived from orchid plant"},
-    {"watermelon", "fruit", 1.0f, "summer",
-     "Large green fruit with sweet red interior"},
-    {"xigua", "fruit", 0.6f, "melon", "Chinese word for watermelon"},
+int loadVocabularyFromFile(const char *filename) {
+  FILE *file = fopen(filename, "r");
+  if (!file) {
+    fprintf(stderr, "Error opening file: %s\n", filename);
+    return -1;
+  }
 
-    // Vegetables
-    {"yam", "vegetable", 0.8f, "potato",
-     "Starchy root vegetable with various colors"},
-    {"zucchini", "vegetable", 0.8f, "squash",
-     "Green summer squash with mild flavor"},
+  // Count the number of lines (entries) in the file
+  int entryCount = 0;
+  char buffer[500];
 
-    {"run", "action", 0.7f, "fast", "Moving quickly on foot with rapid steps"},
-    {"jump", "action", 0.8f, "high",
-     "Propelling oneself upward off the ground"},
-    {"sing", "action", 0.6f, "loud", "Producing musical sounds with voice"},
-    {"dance", "action", 0.7f, "music",
-     "Rhythmic body movement to musical beats"},
-    {"write", "action", 0.8f, "book", "Creating text by forming words"},
+  while (fgets(buffer, sizeof(buffer), file) != NULL) {
+    // Skip comments and empty lines
+    if (buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
+      continue;
+    }
+    entryCount++;
+  }
 
-    {"carrot", "vegetable", 0.9f, "salad",
-     "Orange root vegetable, rich in beta-carotene"},
-    {"broccoli", "vegetable", 0.8f, "green",
-     "Tree-like green vegetable with nutrient-dense florets"},
-    {"potato", "vegetable", 0.7f, "starch",
-     "Underground tuber, staple in many cuisines"},
+  // Reset file position to beginning
+  rewind(file);
 
-    {"love", "emotion", 0.9f, "heart", "Deep affection, care, and connection"},
-    {"hope", "emotion", 0.8f, "future", "Optimistic expectation and desire"},
-    {"dream", "concept", 0.7f, "imagination",
-     "Visionary mental experience or aspiration"},
+  // Parse each line and fill the vocabulary entries
+  int index = 0;
+  while (fgets(buffer, sizeof(buffer), file) != NULL && index < entryCount) {
+    // Skip comments and empty lines
+    if (buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
+      continue;
+    }
 
-    // Punctuation
-    {".", "punctuation", 0.5f, NULL, "Marks the end of a declarative sentence"},
+    // Remove newline character
+    buffer[strcspn(buffer, "\n")] = 0;
 
-    {"fast", "adjective", 0.7f, "run",
-     "Moving or capable of moving at high speed"},
-    {"high", "adjective", 0.7f, "jump",
-     "Extending far upward; great vertical extent"},
-    {"loud", "adjective", 0.6f, "sing",
-     "Producing or capable of producing much noise"},
-    {"music", "noun", 0.8f, "dance",
-     "Vocal or instrumental sounds combined to produce beauty of form, "
-     "harmony, and expression of emotion"},
-    {"book", "noun", 0.8f, "write",
-     "Written or printed work consisting of pages glued or sewn together"},
-    {"salad", "noun", 0.7f, "carrot",
-     "Dish consisting of mixed pieces of food, typically vegetables"},
-    {"green", "adjective", 0.8f, "broccoli",
-     "Color between blue and yellow in the spectrum; colored like grass"},
-    {"starch", "noun", 0.6f, "potato",
-     "Carbohydrate consisting of a large number of glucose units joined by "
-     "glycosidic bonds"},
-    {"heart", "noun", 0.9f, "love",
-     "Hollow muscular organ that pumps the blood through the circulatory "
-     "system by rhythmic contraction and dilation"},
-    {"future", "noun", 0.8f, "hope",
-     "Time or a period of time following the moment of speaking or writing; "
-     "time regarded as still to come"},
-    {"imagination", "noun", 0.7f, "dream",
-     "Faculty or action of forming new ideas, or images or concepts of "
-     "external objects not present to the senses"},
-    {"cream", "noun", 0.7f, "strawberry",
-     "Thick white or pale yellow fatty liquid which rises to the top when milk "
-     "is left to stand and which can be eaten as an accompaniment to desserts "
-     "or used as a cooking ingredient"},
-    {"bean", "noun", 0.6f, "vanilla",
-     "Edible seed, typically kidney-shaped, growing in long pods on certain "
-     "leguminous plants"},
-    {"summer", "noun", 0.7f, "watermelon",
-     "Warmest season of the year, in the northern hemisphere from June to "
-     "August and in the southern hemisphere from December to February"},
-    {"melon", "noun", 0.7f, "honeydew",
-     "Large round fruit with sweet pulpy flesh and thick skin"},
-    {"squash", "noun", 0.7f, "zucchini",
-     "Edible gourd, typically with green skin and white flesh, eaten as a "
-     "vegetable"},
-    {"blueberry", "noun", 0.7f, "raspberry", "Small blue-black edible berry"},
-    {"peach", "noun", 0.8f, "nectarine",
-     "Soft, juicy fruit with sweet yellow or pinkish flesh and downy "
-     "pinkish-yellow skin"},
-    {"lime", "noun", 0.7f, "lemon",
-     "Round citrus fruit with green skin and acidic juice"},
-    {"is", "verb", 0.8f, "he", "Third-person singular present of 'be'"},
-    {"are", "verb", 0.8f, "you",
-     "Second-person singular present and plural present of 'be'"},
-    {"have", "verb", 0.7f, "it", "Possess, own, or hold"},
-    {"with", "preposition", 0.7f, "you",
-     "Accompanied by (another person or thing)"},
-    {"he", "pronoun", 0.8f, "is",
-     "Used to refer to a man, boy, or male animal previously mentioned or "
-     "easily identified"},
-};
+    // Format expected:
+    // word,category,semantic_weight,connects_to,description,letter_weight
+    char *token = strtok(buffer, ",");
+    if (!token)
+      continue;
+    strncpy(vocabulary[index].word, token, sizeof(vocabulary[index].word) - 1);
+
+    token = strtok(NULL, ",");
+    if (!token)
+      continue;
+    strncpy(vocabulary[index].category, token,
+            sizeof(vocabulary[index].category) - 1);
+
+    token = strtok(NULL, ",");
+    if (!token)
+      continue;
+    vocabulary[index].semantic_weight = atof(token);
+
+    token = strtok(NULL, ",");
+    if (!token || strcmp(token, "NULL") == 0 || strcmp(token, "null") == 0) {
+      vocabulary[index].connects_to = NULL;
+    } else {
+      vocabulary[index].connects_to = strdup(token);
+    }
+
+    token = strtok(NULL, ",");
+    if (!token) {
+      vocabulary[index].description = NULL;
+    } else {
+      vocabulary[index].description = strdup(token);
+    }
+
+    token = strtok(NULL, ",");
+    if (!token) {
+      vocabulary[index].letter_weight = 1.0f; // Default value
+    } else {
+      vocabulary[index].letter_weight = atof(token);
+    }
+
+    index++;
+  }
+
+  fclose(file);
+  return entryCount; // Return the actual number of entries loaded
+}
 
 const float letter_weights[26] = {1.0f,  0.9f,  0.8f, 0.85f, 0.95f, 0.75f, 0.7f,
                                   0.8f,  0.9f,  0.6f, 0.7f,  0.85f, 0.75f, 0.9f,
@@ -1706,6 +1636,57 @@ void swap(char *a, char *b) {
   char temp = *a;
   *a = *b;
   *b = temp;
+}
+
+bool isWordMeaningful(const char *word) {
+  for (int i = 0; i < vocab_size; i++) {
+    if (strcmp(vocabulary[i].word, word) == 0) {
+      return true;
+    }
+  }
+
+  // Check word length
+  size_t len = strlen(word);
+  if (len < 3 || len > 20) {
+    return false;
+  }
+
+  // Check for at least one vowel
+  bool has_vowel = false;
+  for (size_t i = 0; i < len; i++) {
+    if (strchr("aeiouAEIOU", word[i]) != NULL) {
+      has_vowel = true;
+      break;
+    }
+  }
+  if (!has_vowel) {
+    return false;
+  }
+
+  // Check for common prefixes/suffixes
+  const char *prefixes[] = {"un", "re", "pre", "in", "dis"};
+  const char *suffixes[] = {"ing", "tion", "ment", "ness", "able"};
+
+  for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+    if (strncmp(word, prefixes[i], strlen(prefixes[i])) == 0) {
+      return true;
+    }
+  }
+
+  for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+    if (strlen(word) >= strlen(suffixes[i]) &&
+        strcmp(word + strlen(word) - strlen(suffixes[i]), suffixes[i]) == 0) {
+      return true;
+    }
+  }
+
+  // Check for proper nouns
+  if (isupper(word[0])) {
+    return true;
+  }
+
+  // If none of the above checks pass, the word is not considered meaningful
+  return false;
 }
 
 const char *mapToWord(float value) {
@@ -1750,6 +1731,11 @@ const char *mapToWord(float value) {
     }
 
     customWord[wordLength] = '\0';
+    if (!isWordMeaningful(customWord)) {
+      // If the word doesn't make sense, regenerate it
+      return mapToWord(fabs(value) *
+                       0.9f); // Slightly adjust value and try again
+    }
     return customWord;
   }
 
@@ -1787,13 +1773,14 @@ float computeLetterWeight(const char *word) {
   return (length > 0) ? (weight_sum / length) : 0.0f; // Normalize by length
 }
 
-// Initialize vocabulary letter weights
 void initializeVocabularyWeights() {
   for (int i = 0; i < vocab_size; i++) {
     ((VocabularyEntry *)&vocabulary[i])->letter_weight =
         computeLetterWeight(vocabulary[i].word);
   }
 }
+
+float embeddings[vocab_size][EMBEDDING_SIZE];
 
 void importPretrainedEmbeddings(const char *embedding_file) {
   FILE *file = fopen(embedding_file, "r");
@@ -2012,14 +1999,29 @@ void initializeEmbeddings(const char *embedding_file) {
       }
     } else if (strcmp(vocabulary[i].category, "action") == 0) {
       for (int j = 10; j < 20; j++) {
-        embeddings[i][j] += 0.2f; // Boost action-specific dimensions
+        embeddings[i][j] += 0.3f; // Boost action-specific dimensions
       }
     } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
       for (int j = 20; j < 30; j++) {
-        embeddings[i][j] += 0.2f; // Boost emotion-specific dimensions
+        embeddings[i][j] += 0.5f; // Boost emotion-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "object") == 0) {
+      for (int j = 30; j < 40; j++) {
+        embeddings[i][j] += 0.1f; // Boost object-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "place") == 0) {
+      for (int j = 40; j < 50; j++) {
+        embeddings[i][j] += 0.2f; // Boost place-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "time") == 0) {
+      for (int j = 50; j < 60; j++) {
+        embeddings[i][j] += 0.3f; // Boost time-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "person") == 0) {
+      for (int j = 60; j < 70; j++) {
+        embeddings[i][j] += 0.4f; // Boost person-specific dimensions
       }
     }
-    // Add other categories as needed
 
     // Incorporate letter-weight in specific dimensions
     float letter_weight = vocabulary[i].letter_weight;
@@ -6397,11 +6399,11 @@ void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
   }
 }
 
-SecurityValidationStatus
-validateCriticalSecurity(const Neuron *neurons, const float *weights,
-                         const int *connections, size_t max_neurons,
-                         size_t max_connections,
-                         const MemorySystem *memorySystem) {
+SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
+                                                  const float *weights,
+                                                  const int *connections,
+                                                  size_t max_neurons,
+                                                  size_t max_connections) {
   SecurityValidationStatus status = {.critical_violation = false,
                                      .suspect_address = 0,
                                      .violation_type = NULL};
@@ -6467,38 +6469,27 @@ validateCriticalSecurity(const Neuron *neurons, const float *weights,
   return status;
 }
 
-// Emergency shutdown for critical security violations
-void criticalSecurityShutdown(Neuron *neurons, float *weights, int *connections,
-                              MemorySystem *memorySystem,
-                              const SecurityValidationStatus *status) {
+void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
+                                     int *connections,
+                                     const SecurityValidationStatus *status) {
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
   fprintf(stderr, "Type: %s\n", status->violation_type);
-  fprintf(stderr, "Suspect address: 0x%lx\n", status->suspect_address);
+  fprintf(stderr, "Suspect address: 0x%llx\n", status->suspect_address);
 
-  // Force immediate cleanup
-  if (memorySystem) {
-    memset(memorySystem->entries, 0,
-           memorySystem->capacity * sizeof(MemoryEntry));
-    freeMemorySystem(memorySystem);
+  // Free up the suspect address
+  void *suspect_ptr = (void *)status->suspect_address;
+  if (suspect_ptr) {
+    memset(suspect_ptr, 0,
+           sizeof(Neuron)); // Clear the memory at the suspect address
   }
 
-  if (neurons) {
-    memset(neurons, 0, MAX_NEURONS * sizeof(Neuron));
-    free(neurons);
+  // Log the violation for further investigation
+  FILE *log_file = fopen("security_violations.log", "a");
+  if (log_file) {
+    fprintf(log_file, "Violation Type: %s\n", status->violation_type);
+    fprintf(log_file, "Suspect Address: 0x%llx\n", status->suspect_address);
+    fclose(log_file);
   }
-
-  if (weights) {
-    memset(weights, 0, MAX_NEURONS * MAX_CONNECTIONS * sizeof(float));
-    free(weights);
-  }
-
-  if (connections) {
-    memset(connections, 0, MAX_NEURONS * MAX_CONNECTIONS * sizeof(int));
-    free(connections);
-  }
-
-  // Force process termination
-  _Exit(1); // Use _Exit instead of exit() for immediate termination
 }
 
 float computeBeliefStability(const SelfIdentitySystem *system,
@@ -6889,13 +6880,13 @@ void updateContextAnswer(GlobalContextManager *contextManager,
   if (!found) {
     if (currentNode->num_children < currentNode->max_children) {
       // Create new node
-      ContextNode *newNode = (ContextNode *)malloc(sizeof(ContextNode)); // Fixed
+      ContextNode *newNode = malloc(sizeof(ContextNode));
       newNode->name = strdup(contextName);
       newNode->importance = 0.7f; // QA interactions are important
 
       // Initialize state vector
       newNode->vector_size = contextManager->vector_size;
-      newNode->state_vector = (float *)malloc(sizeof(float) * newNode->vector_size); 
+      newNode->state_vector = malloc(sizeof(float) * newNode->vector_size);
       for (uint32_t i = 0; i < newNode->vector_size; i++) {
         newNode->state_vector[i] = 0.0f;
       }
@@ -6915,8 +6906,9 @@ void updateContextAnswer(GlobalContextManager *contextManager,
       newNode->last_updated = time(NULL);
 
       // Add to parent's children
-      currentNode->children = (ContextNode**) realloc(currentNode->children,
-        sizeof(ContextNode*) * (currentNode->num_children + 1));
+      currentNode->children =
+          realloc(currentNode->children,
+                  sizeof(ContextNode *) * (currentNode->num_children + 1));
       currentNode->children[currentNode->num_children] = newNode;
       currentNode->num_children++;
 
@@ -7079,10 +7071,10 @@ void addQuestionAndAnswerToMemory(
     // Add to focused attention
     if (workingMemory->focus.size < workingMemory->focus.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = (float *)malloc(128 * sizeof(float)); // Fixed
-enhanced.context_vector = (float *)malloc(256 * sizeof(float)); // Fixed
+      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
+      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->focus.entries[workingMemory->focus.size++] = enhanced;
@@ -7092,11 +7084,10 @@ enhanced.context_vector = (float *)malloc(256 * sizeof(float)); // Fixed
     // Add to active memory
     if (workingMemory->active.size < workingMemory->active.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = (float *)malloc(128 * sizeof(float)); // Fixed
-enhanced.context_vector = (float *)malloc(256 * sizeof(float)); // Fixed
-
+      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
+      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->active.entries[workingMemory->active.size++] = enhanced;
@@ -7614,7 +7605,7 @@ void adjustBehaviorBasedOnAnswers(
 }
 
 int main() {
-
+  loadVocabularyFromFile("vocabulary.txt");
   // Try to load existing memory system
   MemorySystem *memorySystem = NULL;
   WorkingMemorySystem *working_memory =
@@ -7900,15 +7891,13 @@ int main() {
     applyMetaControllerAdaptations(neurons, weights, metaController,
                                    MAX_NEURONS);
 
-    SecurityValidationStatus secStatus =
-        validateCriticalSecurity(neurons, weights, connections, max_neurons,
-                                 max_connections, memorySystem);
+    SecurityValidationStatus secStatus = validateCriticalSecurity(
+        neurons, weights, connections, max_neurons, max_connections);
 
     if (secStatus.critical_violation) {
-      criticalSecurityShutdown(neurons, weights, connections, memorySystem,
-                               &secStatus);
+      handleCriticalSecurityViolation(neurons, weights, connections,
+                                      &secStatus);
     }
-
     integrateKnowledgeFilter(knowledge_filter, memorySystem, neurons,
                              input_tensor);
 
