@@ -23,7 +23,7 @@
 #define OPTIMIZATION_WINDOW 5  // Number of steps to consider for optimization
 #define PERFORMANCE_THRESHOLD 0.8 // Target performance improvement threshold
 #define MAX_BATCH_SIZE 16         // Maximum batch size for processing
-#define EMBEDDING_SIZE 768       // Size of word embeddings
+#define EMBEDDING_SIZE 16       // Size of word embeddings
 #define WEIGHT_DECAY 0.95f        // Weight decay factor
 #define MAX_SIMULATIONS 10        // Number of simulation runs
 #define MIN_WEIGHT -1.0f
