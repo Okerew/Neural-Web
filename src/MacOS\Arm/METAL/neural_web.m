@@ -1470,7 +1470,6 @@ void tokenizeString(const char *input, char **tokens, int *num_tokens) {
   }
 }
 
-// Word embeddings (randomly initialized)
 float embeddings[vocab_size][EMBEDDING_SIZE];
 
 // Function to calculate letter-based weight for a word
@@ -1493,8 +1492,6 @@ void initializeVocabularyWeights() {
         computeLetterWeight(vocabulary[i].word);
   }
 }
-
-float embeddings[vocab_size][EMBEDDING_SIZE];
 
 void importPretrainedEmbeddings(const char *embedding_file) {
   FILE *file = fopen(embedding_file, "r");
