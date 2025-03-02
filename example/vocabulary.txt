@@ -1,81 +1,80 @@
-word,category,related_word,frequency,definition
-the,common,be,0.9f,"Definite article identifying a specific noun"
-be,common,to,0.8f,"Verb expressing existence or state"
-to,common,the,0.8f,"Indicates direction or purpose"
-of,common,and,0.9f,"Shows possession or connection"
-and,common,a,0.8f,"Connects words, phrases, or clauses"
-a,common,the,0.9f,"Indefinite article for singular nouns"
-in,common,the,0.7f,"Indicates location or state"
-that,common,have,0.6f,"Introduces a descriptive clause"
-have,common,it,0.5f,"Indicates possession or experience"
-it,common,is,0.6f,"Refers to a previous noun or concept"
-for,common,the,0.8f,"Indicates purpose or recipient"
-not,common,be,0.7f,"Negation or denial"
-on,common,the,0.6f,"Indicates position or contact"
-with,common,you,0.5f,"Indicates accompaniment or method"
-he,common,is,0.7f,"Masculine third-person singular pronoun"
-as,common,the,0.5f,"Comparison or equivalence marker"
-you,common,are,0.7f,"Second-person pronoun"
-do,common,not,0.6f,"Auxiliary verb for questions or emphasis"
-at,common,the,0.6f,"Indicates specific location or time"
-are,common,you,0.7f,"Plural or second-person form of 'to be'"
-apple,fruit,banana,1.0f,"Round, sweet fruit with crisp flesh, red/green/yellow"
-banana,fruit,cherry,0.9f,"Long curved tropical fruit with soft yellow flesh"
-cherry,fruit,date,0.8f,"Small round fruit, sweet and slightly tart flavor"
-date,fruit,fig,0.8f,"Sweet, wrinkled fruit often used in desserts"
-elderberry,fruit,grape,0.7f,"Small, dark purple berry with tart flavor"
-fig,fruit,grape,0.9f,"Sweet, soft fruit with unique texture"
-grape,fruit,orange,0.8f,"Small round fruit that grows in clusters"
-honeydew,fruit,melon,0.7f,"Pale green melon with sweet, mild flavor"
-kiwi,fruit,mango,0.9f,"Small oval fruit with fuzzy brown exterior"
-lemon,fruit,lime,0.8f,"Bright yellow citrus fruit with sour taste"
-mango,fruit,papaya,1.0f,"Sweet tropical fruit with vibrant orange flesh"
-nectarine,fruit,peach,0.8f,"Smooth-skinned stone fruit similar to peaches"
-orange,fruit,tangerine,1.0f,"Bright orange citrus fruit with sweet flavor"
-papaya,fruit,mango,0.9f,"Soft tropical fruit with green to orange color"
-quince,fruit,apple,0.6f,"Hard, yellow fruit used in preserves"
-raspberry,fruit,blueberry,0.8f,"Soft red berry with delicate flavor"
-strawberry,fruit,cream,0.9f,"Red, heart-shaped berry with sweet taste"
-tangerine,fruit,orange,0.8f,"Small, sweet citrus fruit"
-ugli,fruit,fruit,0.5f,"Jamaican hybrid citrus fruit"
-vanilla,fruit,bean,0.7f,"Flavoring derived from orchid plant"
-watermelon,fruit,summer,1.0f,"Large green fruit with sweet red interior"
-xigua,fruit,melon,0.6f,"Chinese word for watermelon"
-yam,vegetable,potato,0.8f,"Starchy root vegetable with various colors"
-zucchini,vegetable,squash,0.8f,"Green summer squash with mild flavor"
-run,action,fast,0.7f,"Moving quickly on foot with rapid steps"
-jump,action,high,0.8f,"Propelling oneself upward off the ground"
-sing,action,loud,0.6f,"Producing musical sounds with voice"
-dance,action,music,0.7f,"Rhythmic body movement to musical beats"
-write,action,book,0.8f,"Creating text by forming words"
-carrot,vegetable,salad,0.9f,"Orange root vegetable, rich in beta-carotene"
-broccoli,vegetable,green,0.8f,"Tree-like green vegetable with nutrient-dense florets"
-potato,vegetable,starch,0.7f,"Underground tuber, staple in many cuisines"
-love,emotion,heart,0.9f,"Deep affection, care, and connection"
-hope,emotion,future,0.8f,"Optimistic expectation and desire"
-dream,concept,imagination,0.7f,"Visionary mental experience or aspiration"
-.,punctuation,NULL,0.5f,"Marks the end of a declarative sentence"
-fast,adjective,run,0.7f,"Moving or capable of moving at high speed"
-high,adjective,jump,0.7f,"Extending far upward; great vertical extent"
-loud,adjective,sing,0.6f,"Producing or capable of producing much noise"
-music,noun,dance,0.8f,"Vocal or instrumental sounds combined to produce beauty of form, harmony, and expression of emotion"
-book,noun,write,0.8f,"Written or printed work consisting of pages glued or sewn together"
-salad,noun,carrot,0.7f,"Dish consisting of mixed pieces of food, typically vegetables"
-green,adjective,broccoli,0.8f,"Color between blue and yellow in the spectrum; colored like grass"
-starch,noun,potato,0.6f,"Carbohydrate consisting of a large number of glucose units joined by glycosidic bonds"
-heart,noun,love,0.9f,"Hollow muscular organ that pumps the blood through the circulatory system by rhythmic contraction and dilation"
-future,noun,hope,0.8f,"Time or a period of time following the moment of speaking or writing; time regarded as still to come"
-imagination,noun,dream,0.7f,"Faculty or action of forming new ideas, or images or concepts of external objects not present to the senses"
-cream,noun,strawberry,0.7f,"Thick white or pale yellow fatty liquid which rises to the top when milk is left to stand and which can be eaten as an accompaniment to desserts or used as a cooking ingredient"
-bean,noun,vanilla,0.6f,"Edible seed, typically kidney-shaped, growing in long pods on certain leguminous plants"
-summer,noun,watermelon,0.7f,"Warmest season of the year, in the northern hemisphere from June to August and in the southern hemisphere from December to February"
-melon,noun,honeydew,0.7f,"Large round fruit with sweet pulpy flesh and thick skin"
-squash,noun,zucchini,0.7f,"Edible gourd, typically with green skin and white flesh, eaten as a vegetable"
-blueberry,noun,raspberry,0.7f,"Small blue-black edible berry"
-peach,noun,nectarine,0.8f,"Soft, juicy fruit with sweet yellow or pinkish flesh and downy pinkish-yellow skin"
-lime,noun,lemon,0.7f,"Round citrus fruit with green skin and acidic juice"
-is,verb,he,0.8f,"Third-person singular present of 'be'"
-are,verb,you,0.8f,"Second-person singular present and plural present of 'be'"
-have,verb,it,0.7f,"Possess, own, or hold"
-with,preposition,you,0.7f,"Accompanied by (another person or thing)"
-he,pronoun,is,0.8f,"Used to refer to a man, boy, or male animal previously mentioned or easily identified"
+the,common,0.9,Definite article identifying a specific noun,0.0
+be,common,0.8,Verb expressing existence or state,0.0
+to,common,0.8,Indicates direction or purpose,0.0
+of,common,0.9,Shows possession or connection,0.0
+and,common,0.8,Connects words, phrases, or clauses,0.0
+a,common,0.9,Indefinite article for singular nouns,0.0
+in,common,0.7,Indicates location or state,0.0
+that,common,0.6,Introduces a descriptive clause,0.0
+have,common,0.5,Indicates possession or experience,0.0
+it,common,0.6,Refers to a previous noun or concept,0.0
+for,common,0.8,Indicates purpose or recipient,0.0
+not,common,0.7,Negation or denial,0.0
+on,common,0.6,Indicates position or contact,0.0
+with,common,0.5,Indicates accompaniment or method,0.0
+he,common,0.7,Masculine third-person singular pronoun,0.0
+as,common,0.5,Comparison or equivalence marker,0.0
+you,common,0.7,Second-person pronoun,0.0
+do,common,0.6,Auxiliary verb for questions or emphasis,0.0
+at,common,0.6,Indicates specific location or time,0.0
+are,common,0.7,Plural or second-person form of 'to be',0.0
+apple,fruit,1.0,Round, sweet fruit with crisp flesh, red/green/yellow,0.0
+banana,fruit,0.9,Long curved tropical fruit with soft yellow flesh,0.0
+cherry,fruit,0.8,Small round fruit, sweet and slightly tart flavor,0.0
+date,fruit,0.8,Sweet, wrinkled fruit often used in desserts,0.0
+elderberry,fruit,0.7,Small, dark purple berry with tart flavor,0.0
+fig,fruit,0.8,Sweet, soft fruit with unique texture,0.0
+grape,fruit,0.9,Small round fruit that grows in clusters,0.0
+honeydew,fruit,0.7,Pale green melon with sweet, mild flavor,0.0
+kiwi,fruit,0.9,Small oval fruit with fuzzy brown exterior,0.0
+lemon,fruit,0.8,Bright yellow citrus fruit with sour taste,0.0
+mango,fruit,1.0,Sweet tropical fruit with vibrant orange flesh,0.0
+nectarine,fruit,0.8,Smooth-skinned stone fruit similar to peaches,0.0
+orange,fruit,1.0,Bright orange citrus fruit with sweet flavor,0.0
+papaya,fruit,0.9,Soft tropical fruit with green to orange color,0.0
+quince,fruit,0.6,Hard, yellow fruit used in preserves,0.0
+raspberry,fruit,0.8,Soft red berry with delicate flavor,0.0
+strawberry,fruit,0.9,Red, heart-shaped berry with sweet taste,0.0
+tangerine,fruit,0.8,Small, sweet citrus fruit,0.0
+ugli,fruit,0.5,Jamaican hybrid citrus fruit,0.0
+vanilla,fruit,0.7,Flavoring derived from orchid plant,0.0
+watermelon,fruit,1.0,Large green fruit with sweet red interior,0.0
+xigua,fruit,0.6,Chinese word for watermelon,0.0
+yam,vegetable,0.8,Starchy root vegetable with various colors,0.0
+zucchini,vegetable,0.8,Green summer squash with mild flavor,0.0
+run,action,0.7,Moving quickly on foot with rapid steps,0.0
+jump,action,0.8,Propelling oneself upward off the ground,0.0
+sing,action,0.6,Producing musical sounds with voice,0.0
+dance,action,0.7,Rhythmic body movement to musical beats,0.0
+write,action,0.8,Creating text by forming words,0.0
+carrot,vegetable,0.9,Orange root vegetable, rich in beta-carotene,0.0
+broccoli,vegetable,0.8,Tree-like green vegetable with nutrient-dense florets,0.0
+potato,vegetable,0.7,Underground tuber, staple in many cuisines,0.0
+love,emotion,0.9,Deep affection, care, and connection,0.0
+hope,emotion,0.8,Optimistic expectation and desire,0.0
+dream,concept,0.7,Visionary mental experience or aspiration,0.0
+.,punctuation,0.5,Marks the end of a declarative sentence,0.0
+fast,adjective,0.7,Moving or capable of moving at high speed,0.0
+high,adjective,0.7,Extending far upward; great vertical extent,0.0
+loud,adjective,0.6,Producing or capable of producing much noise,0.0
+music,noun,0.8,Vocal or instrumental sounds combined to produce beauty of form, harmony, and expression of emotion,0.0
+book,noun,0.8,Written or printed work consisting of pages glued or sewn together,0.0
+salad,noun,0.7,Dish consisting of mixed pieces of food, typically vegetables,0.0
+green,adjective,0.8,Color between blue and yellow in the spectrum; colored like grass,0.0
+starch,noun,0.6,Carbohydrate consisting of a large number of glucose units joined by glycosidic bonds,0.0
+heart,noun,0.9,Hollow muscular organ that pumps the blood through the circulatory system by rhythmic contraction and dilation,0.0
+future,noun,0.8,Time or a period of time following the moment of speaking or writing; time regarded as still to come,0.0
+imagination,noun,0.7,Faculty or action of forming new ideas, or images or concepts of external objects not present to the senses,0.0
+cream,noun,0.7,Thick white or pale yellow fatty liquid which rises to the top when milk is left to stand and which can be eaten as an accompaniment to desserts or used as a cooking ingredient,0.0
+bean,noun,0.6,Edible seed, typically kidney-shaped, growing in long pods on certain leguminous plants,0.0
+summer,noun,0.7,Warmest season of the year, in the northern hemisphere from June to August and in the southern hemisphere from December to February,0.0
+melon,noun,0.7,Large round fruit with sweet pulpy flesh and thick skin,0.0
+squash,noun,0.7,Edible gourd, typically with green skin and white flesh, eaten as a vegetable,0.0
+blueberry,noun,0.7,Small blue-black edible berry,0.0
+peach,noun,0.8,Soft, juicy fruit with sweet yellow or pinkish flesh and downy pinkish-yellow skin,0.0
+lime,noun,0.7,Round citrus fruit with green skin and acidic juice,0.0
+is,verb,0.8,Third-person singular present of 'be',0.0
+are,verb,0.8,Second-person singular present and plural present of 'be',0.0
+have,verb,0.7,Possess, own, or hold,0.0
+with,preposition,0.7,Accompanied by (another person or thing),0.0
+he,pronoun,0.8,Used to refer to a man, boy, or male animal previously mentioned or easily identified,0.0

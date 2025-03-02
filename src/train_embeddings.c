@@ -279,49 +279,78 @@ void trainCustomEmbeddings(int num_epochs, float learning_rate) {
     printf("Custom embeddings trained and saved to 'custom_embeddings.txt'\n");
 }
 
-void loadVocabularyFromFile(const char *filename) {
-    FILE *file = fopen(filename, "r");
+int loadVocabularyFromFile(const char* filename) {
+    FILE* file = fopen(filename, "r");
     if (!file) {
-        fprintf(stderr, "Error: Could not open file for reading: %s\n", filename);
-        return;
+        fprintf(stderr, "Error opening file: %s\n", filename);
+        return -1;
     }
 
-    char line[512];
-    int i = 0;
+    // Count the number of lines (entries) in the file
+    int entryCount = 0;
+    char buffer[500];
     
-    // Read each line and populate the vocabulary array
-    while (fgets(line, sizeof(line), file)) {
-        if (i >= VOCAB_SIZE) {
-            fprintf(stderr, "Warning: Vocabulary size exceeds the limit\n");
-            break;
+    while (fgets(buffer, sizeof(buffer), file) != NULL) {
+        // Skip comments and empty lines
+        if (buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
+            continue;
         }
-
-        // Use strtok to split the line by commas
-        char *token = strtok(line, ",");
-        if (token) strcpy(vocabulary[i].word, token);
-
-        token = strtok(NULL, ",");
-        if (token) strcpy(vocabulary[i].category, token);
-
-        token = strtok(NULL, ",");
-        if (token) {
-            vocabulary[i].connects_to = strdup(token);  // Copy connects_to string dynamically
-        }
-
-        token = strtok(NULL, ",");
-        if (token) vocabulary[i].semantic_weight = atof(token);
-
-        token = strtok(NULL, ",");
-        if (token) vocabulary[i].description = strdup(token);  // Copy description dynamically
-
-        token = strtok(NULL, ",");
-        if (token) vocabulary[i].letter_weight = atof(token);
-
-        i++;
+        entryCount++;
     }
-
+    
+    // Reset file position to beginning
+    rewind(file);
+    
+    // Parse each line and fill the vocabulary entries
+    int index = 0;
+    while (fgets(buffer, sizeof(buffer), file) != NULL && index < entryCount) {
+        // Skip comments and empty lines
+        if (buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
+            continue;
+        }
+        
+        // Remove newline character
+        buffer[strcspn(buffer, "\n")] = 0;
+        
+        // Format expected: word,category,semantic_weight,connects_to,description,letter_weight
+        char* token = strtok(buffer, ",");
+        if (!token) continue;
+        strncpy(vocabulary[index].word, token, sizeof(vocabulary[index].word) - 1);
+        
+        token = strtok(NULL, ",");
+        if (!token) continue;
+        strncpy(vocabulary[index].category, token, sizeof(vocabulary[index].category) - 1);
+        
+        token = strtok(NULL, ",");
+        if (!token) continue;
+        vocabulary[index].semantic_weight = atof(token);
+        
+        token = strtok(NULL, ",");
+        if (!token || strcmp(token, "NULL") == 0 || strcmp(token, "null") == 0) {
+            vocabulary[index].connects_to = NULL;
+        } else {
+            vocabulary[index].connects_to = strdup(token);
+        }
+        
+        token = strtok(NULL, ",");
+        if (!token) {
+            vocabulary[index].description = NULL;
+        } else {
+            vocabulary[index].description = strdup(token);
+        }
+        
+        token = strtok(NULL, ",");
+        if (!token) {
+            vocabulary[index].letter_weight = 1.0f; // Default value
+        } else {
+            vocabulary[index].letter_weight = atof(token);
+        }
+        
+        index++;
+    }
+    
     fclose(file);
-    printf("Vocabulary loaded from file '%s'\n", filename);
+    return entryCount; // Return the actual number of entries loaded
 }
 
 int main() {

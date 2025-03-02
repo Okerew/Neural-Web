@@ -52,11 +52,10 @@ When using the metacognition functionality make sure to use this piece of code, 
 
 SecurityValidationStatus secStatus =
         validateCriticalSecurity(updatedNeurons, weights, connections,
-                                 max_neurons, max_connections, memorySystem);
+                                 max_neurons, max_connections);
 
 if (secStatus.critical_violation) {
-      criticalSecurityShutdown(updatedNeurons, weights, connections,
-                               memorySystem, &secStatus);
+      handleCriticalSecurityViolation(updatedNeurons, weights, connections, &secStatus);
 }
 ```
 

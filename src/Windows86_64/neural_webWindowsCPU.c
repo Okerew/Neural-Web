@@ -1,13 +1,22 @@
 #include <ctype.h>
+#include <fcntl.h>
 #include <float.h>
 #include <immintrin.h>
+#include <io.h>
 #include <json-c/json.h>
 #include <math.h>
+#include <psapi.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <windows.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #define MAX_NEURONS 8
 #define MAX_CONNECTIONS 2
@@ -46,7 +55,6 @@
 #define MAX_DECISION_STEPS 20
 #define MAX_SYMBOLS 100
 #define MAX_QUESTIONS 10
-#define VOCAB_SIZE 100
 
 typedef struct {
   float state;
@@ -146,9 +154,9 @@ typedef struct {
 typedef struct {
   float similarity_threshold; // Minimum similarity score to consider a match
   int temporal_window;        // Number of consecutive memories to consider for
-                              // temporal patterns
-  float temporal_decay;       // Decay factor for temporal pattern matching
-  int max_matches;            // Maximum number of matches to return
+  // temporal patterns
+  float temporal_decay; // Decay factor for temporal pattern matching
+  int max_matches;      // Maximum number of matches to return
 } PatternMatchingParams;
 
 typedef struct {
@@ -438,7 +446,7 @@ typedef struct {
 
 typedef struct {
   bool critical_violation;
-  uint64_t suspect_address;
+  int suspect_address;
   const char *violation_type;
 } SecurityValidationStatus;
 
@@ -488,6 +496,110 @@ InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
 int num_symbols = 0;
 int num_questions = 0;
+
+FILE *popen(const char *command, const char *mode) {
+  if (mode[0] != 'w') {
+    return NULL; // We only support writing mode (for simplicity)
+  }
+
+  // Open a pipe to gnuplot
+  STARTUPINFO si = {sizeof(STARTUPINFO)};
+  PROCESS_INFORMATION pi;
+  SECURITY_ATTRIBUTES sa = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+
+  if (!CreatePipe(&si.hStdOutput, &si.hStdInput, &sa, 0)) {
+    return NULL;
+  }
+
+  si.dwFlags = STARTF_USESTDHANDLES;
+
+  if (!CreateProcess(NULL, (LPSTR)command, NULL, NULL, TRUE, 0, NULL, NULL, &si,
+                     &pi)) {
+    return NULL;
+  }
+
+  // Use _open_osfhandle to convert the Windows pipe handle to a C runtime file
+  // stream
+  return _fdopen(_open_osfhandle((intptr_t)si.hStdInput, _O_WRONLY), "w");
+}
+
+int pclose(FILE *stream) {
+  fclose(stream);
+  return 0; // Always returns 0, for simplicity
+}
+
+void printMemoryUsage() {
+  PROCESS_MEMORY_COUNTERS pmc;
+  if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+    printf("Memory Usage: %ld KB\n", pmc.WorkingSetSize / 1024);
+  } else {
+    printf("Failed to get memory usage\n");
+  }
+}
+
+uint64_t get_monotonic_time() {
+  LARGE_INTEGER counter;
+  QueryPerformanceCounter(&counter);
+  return counter.QuadPart;
+}
+
+int clock_gettime(uint64_t clk_id, struct timespec *ts) {
+  if (clk_id == get_monotonic_time) {
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+
+    ts->tv_sec = counter.QuadPart / freq.QuadPart;
+    ts->tv_nsec =
+        (counter.QuadPart % freq.QuadPart) * 1000000000 / freq.QuadPart;
+
+    return 0;
+  }
+
+  return -1; // Unsupported clock type
+}
+
+errno_t ctime_r(const time_t *time, char *buf) {
+  return ctime_s(buf, 26,
+                 time); // 26 is the size of the buffer required by ctime_s
+}
+
+// Define struct rusage as a simplified version
+struct rusage {
+  struct timeval ru_utime; // User time used
+  struct timeval ru_stime; // System time used
+};
+
+// Define RUSAGE_SELF (since we only care about the current process)
+#define RUSAGE_SELF 0
+
+int getrusage(int who, struct rusage *usage) {
+  if (who != RUSAGE_SELF) {
+    return -1; // For simplicity, we'll only handle RUSAGE_SELF.
+  }
+
+  FILETIME creationTime, exitTime, kernelTime, userTime;
+  SYSTEM_INFO sysInfo;
+  GetProcessTimes(GetCurrentProcess(), &creationTime, &exitTime, &kernelTime,
+                  &userTime);
+
+  // Convert FILETIME to timeval (milliseconds)
+  ULARGE_INTEGER kernel, user;
+  kernel.LowPart = kernelTime.dwLowDateTime;
+  kernel.HighPart = kernelTime.dwHighDateTime;
+
+  user.LowPart = userTime.dwLowDateTime;
+  user.HighPart = userTime.dwHighDateTime;
+
+  // Fill in the rusage struct
+  usage->ru_utime.tv_sec = user.QuadPart / 10000000;         // seconds
+  usage->ru_utime.tv_usec = (user.QuadPart % 10000000) / 10; // microseconds
+
+  usage->ru_stime.tv_sec = kernel.QuadPart / 10000000;         // seconds
+  usage->ru_stime.tv_usec = (kernel.QuadPart % 10000000) / 10; // microseconds
+
+  return 0;
+}
 
 DynamicParameters initDynamicParameters() {
   DynamicParameters params = {.input_noise_scale = 0.1f,
@@ -1163,6 +1275,38 @@ void loadHierarchicalMemory(MemorySystem *system, const char *filename) {
   fclose(fp);
 }
 
+void initializeNeurons(Neuron *neurons, int *connections, float *weights,
+                       float *input_tensor) {
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    // Initialize state with input
+    neurons[i].state = input_tensor[i % INPUT_SIZE];
+    // Initialize output with transformed state
+    float scale = 1.5f;
+    float bias = 0.1f;
+    neurons[i].output = tanh(neurons[i].state * scale + bias);
+    neurons[i].num_connections = 2;
+    neurons[i].layer_id = i % 2;
+  }
+
+  // Initialize connections
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    // Create feedforward connections between layers
+    if (neurons[i].layer_id == 0) {
+      connections[i * MAX_CONNECTIONS] = (i + 1) % MAX_NEURONS;
+      connections[i * MAX_CONNECTIONS + 1] = (i + 2) % MAX_NEURONS;
+    } else {
+      connections[i * MAX_CONNECTIONS] = (i + 1) % MAX_NEURONS;
+      connections[i * MAX_CONNECTIONS + 1] = (i + 3) % MAX_NEURONS;
+    }
+  }
+
+  // Initialize weights with varied values
+  for (int i = 0; i < MAX_NEURONS * MAX_CONNECTIONS; i++) {
+    // Create weights between -0.5 and 0.5
+    weights[i] = (((float)rand() / RAND_MAX) - 0.5f);
+  }
+}
+
 void saveNetworkStates(NetworkStateSnapshot *history, int total_steps) {
   // Create the root JSON object
   struct json_object *root = json_object_new_object();
@@ -1227,38 +1371,6 @@ void saveNetworkStates(NetworkStateSnapshot *history, int total_steps) {
   // Clean up
   fclose(fp);
   json_object_put(root); // Free the memory used by the JSON object
-}
-
-void initializeNeurons(Neuron *neurons, int *connections, float *weights,
-                       float *input_tensor) {
-  for (int i = 0; i < MAX_NEURONS; i++) {
-    // Initialize state with input
-    neurons[i].state = input_tensor[i % INPUT_SIZE];
-    // Initialize output with transformed state
-    float scale = 1.5f;
-    float bias = 0.1f;
-    neurons[i].output = tanh(neurons[i].state * scale + bias);
-    neurons[i].num_connections = 2;
-    neurons[i].layer_id = i % 2;
-  }
-
-  // Initialize connections
-  for (int i = 0; i < MAX_NEURONS; i++) {
-    // Create feedforward connections between layers
-    if (neurons[i].layer_id == 0) {
-      connections[i * MAX_CONNECTIONS] = (i + 1) % MAX_NEURONS;
-      connections[i * MAX_CONNECTIONS + 1] = (i + 2) % MAX_NEURONS;
-    } else {
-      connections[i * MAX_CONNECTIONS] = (i + 1) % MAX_NEURONS;
-      connections[i * MAX_CONNECTIONS + 1] = (i + 3) % MAX_NEURONS;
-    }
-  }
-
-  // Initialize weights with varied values
-  for (int i = 0; i < MAX_NEURONS * MAX_CONNECTIONS; i++) {
-    // Create weights between -0.5 and 0.5
-    weights[i] = (((float)rand() / RAND_MAX) - 0.5f);
-  }
 }
 
 VocabularyEntry vocabulary[VOCAB_SIZE];
@@ -2368,7 +2480,7 @@ void processNeurons(Neuron *neurons, int num_neurons, float *weights,
 // Function to measure execution time
 double getCurrentTime() {
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(get_monotonic_time(), &ts);
   return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
@@ -6351,11 +6463,11 @@ void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
   }
 }
 
-SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
-                                                  const float *weights,
-                                                  const int *connections,
-                                                  size_t max_neurons,
-                                                  size_t max_connections) {
+SecurityValidationStatus
+validateCriticalSecurity(const Neuron *neurons, const float *weights,
+                         const int *connections, size_t max_neurons,
+                         size_t max_connections,
+                         const MemorySystem *memorySystem) {
   SecurityValidationStatus status = {.critical_violation = false,
                                      .suspect_address = 0,
                                      .violation_type = NULL};
@@ -6421,27 +6533,38 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
   return status;
 }
 
-void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
-                                     int *connections,
-                                     const SecurityValidationStatus *status) {
+// Emergency shutdown for critical security violations
+void criticalSecurityShutdown(Neuron *neurons, float *weights, int *connections,
+                              MemorySystem *memorySystem,
+                              const SecurityValidationStatus *status) {
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
   fprintf(stderr, "Type: %s\n", status->violation_type);
-  fprintf(stderr, "Suspect address: 0x%llx\n", status->suspect_address);
+  fprintf(stderr, "Suspect address: 0x%x\n", status->suspect_address);
 
-  // Free up the suspect address
-  void *suspect_ptr = (void *)status->suspect_address;
-  if (suspect_ptr) {
-    memset(suspect_ptr, 0,
-           sizeof(Neuron)); // Clear the memory at the suspect address
+  // Force immediate cleanup
+  if (memorySystem) {
+    memset(memorySystem->entries, 0,
+           memorySystem->capacity * sizeof(MemoryEntry));
+    freeMemorySystem(memorySystem);
   }
 
-  // Log the violation for further investigation
-  FILE *log_file = fopen("security_violations.log", "a");
-  if (log_file) {
-    fprintf(log_file, "Violation Type: %s\n", status->violation_type);
-    fprintf(log_file, "Suspect Address: 0x%llx\n", status->suspect_address);
-    fclose(log_file);
+  if (neurons) {
+    memset(neurons, 0, MAX_NEURONS * sizeof(Neuron));
+    free(neurons);
   }
+
+  if (weights) {
+    memset(weights, 0, MAX_NEURONS * MAX_CONNECTIONS * sizeof(float));
+    free(weights);
+  }
+
+  if (connections) {
+    memset(connections, 0, MAX_NEURONS * MAX_CONNECTIONS * sizeof(int));
+    free(connections);
+  }
+
+  // Force process termination
+  _Exit(1); // Use _Exit instead of exit() for immediate termination
 }
 
 float computeBeliefStability(const SelfIdentitySystem *system,
@@ -7810,12 +7933,13 @@ int main() {
     applyMetaControllerAdaptations(neurons, weights, metaController,
                                    MAX_NEURONS);
 
-    SecurityValidationStatus secStatus = validateCriticalSecurity(
-        neurons, weights, connections, max_neurons, max_connections);
+    SecurityValidationStatus secStatus =
+        validateCriticalSecurity(neurons, weights, connections, max_neurons,
+                                 max_connections, memorySystem);
 
     if (secStatus.critical_violation) {
-      handleCriticalSecurityViolation(neurons, weights, connections,
-                                      &secStatus);
+      criticalSecurityShutdown(neurons, weights, connections, memorySystem,
+                               &secStatus);
     }
 
     integrateKnowledgeFilter(knowledge_filter, memorySystem, neurons,
@@ -8358,10 +8482,9 @@ int main() {
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
     printf("Memory Usage Benchmark:\n");
-    printf("Max Resident Set Size: %ld KB\n", usage.ru_maxrss);
+    printMemoryUsage();
   }
 
-  // Save final state
   saveNetworkStates(stateHistory, STEPS);
   saveMemorySystem(memorySystem, "memory_system.dat");
   saveHierarchicalMemory(memorySystem, "hierarchical_memory.dat");

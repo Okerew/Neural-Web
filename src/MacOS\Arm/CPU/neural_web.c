@@ -46,6 +46,7 @@
 #define MAX_DECISION_STEPS 20
 #define MAX_SYMBOLS 100
 #define MAX_QUESTIONS 10
+#define VOCAB_SIZE 100
 
 typedef struct {
   float state;
@@ -188,12 +189,12 @@ typedef struct {
 } NeuronPerformanceMetric;
 
 typedef struct {
-  const char *word;
-  const char *category;    // e.g., "fruit", "common", "action"
-  float semantic_weight;   // How strongly this word relates to its category
-  const char *connects_to; // The most likely word it connects with
-  const char *description; // Detailed description of the word
-  float letter_weight;     // New field for letter-based weight
+  char word[50];
+  char category[50];
+  char *connects_to;
+  float semantic_weight;
+  const char *description;
+  float letter_weight;
 } VocabularyEntry;
 
 typedef struct {
@@ -437,7 +438,7 @@ typedef struct {
 
 typedef struct {
   bool critical_violation;
-  int suspect_address;
+  uint64_t suspect_address;
   const char *violation_type;
 } SecurityValidationStatus;
 
@@ -1260,157 +1261,86 @@ void initializeNeurons(Neuron *neurons, int *connections, float *weights,
   }
 }
 
-const VocabularyEntry vocabulary[] = {
-    // Common English Words
-    {"the", "common", 0.9f, "be",
-     "Definite article identifying a specific noun"},
-    {"be", "common", 0.8f, "to", "Verb expressing existence or state"},
-    {"to", "common", 0.8f, "the", "Indicates direction or purpose"},
-    {"of", "common", 0.9f, "and", "Shows possession or connection"},
-    {"and", "common", 0.8f, "a", "Connects words, phrases, or clauses"},
-    {"a", "common", 0.9f, "the", "Indefinite article for singular nouns"},
-    {"in", "common", 0.7f, "the", "Indicates location or state"},
-    {"that", "common", 0.6f, "have", "Introduces a descriptive clause"},
-    {"have", "common", 0.5f, "it", "Indicates possession or experience"},
-    {"it", "common", 0.6f, "is", "Refers to a previous noun or concept"},
-    {"for", "common", 0.8f, "the", "Indicates purpose or recipient"},
-    {"not", "common", 0.7f, "be", "Negation or denial"},
-    {"on", "common", 0.6f, "the", "Indicates position or contact"},
-    {"with", "common", 0.5f, "you", "Indicates accompaniment or method"},
-    {"he", "common", 0.7f, "is", "Masculine third-person singular pronoun"},
-    {"as", "common", 0.5f, "the", "Comparison or equivalence marker"},
-    {"you", "common", 0.7f, "are", "Second-person pronoun"},
-    {"do", "common", 0.6f, "not", "Auxiliary verb for questions or emphasis"},
-    {"at", "common", 0.6f, "the", "Indicates specific location or time"},
-    {"are", "common", 0.7f, "you", "Plural or second-person form of 'to be'"},
+VocabularyEntry vocabulary[VOCAB_SIZE];
 
-    // Fruits
-    {"apple", "fruit", 1.0f, "banana",
-     "Round, sweet fruit with crisp flesh, red/green/yellow"},
-    {"banana", "fruit", 0.9f, "cherry",
-     "Long curved tropical fruit with soft yellow flesh"},
-    {"cherry", "fruit", 0.8f, "date",
-     "Small round fruit, sweet and slightly tart flavor"},
-    {"date", "fruit", 0.8f, "fig",
-     "Sweet, wrinkled fruit often used in desserts"},
-    {"elderberry", "fruit", 0.7f, "grape",
-     "Small, dark purple berry with tart flavor"},
-    {"fig", "fruit", 0.9f, "grape", "Sweet, soft fruit with unique texture"},
-    {"grape", "fruit", 0.8f, "orange",
-     "Small round fruit that grows in clusters"},
-    {"honeydew", "fruit", 0.7f, "melon",
-     "Pale green melon with sweet, mild flavor"},
-    {"kiwi", "fruit", 0.9f, "mango",
-     "Small oval fruit with fuzzy brown exterior"},
-    {"lemon", "fruit", 0.8f, "lime",
-     "Bright yellow citrus fruit with sour taste"},
-    {"mango", "fruit", 1.0f, "papaya",
-     "Sweet tropical fruit with vibrant orange flesh"},
-    {"nectarine", "fruit", 0.8f, "peach",
-     "Smooth-skinned stone fruit similar to peaches"},
-    {"orange", "fruit", 1.0f, "tangerine",
-     "Bright orange citrus fruit with sweet flavor"},
-    {"papaya", "fruit", 0.9f, "mango",
-     "Soft tropical fruit with green to orange color"},
-    {"quince", "fruit", 0.6f, "apple", "Hard, yellow fruit used in preserves"},
-    {"raspberry", "fruit", 0.8f, "blueberry",
-     "Soft red berry with delicate flavor"},
-    {"strawberry", "fruit", 0.9f, "cream",
-     "Red, heart-shaped berry with sweet taste"},
-    {"tangerine", "fruit", 0.8f, "orange", "Small, sweet citrus fruit"},
-    {"ugli", "fruit", 0.5f, "fruit", "Jamaican hybrid citrus fruit"},
-    {"vanilla", "fruit", 0.7f, "bean", "Flavoring derived from orchid plant"},
-    {"watermelon", "fruit", 1.0f, "summer",
-     "Large green fruit with sweet red interior"},
-    {"xigua", "fruit", 0.6f, "melon", "Chinese word for watermelon"},
+int loadVocabularyFromFile(const char *filename) {
+  FILE *file = fopen(filename, "r");
+  if (!file) {
+    fprintf(stderr, "Error opening file: %s\n", filename);
+    return -1;
+  }
 
-    // Vegetables
-    {"yam", "vegetable", 0.8f, "potato",
-     "Starchy root vegetable with various colors"},
-    {"zucchini", "vegetable", 0.8f, "squash",
-     "Green summer squash with mild flavor"},
+  // Count the number of lines (entries) in the file
+  int entryCount = 0;
+  char buffer[500];
 
-    {"run", "action", 0.7f, "fast", "Moving quickly on foot with rapid steps"},
-    {"jump", "action", 0.8f, "high",
-     "Propelling oneself upward off the ground"},
-    {"sing", "action", 0.6f, "loud", "Producing musical sounds with voice"},
-    {"dance", "action", 0.7f, "music",
-     "Rhythmic body movement to musical beats"},
-    {"write", "action", 0.8f, "book", "Creating text by forming words"},
+  while (fgets(buffer, sizeof(buffer), file) != NULL) {
+    // Skip comments and empty lines
+    if (buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
+      continue;
+    }
+    entryCount++;
+  }
 
-    {"carrot", "vegetable", 0.9f, "salad",
-     "Orange root vegetable, rich in beta-carotene"},
-    {"broccoli", "vegetable", 0.8f, "green",
-     "Tree-like green vegetable with nutrient-dense florets"},
-    {"potato", "vegetable", 0.7f, "starch",
-     "Underground tuber, staple in many cuisines"},
+  // Reset file position to beginning
+  rewind(file);
 
-    {"love", "emotion", 0.9f, "heart", "Deep affection, care, and connection"},
-    {"hope", "emotion", 0.8f, "future", "Optimistic expectation and desire"},
-    {"dream", "concept", 0.7f, "imagination",
-     "Visionary mental experience or aspiration"},
+  // Parse each line and fill the vocabulary entries
+  int index = 0;
+  while (fgets(buffer, sizeof(buffer), file) != NULL && index < entryCount) {
+    // Skip comments and empty lines
+    if (buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
+      continue;
+    }
 
-    // Punctuation
-    {".", "punctuation", 0.5f, NULL, "Marks the end of a declarative sentence"},
+    // Remove newline character
+    buffer[strcspn(buffer, "\n")] = 0;
 
-    {"fast", "adjective", 0.7f, "run",
-     "Moving or capable of moving at high speed"},
-    {"high", "adjective", 0.7f, "jump",
-     "Extending far upward; great vertical extent"},
-    {"loud", "adjective", 0.6f, "sing",
-     "Producing or capable of producing much noise"},
-    {"music", "noun", 0.8f, "dance",
-     "Vocal or instrumental sounds combined to produce beauty of form, "
-     "harmony, and expression of emotion"},
-    {"book", "noun", 0.8f, "write",
-     "Written or printed work consisting of pages glued or sewn together"},
-    {"salad", "noun", 0.7f, "carrot",
-     "Dish consisting of mixed pieces of food, typically vegetables"},
-    {"green", "adjective", 0.8f, "broccoli",
-     "Color between blue and yellow in the spectrum; colored like grass"},
-    {"starch", "noun", 0.6f, "potato",
-     "Carbohydrate consisting of a large number of glucose units joined by "
-     "glycosidic bonds"},
-    {"heart", "noun", 0.9f, "love",
-     "Hollow muscular organ that pumps the blood through the circulatory "
-     "system by rhythmic contraction and dilation"},
-    {"future", "noun", 0.8f, "hope",
-     "Time or a period of time following the moment of speaking or writing; "
-     "time regarded as still to come"},
-    {"imagination", "noun", 0.7f, "dream",
-     "Faculty or action of forming new ideas, or images or concepts of "
-     "external objects not present to the senses"},
-    {"cream", "noun", 0.7f, "strawberry",
-     "Thick white or pale yellow fatty liquid which rises to the top when milk "
-     "is left to stand and which can be eaten as an accompaniment to desserts "
-     "or used as a cooking ingredient"},
-    {"bean", "noun", 0.6f, "vanilla",
-     "Edible seed, typically kidney-shaped, growing in long pods on certain "
-     "leguminous plants"},
-    {"summer", "noun", 0.7f, "watermelon",
-     "Warmest season of the year, in the northern hemisphere from June to "
-     "August and in the southern hemisphere from December to February"},
-    {"melon", "noun", 0.7f, "honeydew",
-     "Large round fruit with sweet pulpy flesh and thick skin"},
-    {"squash", "noun", 0.7f, "zucchini",
-     "Edible gourd, typically with green skin and white flesh, eaten as a "
-     "vegetable"},
-    {"blueberry", "noun", 0.7f, "raspberry", "Small blue-black edible berry"},
-    {"peach", "noun", 0.8f, "nectarine",
-     "Soft, juicy fruit with sweet yellow or pinkish flesh and downy "
-     "pinkish-yellow skin"},
-    {"lime", "noun", 0.7f, "lemon",
-     "Round citrus fruit with green skin and acidic juice"},
-    {"is", "verb", 0.8f, "he", "Third-person singular present of 'be'"},
-    {"are", "verb", 0.8f, "you",
-     "Second-person singular present and plural present of 'be'"},
-    {"have", "verb", 0.7f, "it", "Possess, own, or hold"},
-    {"with", "preposition", 0.7f, "you",
-     "Accompanied by (another person or thing)"},
-    {"he", "pronoun", 0.8f, "is",
-     "Used to refer to a man, boy, or male animal previously mentioned or "
-     "easily identified"},
-};
+    // Format expected:
+    // word,category,semantic_weight,connects_to,description,letter_weight
+    char *token = strtok(buffer, ",");
+    if (!token)
+      continue;
+    strncpy(vocabulary[index].word, token, sizeof(vocabulary[index].word) - 1);
+
+    token = strtok(NULL, ",");
+    if (!token)
+      continue;
+    strncpy(vocabulary[index].category, token,
+            sizeof(vocabulary[index].category) - 1);
+
+    token = strtok(NULL, ",");
+    if (!token)
+      continue;
+    vocabulary[index].semantic_weight = atof(token);
+
+    token = strtok(NULL, ",");
+    if (!token || strcmp(token, "NULL") == 0 || strcmp(token, "null") == 0) {
+      vocabulary[index].connects_to = NULL;
+    } else {
+      vocabulary[index].connects_to = strdup(token);
+    }
+
+    token = strtok(NULL, ",");
+    if (!token) {
+      vocabulary[index].description = NULL;
+    } else {
+      vocabulary[index].description = strdup(token);
+    }
+
+    token = strtok(NULL, ",");
+    if (!token) {
+      vocabulary[index].letter_weight = 1.0f; // Default value
+    } else {
+      vocabulary[index].letter_weight = atof(token);
+    }
+
+    index++;
+  }
+
+  fclose(file);
+  return entryCount; // Return the actual number of entries loaded
+}
 
 const float letter_weights[26] = {1.0f,  0.9f,  0.8f, 0.85f, 0.95f, 0.75f, 0.7f,
                                   0.8f,  0.9f,  0.6f, 0.7f,  0.85f, 0.75f, 0.9f,
@@ -1560,7 +1490,6 @@ float computeLetterWeight(const char *word) {
   return (length > 0) ? (weight_sum / length) : 0.0f; // Normalize by length
 }
 
-// Initialize vocabulary letter weights
 void initializeVocabularyWeights() {
   for (int i = 0; i < vocab_size; i++) {
     ((VocabularyEntry *)&vocabulary[i])->letter_weight =
@@ -1568,35 +1497,355 @@ void initializeVocabularyWeights() {
   }
 }
 
-float embeddings[vocab_size][EMBEDDING_SIZE];
+void importPretrainedEmbeddings(const char *embedding_file) {
+  FILE *file = fopen(embedding_file, "r");
+  if (!file) {
+    fprintf(stderr, "Error: Could not open embedding file: %s\n",
+            embedding_file);
 
-void initializeEmbeddings() {
-  for (int i = 0; i < vocab_size; i++) {
+    // Fall back to random initialization if file can't be opened
+    printf("Falling back to random initialization...\n");
+    for (int i = 0; i < vocab_size; i++) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        // Initialize with Gaussian distribution (standard practice)
+        float u1 = (float)rand() / RAND_MAX;
+        float u2 = (float)rand() / RAND_MAX;
+        float z = sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
+        // Scale to be small (typical for initialization)
+        embeddings[i][j] = z * 0.02f;
+      }
+    }
+    return;
+  }
+
+  printf("Loading pre-trained word embeddings from %s...\n", embedding_file);
+
+  // Initialize vocab_found array to track which words were found in the
+  // pre-trained file
+  bool vocab_found[vocab_size];
+  memset(vocab_found, 0, vocab_size * sizeof(bool));
+
+  // Read header (if GloVe or Word2Vec format)
+  char line[10000]; // Buffer for reading lines (embeddings can be large)
+  if (fgets(line, sizeof(line), file) != NULL) {
+    // Word2Vec format often starts with: <vocab_size> <embedding_dimension>
+    int file_vocab_size, file_dim;
+    if (sscanf(line, "%d %d", &file_vocab_size, &file_dim) == 2) {
+      printf("Word2Vec format detected: %d words, %d dimensions\n",
+             file_vocab_size, file_dim);
+      // If dimensions don't match, we'll need to adjust
+      if (file_dim != EMBEDDING_SIZE) {
+        printf("Warning: File embedding size (%d) doesn't match system "
+               "embedding size (%d)\n",
+               file_dim, EMBEDDING_SIZE);
+        printf("Embeddings will be %s\n",
+               file_dim > EMBEDDING_SIZE ? "truncated" : "padded with zeros");
+      }
+    } else {
+      // If not a header, rewind to read the first embedding
+      rewind(file);
+    }
+  }
+
+  // Process each line of the embedding file
+  int loaded_count = 0;
+  while (fgets(line, sizeof(line), file) != NULL) {
+    char *word = strtok(line, " \t");
+    if (!word)
+      continue;
+
+    // Find this word in our vocabulary
+    int vocab_idx = -1;
+    for (int i = 0; i < vocab_size; i++) {
+      if (strcmp(word, vocabulary[i].word) == 0) {
+        vocab_idx = i;
+        break;
+      }
+    }
+
+    // Skip this word if not in our vocabulary
+    if (vocab_idx == -1)
+      continue;
+
+    // Mark as found
+    vocab_found[vocab_idx] = true;
+    loaded_count++;
+
+    // Parse the embedding values
+    float *current_embedding = embeddings[vocab_idx];
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
-      embeddings[i][j] =
-          (float)rand() / RAND_MAX; // Random values between 0 and 1
+      char *token = strtok(NULL, " \t\n");
+      if (token) {
+        current_embedding[j] = atof(token);
+      } else {
+        // If we run out of values, pad with zeros
+        current_embedding[j] = 0.0f;
+      }
+    }
+  }
+
+  fclose(file);
+  printf(
+      "Successfully loaded %d/%d vocabulary words from pretrained embeddings\n",
+      loaded_count, vocab_size);
+
+  // For words not found in the pre-trained file, initialize with random values
+  // and try to infer from similar words in our vocabulary that were found
+  for (int i = 0; i < vocab_size; i++) {
+    if (!vocab_found[i]) {
+      printf("Word '%s' not found in pretrained embeddings, generating...\n",
+             vocabulary[i].word);
+
+      // Check if we can find words in the same category that were loaded
+      bool found_category_match = false;
+      float category_vector[EMBEDDING_SIZE] = {0};
+      int category_matches = 0;
+
+      for (int j = 0; j < vocab_size; j++) {
+        if (i != j && vocab_found[j] &&
+            strcmp(vocabulary[i].category, vocabulary[j].category) == 0) {
+          // Found a word in the same category, add its embedding
+          for (int k = 0; k < EMBEDDING_SIZE; k++) {
+            category_vector[k] += embeddings[j][k];
+          }
+          category_matches++;
+          found_category_match = true;
+        }
+      }
+
+      if (found_category_match) {
+        // Use average of category embeddings with random noise
+        for (int k = 0; k < EMBEDDING_SIZE; k++) {
+          // Average of category vectors
+          category_vector[k] /= category_matches;
+          // Add some noise for uniqueness
+          float noise = ((float)rand() / RAND_MAX - 0.5f) * 0.1f;
+          embeddings[i][k] = category_vector[k] + noise;
+        }
+      } else {
+        // Completely random initialization
+        for (int j = 0; j < EMBEDDING_SIZE; j++) {
+          float u1 = (float)rand() / RAND_MAX;
+          float u2 = (float)rand() / RAND_MAX;
+          float z = sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
+          embeddings[i][j] = z * 0.02f;
+        }
+      }
+    }
+  }
+
+  // Apply custom modifiers for all words based on vocabulary attributes
+  for (int i = 0; i < vocab_size; i++) {
+    // Apply category-specific modifiers to certain dimensions
+    if (strcmp(vocabulary[i].category, "fruit") == 0) {
+      for (int j = 0; j < 10; j++) {
+        embeddings[i][j] += 0.2f; // Boost fruit-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "action") == 0) {
+      for (int j = 10; j < 20; j++) {
+        embeddings[i][j] += 0.2f; // Boost action-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
+      for (int j = 20; j < 30; j++) {
+        embeddings[i][j] += 0.2f; // Boost emotion-specific dimensions
+      }
+    }
+
+    // Incorporate letter-weight in specific dimensions
+    float letter_weight = vocabulary[i].letter_weight;
+    for (int j = 30; j < 40; j++) {
+      embeddings[i][j] += letter_weight * 0.1f;
+    }
+
+    // Incorporate semantic weight in specific dimensions
+    float semantic_weight = vocabulary[i].semantic_weight;
+    for (int j = 40; j < 50; j++) {
+      embeddings[i][j] += semantic_weight * 0.1f;
+    }
+
+    // Use connections information to modify embedding
+    if (vocabulary[i].connects_to) {
+      // Find the connected word in vocabulary
+      for (int j = 0; j < vocab_size; j++) {
+        if (strcmp(vocabulary[i].connects_to, vocabulary[j].word) == 0) {
+          // Make connected words more similar in specific dimensions
+          for (int k = 50; k < 60; k++) {
+            float avg = (embeddings[i][k] + embeddings[j][k]) * 0.5f;
+            // Move both embeddings slightly toward each other
+            embeddings[i][k] = embeddings[i][k] * 0.8f + avg * 0.2f;
+            embeddings[j][k] = embeddings[j][k] * 0.8f + avg * 0.2f;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Final L2 normalization for all embeddings (industry standard)
+  for (int i = 0; i < vocab_size; i++) {
+    float norm = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      norm += embeddings[i][j] * embeddings[i][j];
+    }
+    norm = sqrt(norm);
+
+    // Prevent division by zero
+    if (norm > 1e-8) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        embeddings[i][j] /= norm;
+      }
+    }
+  }
+
+  printf("Embedding initialization completed with custom modifiers applied\n");
+}
+
+void initializeEmbeddings(const char *embedding_file) {
+  // Start with pre-trained embeddings (industry standard)
+  importPretrainedEmbeddings(embedding_file);
+
+  // Apply custom initialization on top of pre-trained vectors
+  for (int i = 0; i < vocab_size; i++) {
+
+    // Category encoding (first 10 dimensions)
+    if (strcmp(vocabulary[i].category, "fruit") == 0) {
+      for (int j = 0; j < 10; j++) {
+        embeddings[i][j] += 0.2f; // Boost fruit-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "action") == 0) {
+      for (int j = 10; j < 20; j++) {
+        embeddings[i][j] += 0.3f; // Boost action-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
+      for (int j = 20; j < 30; j++) {
+        embeddings[i][j] += 0.5f; // Boost emotion-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "object") == 0) {
+      for (int j = 30; j < 40; j++) {
+        embeddings[i][j] += 0.1f; // Boost object-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "place") == 0) {
+      for (int j = 40; j < 50; j++) {
+        embeddings[i][j] += 0.2f; // Boost place-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "time") == 0) {
+      for (int j = 50; j < 60; j++) {
+        embeddings[i][j] += 0.3f; // Boost time-specific dimensions
+      }
+    } else if (strcmp(vocabulary[i].category, "person") == 0) {
+      for (int j = 60; j < 70; j++) {
+        embeddings[i][j] += 0.4f; // Boost person-specific dimensions
+      }
+    }
+
+    // Incorporate letter-weight in specific dimensions
+    float letter_weight = vocabulary[i].letter_weight;
+    for (int j = 30; j < 40; j++) {
+      embeddings[i][j] += letter_weight * 0.1f;
+    }
+
+    // Incorporate semantic weight in specific dimensions
+    float semantic_weight = vocabulary[i].semantic_weight;
+    for (int j = 40; j < 50; j++) {
+      embeddings[i][j] += semantic_weight * 0.1f;
+    }
+
+    // Re-normalize the embedding after modifications
+    float norm = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      norm += embeddings[i][j] * embeddings[i][j];
+    }
+    norm = sqrt(norm);
+
+    if (norm > 1e-8) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        embeddings[i][j] /= norm;
+      }
     }
   }
 }
 
 float *getWordEmbedding(const char *word) {
+  static float contextual_embedding[EMBEDDING_SIZE];
+
+  // Find the word in vocabulary
+  int word_index = -1;
   for (int i = 0; i < vocab_size; i++) {
     if (strcmp(word, vocabulary[i].word) == 0) {
-      float *base_embedding = embeddings[i];
-      float complexity_factor =
-          strlen(vocabulary[i].description) /
-          50.0f; // More detailed descriptions increase complexity
-
-      // Scale embedding by semantic weight and description complexity
-      for (int j = 0; j < EMBEDDING_SIZE; j++) {
-        base_embedding[j] *=
-            (vocabulary[i].semantic_weight + vocabulary[i].letter_weight) *
-            (1.0f + complexity_factor);
-      }
-      return base_embedding;
+      word_index = i;
+      break;
     }
   }
-  return embeddings[0]; // Default embedding if word is not in vocabulary
+
+  if (word_index == -1) {
+    // Word not found - use subword tokenization approach (like BERT/GPT)
+    // This is a simplified version of subword tokenization
+    memset(contextual_embedding, 0, EMBEDDING_SIZE * sizeof(float));
+
+    // Generate embedding from character n-grams (industry standard approach for
+    // OOV words)
+    size_t len = strlen(word);
+    for (size_t i = 0; i < len; i++) {
+      for (size_t n = 1; n <= 3 && i + n <= len; n++) {
+        // Use character n-grams to build embedding
+        unsigned int hash = 0;
+        for (size_t j = i; j < i + n; j++) {
+          hash = hash * 101 + word[j];
+        }
+
+        // Use hash to modify embedding (similar to FastText approach)
+        for (int j = 0; j < EMBEDDING_SIZE / 10; j++) {
+          int idx = (hash + j) % EMBEDDING_SIZE;
+          contextual_embedding[idx] +=
+              letter_weights[(word[i] - 'a') % 26] / (float)len;
+        }
+      }
+    }
+
+    // Normalize the embedding
+    float norm = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      norm += contextual_embedding[j] * contextual_embedding[j];
+    }
+    norm = sqrt(norm);
+
+    if (norm > 1e-8) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        contextual_embedding[j] /= norm;
+      }
+    }
+  } else {
+    // Word found - use base embedding and apply custom modifications
+    memcpy(contextual_embedding, embeddings[word_index],
+           EMBEDDING_SIZE * sizeof(float));
+
+    // Apply the custom modifiers as in the original code
+    float complexity_factor =
+        strlen(vocabulary[word_index].description) / 50.0f;
+    float scaling_factor = (vocabulary[word_index].semantic_weight +
+                            vocabulary[word_index].letter_weight) *
+                           (1.0f + complexity_factor);
+
+    // Apply scaling but maintain vector magnitude (more stable)
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      contextual_embedding[j] *= scaling_factor;
+    }
+
+    // Re-normalize (standard practice)
+    float norm = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      norm += contextual_embedding[j] * contextual_embedding[j];
+    }
+    norm = sqrt(norm);
+
+    if (norm > 1e-8) {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        contextual_embedding[j] /= norm;
+      }
+    }
+  }
+
+  return contextual_embedding;
 }
 
 void updateEmbeddings(float *feedback, const char *word) {
@@ -1636,34 +1885,67 @@ float cosineSimilarity(float *vec1, float *vec2, int size) {
 void computeAttentionWeights(float *attention_weights, int step, int num_tokens,
                              float **token_embeddings,
                              MemoryEntry *relevantMemory) {
-  // Step-based relevance: Words closer to the current step are more relevant
-  for (int i = 0; i < num_tokens; i++) {
-    float step_relevance = 1.0f / (1.0f + fabsf((float)i - (float)step));
-    attention_weights[i] = step_relevance;
-  }
+  // Initialize attention scores
+  float attention_scores[INPUT_SIZE] = {0};
 
-  // Contextual similarity: Words similar to the current context are more
-  // relevant
-  float context[EMBEDDING_SIZE] = {0};
+  // Calculate attention query vector (simplified version)
+  float query[EMBEDDING_SIZE] = {0};
   if (relevantMemory) {
+    // Use memory as query
     for (int i = 0; i < EMBEDDING_SIZE; i++) {
-      context[i] = relevantMemory->vector[i % MAX_NEURONS];
+      query[i] = relevantMemory->vector[i % MAX_NEURONS];
+    }
+  } else {
+    // Default query based on step
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      query[i] = sinf(0.01f * step + 0.1f * i);
     }
   }
 
+  // Normalize query vector
+  float query_norm = 0.0f;
+  for (int i = 0; i < EMBEDDING_SIZE; i++) {
+    query_norm += query[i] * query[i];
+  }
+  query_norm = sqrt(query_norm);
+
+  if (query_norm > 1e-8) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      query[i] /= query_norm;
+    }
+  }
+
+  // Calculate dot product attention (scaled dot-product attention)
   for (int i = 0; i < num_tokens; i++) {
-    float similarity =
-        cosineSimilarity(token_embeddings[i], context, EMBEDDING_SIZE);
-    attention_weights[i] += similarity;
+    // Dot product between query and token embedding
+    float dot_product = 0.0f;
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      dot_product += query[j] * token_embeddings[i][j];
+    }
+
+    // Scale by sqrt(dimension) as in transformer attention
+    attention_scores[i] = dot_product / sqrt(EMBEDDING_SIZE);
+  }
+
+  // Apply softmax to get attention weights
+  float max_score = -INFINITY;
+  for (int i = 0; i < num_tokens; i++) {
+    if (attention_scores[i] > max_score) {
+      max_score = attention_scores[i];
+    }
+  }
+
+  float sum_exp = 0.0f;
+  for (int i = 0; i < num_tokens; i++) {
+    attention_weights[i] = expf(attention_scores[i] - max_score);
+    sum_exp += attention_weights[i];
   }
 
   // Normalize attention weights
-  float sum = 0.0f;
-  for (int i = 0; i < num_tokens; i++) {
-    sum += attention_weights[i];
-  }
-  for (int i = 0; i < num_tokens; i++) {
-    attention_weights[i] /= sum;
+  if (sum_exp > 1e-8) {
+    for (int i = 0; i < num_tokens; i++) {
+      attention_weights[i] /= sum_exp;
+    }
   }
 }
 
@@ -1673,22 +1955,22 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
   float t = step * 0.01f;
   DynamicParameters params = system_params->dynamic_params;
 
-  // Tokenize the text input
+  // Tokenize the text input (modern NLP systems use subword tokenization)
   char *tokens[INPUT_SIZE];
   int num_tokens = 0;
-  float feedback[EMBEDDING_SIZE];
   tokenizeString(text_input, tokens, &num_tokens);
 
-  // Enhanced token embedding with category and semantic weight consideration
+  // Get token embeddings with contextual information
   float *token_embeddings[INPUT_SIZE];
   float letter_weights[INPUT_SIZE] = {0};
   float category_weights[INPUT_SIZE] = {0};
 
+  // First pass: get basic embeddings and weights
   for (int i = 0; i < num_tokens; i++) {
     token_embeddings[i] = getWordEmbedding(tokens[i]);
     letter_weights[i] = computeLetterWeight(tokens[i]);
 
-    // Find word's semantic category weight
+    // Find category weights (preserving custom logic)
     for (int j = 0; j < vocab_size; j++) {
       if (strcmp(tokens[i], vocabulary[j].word) == 0) {
         // Weight based on category and semantic significance
@@ -1696,6 +1978,8 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
           category_weights[i] = 1.2f;
         else if (strcmp(vocabulary[j].category, "emotion") == 0)
           category_weights[i] = 1.1f;
+        else if (strcmp(vocabulary[j].category, "fruit") == 0)
+          category_weights[i] = 1.05f;
         else
           category_weights[i] = 1.0f;
         break;
@@ -1703,41 +1987,67 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
     }
   }
 
-  // Compute attention weights with enhanced category sensitivity
+  // Compute attention weights using modern transformer-style attention
   float attention_weights[INPUT_SIZE] = {0};
   computeAttentionWeights(attention_weights, step, num_tokens, token_embeddings,
                           relevantMemory);
 
-  // Adjust attention weights with category influence
+  // Apply category and letter weight modifiers to attention weights
   for (int i = 0; i < num_tokens; i++) {
-    attention_weights[i] *= category_weights[i];
-  }
-  for (int i = 0; i < num_tokens; i++) {
-    attention_weights[i] *= letter_weights[i];
+    attention_weights[i] *= category_weights[i] * letter_weights[i];
   }
 
+  // Position encoding (similar to transformer position encoding)
+  float position_encoding[INPUT_SIZE][EMBEDDING_SIZE];
+  for (int pos = 0; pos < INPUT_SIZE; pos++) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      if (i % 2 == 0) {
+        position_encoding[pos][i] =
+            sinf(pos / powf(10000, i / (float)EMBEDDING_SIZE));
+      } else {
+        position_encoding[pos][i] =
+            cosf(pos / powf(10000, (i - 1) / (float)EMBEDDING_SIZE));
+      }
+    }
+  }
+
+  // Generate the input tensor combining embeddings, attention, and your custom
+  // signal logic
   for (int i = 0; i < INPUT_SIZE; i++) {
+    // Start with base signal (from original code)
     float phase = (float)i / INPUT_SIZE;
     float signal = 0.4f * sinf(2.0f * M_PI * (t + phase));
     signal += 0.4f * sinf(2.0f * M_PI * (t + phase * 1.5f));
     signal += 0.2f * sinf(5.0f * M_PI * (t + phase * 2.0f));
 
-    // Incorporate word description complexity
+    // Add weighted word embeddings (context-aware representation)
     if (i < EMBEDDING_SIZE) {
-      for (int j = 0; j < num_tokens; j++) {
-        // Find word to get its description length
+      float weighted_embedding = 0.0f;
+      for (int j = 0; j < num_tokens && j < INPUT_SIZE; j++) {
+        float position_factor = position_encoding[j][i]; // Position encoding
+
+        // Find description length for complexity factor
         int desc_length = 0;
         for (int k = 0; k < vocab_size; k++) {
-          if (strcmp(tokens[j], vocabulary[k].word) == 0) {
+          if (j < num_tokens && strcmp(tokens[j], vocabulary[k].word) == 0) {
             desc_length = strlen(vocabulary[k].description);
             break;
           }
         }
 
-        // Use description length to modulate signal
+        // Incorporate description complexity (custom logic)
         float desc_factor = 1.0f + (desc_length / 100.0f);
-        signal += 0.3f * attention_weights[j] * desc_factor * letter_weights[j];
+
+        // Add weighted contribution from token
+        if (j < num_tokens) {
+          weighted_embedding += attention_weights[j] *
+                                token_embeddings[j][i % EMBEDDING_SIZE] *
+                                desc_factor * position_factor;
+        }
       }
+
+      // Add the weighted embedding contribution
+      signal += 0.3f * weighted_embedding;
     }
 
     // Add memory-based relevance
@@ -1745,11 +2055,14 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
       signal += 0.2f * relevantMemory->vector[i % MAX_NEURONS];
     }
 
-    // Noise and drift management
+    // Noise and drift management (preserved from original)
     float noise = ((float)rand() / RAND_MAX - 0.5f) * params.input_noise_scale;
     float drift = params.plasticity * sinf(0.1f * M_PI * t);
 
+    // Combine all factors and normalize
     input_tensor[i] = (signal + noise + drift + 1.0f) * 0.5f;
+
+    // Clamp to valid range
     input_tensor[i] = fmaxf(0.0f, fminf(1.0f, input_tensor[i]));
   }
 }
@@ -5304,13 +5617,14 @@ void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
   float adaptation_factor =
       system->adaptation_rate * (1.0f - pattern_consistency);
 
-  for (int i = 0; i < system->num_core_values; i++) {
+  for (uint32_t i = 0; i < system->num_core_values; i++) {
     // Map patterns to core values (simplified mapping)
     float pattern_influence = 0.0f;
-    int patterns_per_value = system->pattern_size / system->num_core_values;
+    uint32_t patterns_per_value =
+        system->pattern_size / system->num_core_values;
 
-    for (int j = 0; j < patterns_per_value; j++) {
-      int pattern_idx = i * patterns_per_value + j;
+    for (uint32_t j = 0; j < patterns_per_value; j++) {
+      uint32_t pattern_idx = i * patterns_per_value + j;
       if (pattern_idx < system->pattern_size) {
         pattern_influence += current_patterns[pattern_idx];
       }
@@ -5321,6 +5635,20 @@ void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
     system->core_values[i] =
         (1.0f - adaptation_factor) * system->core_values[i] +
         adaptation_factor * pattern_influence;
+    system->core_values[i] = clampValue(system->core_values[i]);
+  }
+}
+
+void updateReferenceStates(SelfIdentitySystem *system, float *current_state) {
+  for (uint32_t i = 0; i < system->verification.state_size; i++) {
+    system->verification.reference_state[i] =
+        (1.0f - system->adaptation_rate) *
+            system->verification.reference_state[i] +
+        system->adaptation_rate * current_state[i];
+
+    // Clamp the value to a reasonable range
+    system->verification.reference_state[i] =
+        clampValue(system->verification.reference_state[i]);
   }
 }
 
@@ -5331,7 +5659,7 @@ float computeExperienceValue(float *experience_vector) {
   float weighted_sum = 0.0f;
   float weight_total = 0.0f;
 
-  for (int i = 0; i < EXPERIENCE_VECTOR_SIZE; i++) {
+  for (uint32_t i = 0; i < EXPERIENCE_VECTOR_SIZE; i++) {
     float weight = expf(-(float)(EXPERIENCE_VECTOR_SIZE - i) /
                         EXPERIENCE_VECTOR_SIZE); // Exponential decay
     weighted_sum += experience_vector[i] * weight;
@@ -5355,13 +5683,14 @@ void addExperience(SelfIdentitySystem *system, float *experience_vector) {
 }
 
 // Helper function to compute memory influence on beliefs
-float computeMemoryInfluence(MemorySystem *memory_system, int belief_idx) {
+float computeMemoryInfluence(MemorySystem *memory_system, uint32_t belief_idx) {
   float influence = 0.0f;
-  int recent_memories = 10; // Consider last 10 memories
+  uint32_t recent_memories = 10; // Consider last 10 memories
 
-  for (int i = 0; i < recent_memories && i < memory_system->size; i++) {
-    int memory_idx = (memory_system->head - 1 - i + memory_system->capacity) %
-                     memory_system->capacity;
+  for (uint32_t i = 0; i < recent_memories && i < memory_system->size; i++) {
+    uint32_t memory_idx =
+        (memory_system->head - 1 - i + memory_system->capacity) %
+        memory_system->capacity;
     influence += memory_system->entries[memory_idx]
                      .vector[belief_idx % MEMORY_VECTOR_SIZE];
   }
@@ -5370,20 +5699,21 @@ float computeMemoryInfluence(MemorySystem *memory_system, int belief_idx) {
 }
 
 // Helper function to compute experience influence on beliefs
-float computeExperienceInfluence(SelfIdentitySystem *system, int belief_idx) {
+float computeExperienceInfluence(SelfIdentitySystem *system,
+                                 uint32_t belief_idx) {
   float influence = 0.0f;
-  int recent_experiences = 5; // Consider last 5 experiences
+  uint32_t recent_experiences = 5; // Consider last 5 experiences
 
-  for (int i = 0; i < recent_experiences && i < system->history_size; i++) {
+  for (uint32_t i = 0; i < recent_experiences && i < system->history_size;
+       i++) {
     influence += system->experience_history[i];
   }
 
   return influence / recent_experiences;
 }
 
-// Update belief system based on experiences and memory
 void updateBeliefs(SelfIdentitySystem *system, MemorySystem *memory_system) {
-  for (int i = 0; i < system->num_beliefs; i++) {
+  for (uint32_t i = 0; i < system->num_beliefs; i++) {
     float memory_influence = computeMemoryInfluence(memory_system, i);
     float experience_influence = computeExperienceInfluence(system, i);
 
@@ -5392,11 +5722,14 @@ void updateBeliefs(SelfIdentitySystem *system, MemorySystem *memory_system) {
         (1.0f - system->adaptation_rate) * system->belief_system[i] +
         system->adaptation_rate *
             (0.7f * memory_influence + 0.3f * experience_influence);
+
+    // Clamp the value to a reasonable range
+    system->belief_system[i] = clampValue(system->belief_system[i]);
   }
 }
 
 // Enhanced version of areValueAndMarkerRelated
-bool areValueAndMarkerRelated(int value_idx, int marker_idx) {
+bool areValueAndMarkerRelated(uint32_t value_idx, uint32_t marker_idx) {
   return (value_idx % 5 == marker_idx % 5) ||
          haveCommonPrimeFactors(value_idx,
                                 marker_idx) ||     // Common prime factors
@@ -5404,7 +5737,7 @@ bool areValueAndMarkerRelated(int value_idx, int marker_idx) {
 }
 
 // Enhanced version of areBeliefAndMarkerRelated
-bool areBeliefAndMarkerRelated(int belief_idx, int marker_idx) {
+bool areBeliefAndMarkerRelated(uint32_t belief_idx, uint32_t marker_idx) {
   return (belief_idx % 7 == marker_idx % 7) ||
          haveCommonPrimeFactors(belief_idx,
                                 marker_idx) ||      // Common prime factors
@@ -5412,11 +5745,11 @@ bool areBeliefAndMarkerRelated(int belief_idx, int marker_idx) {
 }
 
 // Helper function to compute core value influence on markers
-float computeValueInfluence(SelfIdentitySystem *system, int marker_idx) {
+float computeValueInfluence(SelfIdentitySystem *system, uint32_t marker_idx) {
   float influence = 0.0f;
-  int related_values = 0;
+  uint32_t related_values = 0;
 
-  for (int i = 0; i < system->num_core_values; i++) {
+  for (uint32_t i = 0; i < system->num_core_values; i++) {
     if (areValueAndMarkerRelated(i, marker_idx)) {
       influence += system->core_values[i];
       related_values++;
@@ -5427,11 +5760,11 @@ float computeValueInfluence(SelfIdentitySystem *system, int marker_idx) {
 }
 
 // Helper function to compute belief influence on markers
-float computeBeliefInfluence(SelfIdentitySystem *system, int marker_idx) {
+float computeBeliefInfluence(SelfIdentitySystem *system, uint32_t marker_idx) {
   float influence = 0.0f;
-  int related_beliefs = 0;
+  uint32_t related_beliefs = 0;
 
-  for (int i = 0; i < system->num_beliefs; i++) {
+  for (uint32_t i = 0; i < system->num_beliefs; i++) {
     if (areBeliefAndMarkerRelated(i, marker_idx)) {
       influence += system->belief_system[i];
       related_beliefs++;
@@ -5443,7 +5776,7 @@ float computeBeliefInfluence(SelfIdentitySystem *system, int marker_idx) {
 
 // Update identity markers
 void updateIdentityMarkers(SelfIdentitySystem *system) {
-  for (int i = 0; i < system->num_markers; i++) {
+  for (uint32_t i = 0; i < system->num_markers; i++) {
     float value_influence = computeValueInfluence(system, i);
     float belief_influence = computeBeliefInfluence(system, i);
 
@@ -5455,14 +5788,14 @@ void updateIdentityMarkers(SelfIdentitySystem *system) {
   }
 }
 
-float computeRecentCoherence(float *coherence_history, int window_size) {
+float computeRecentCoherence(float *coherence_history, uint32_t window_size) {
   if (window_size == 0)
     return 0.0f;
 
   float sum = 0.0f;
-  int valid_samples = 0;
+  uint32_t valid_samples = 0;
 
-  for (int i = 0; i < window_size; i++) {
+  for (uint32_t i = 0; i < window_size; i++) {
     if (!isnan(coherence_history[i])) {
       sum += coherence_history[i];
       valid_samples++;
@@ -5514,18 +5847,18 @@ void shiftCoherenceWindow(SelfIdentitySystem *system) {
 
 // Compress current experience into a summary vector
 float *compressExperience(float *current_input, Neuron *neurons,
-                          int num_neurons) {
+                          uint32_t num_neurons) {
   float *compressed = (float *)calloc(EXPERIENCE_VECTOR_SIZE, sizeof(float));
 
   // Combine input and neuron states into experience vector
-  for (int i = 0; i < EXPERIENCE_VECTOR_SIZE; i++) {
+  for (uint32_t i = 0; i < EXPERIENCE_VECTOR_SIZE; i++) {
     float input_contribution = 0.0f;
     float neuron_contribution = 0.0f;
 
     // Sample input values
-    int inputs_per_experience = num_neurons / EXPERIENCE_VECTOR_SIZE;
-    for (int j = 0; j < inputs_per_experience; j++) {
-      int idx = i * inputs_per_experience + j;
+    uint32_t inputs_per_experience = num_neurons / EXPERIENCE_VECTOR_SIZE;
+    for (uint32_t j = 0; j < inputs_per_experience; j++) {
+      uint32_t idx = i * inputs_per_experience + j;
       if (idx < num_neurons) {
         input_contribution += current_input[idx];
         neuron_contribution += neurons[idx].output;
@@ -5556,7 +5889,7 @@ float computeIdentityCoherence(SelfIdentitySystem *system) {
 
 // Update identity based on new experiences and network state
 void updateIdentity(SelfIdentitySystem *system, Neuron *neurons,
-                    int num_neurons, MemorySystem *memory_system,
+                    uint32_t num_neurons, MemorySystem *memory_system,
                     float *current_input) {
 
   // Extract current behavioral patterns
@@ -5567,14 +5900,15 @@ void updateIdentity(SelfIdentitySystem *system, Neuron *neurons,
       system->behavioral_patterns, current_patterns, system->pattern_size);
 
   // Update behavioral patterns with temporal smoothing
-  for (int i = 0; i < system->pattern_size; i++) {
+  for (uint32_t i = 0; i < system->pattern_size; i++) {
     system->behavioral_patterns[i] =
         (1 - system->adaptation_rate) * system->behavioral_patterns[i] +
         system->adaptation_rate * current_patterns[i];
   }
-
   // Update core values based on consistent behaviors
   updateCoreValues(system, current_patterns, pattern_consistency);
+
+  updateReferenceStates(system, current_input);
 
   // Integrate new experiences
   float *experience_vector =
@@ -6071,11 +6405,11 @@ void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
   }
 }
 
-SecurityValidationStatus
-validateCriticalSecurity(const Neuron *neurons, const float *weights,
-                         const int *connections, size_t max_neurons,
-                         size_t max_connections,
-                         const MemorySystem *memorySystem) {
+SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
+                                                  const float *weights,
+                                                  const int *connections,
+                                                  size_t max_neurons,
+                                                  size_t max_connections) {
   SecurityValidationStatus status = {.critical_violation = false,
                                      .suspect_address = 0,
                                      .violation_type = NULL};
@@ -6132,7 +6466,7 @@ validateCriticalSecurity(const Neuron *neurons, const float *weights,
         (mem_scan[i] == 0xEB &&
          mem_scan[i + 1] == 0xFE)) { // infinite loop (no-op)
       status.critical_violation = true;
-      status.suspect_address = (uint64_t)&mem_scan[i];
+      status.suspect_address = (int64_t)&mem_scan[i];
       status.violation_type = "Detected potential shellcode";
       break;
     }
@@ -6141,38 +6475,27 @@ validateCriticalSecurity(const Neuron *neurons, const float *weights,
   return status;
 }
 
-// Emergency shutdown for critical security violations
-void criticalSecurityShutdown(Neuron *neurons, float *weights, int *connections,
-                              MemorySystem *memorySystem,
-                              const SecurityValidationStatus *status) {
+void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
+                                     int *connections,
+                                     const SecurityValidationStatus *status) {
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
   fprintf(stderr, "Type: %s\n", status->violation_type);
-  fprintf(stderr, "Suspect address: 0x%x\n", status->suspect_address);
+  fprintf(stderr, "Suspect address: 0x%llx\n", status->suspect_address);
 
-  // Force immediate cleanup
-  if (memorySystem) {
-    memset(memorySystem->entries, 0,
-           memorySystem->capacity * sizeof(MemoryEntry));
-    freeMemorySystem(memorySystem);
+  // Free up the suspect address
+  void *suspect_ptr = (void *)status->suspect_address;
+  if (suspect_ptr) {
+    memset(suspect_ptr, 0,
+           sizeof(Neuron)); // Clear the memory at the suspect address
   }
 
-  if (neurons) {
-    memset(neurons, 0, MAX_NEURONS * sizeof(Neuron));
-    free(neurons);
+  // Log the violation for further investigation
+  FILE *log_file = fopen("security_violations.log", "a");
+  if (log_file) {
+    fprintf(log_file, "Violation Type: %s\n", status->violation_type);
+    fprintf(log_file, "Suspect Address: 0x%llx\n", status->suspect_address);
+    fclose(log_file);
   }
-
-  if (weights) {
-    memset(weights, 0, MAX_NEURONS * MAX_CONNECTIONS * sizeof(float));
-    free(weights);
-  }
-
-  if (connections) {
-    memset(connections, 0, MAX_NEURONS * MAX_CONNECTIONS * sizeof(int));
-    free(connections);
-  }
-
-  // Force process termination
-  _Exit(1); // Use _Exit instead of exit() for immediate termination
 }
 
 float computeBeliefStability(const SelfIdentitySystem *system,
@@ -7288,6 +7611,7 @@ void adjustBehaviorBasedOnAnswers(
 }
 
 int main() {
+  loadVocabularyFromFile("vocabulary.txt");
   // Try to load existing memory system
   MemorySystem *memorySystem = NULL;
   WorkingMemorySystem *working_memory =
@@ -7413,7 +7737,7 @@ int main() {
   float target_outputs[MAX_NEURONS];
   const char *text_input =
       "Apple, banana, cherry, date, and elderberry are fruits.";
-  initializeEmbeddings();
+  initializeEmbeddings("custom_embeddings.txt");
 
   int network_regions = 2; // Assuming 2 layers
   MetaController *metaController = initializeMetaController(network_regions);
@@ -7540,13 +7864,12 @@ int main() {
     applyMetaControllerAdaptations(neurons, weights, metaController,
                                    MAX_NEURONS);
 
-    SecurityValidationStatus secStatus =
-        validateCriticalSecurity(neurons, weights, connections, max_neurons,
-                                 max_connections, memorySystem);
+    SecurityValidationStatus secStatus = validateCriticalSecurity(
+        neurons, weights, connections, max_neurons, max_connections);
 
     if (secStatus.critical_violation) {
-      criticalSecurityShutdown(neurons, weights, connections, memorySystem,
-                               &secStatus);
+      handleCriticalSecurityViolation(neurons, weights, connections,
+                                      &secStatus);
     }
 
     integrateKnowledgeFilter(knowledge_filter, memorySystem, neurons,
