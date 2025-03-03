@@ -68,7 +68,7 @@ change updatedNeurons to neurons if using any other version than metal not only 
 Find the correct version you want to build by downloading the whole repo `git clone https://github.com/Okerew/Neural-Web.git` and navigating to the correct version you want to build.
 
 #### Firstly
-Start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web, also copy your file with the vocabulary you can take one from the example folder.
+Start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
 
 #### Than to build do
 
@@ -466,115 +466,116 @@ typedef struct {
     int num_symbols;
 } InternalQuestion;
 ```
-## Key Functions: 
+
+## Key Functions:
 
 ### Memory System
 
-- **createMemorySystem(int capacity)**: Initializes a new memory system with a specified capacity.
-- **loadMemorySystem(const char* filename)**: Loads a memory system from a file.
-- **saveMemorySystem(MemorySystem memorySystem, const char* filename)**: Saves the current memory system to a file.
-- **freeMemorySystem(MemorySystem memorySystem)**: Frees the memory allocated for the memory system.
-- **loadHierarchicalMemory(MemorySystem memorySystem, const char* filename)**: Loads hierarchical memory from a file.
-- **saveHierarchicalMemory(MemorySystem memorySystem, const char* filename)**: Saves hierarchical memory to a file.
-- **decayMemorySystem(MemorySystem memorySystem)**: Applies decay to the memory system to simulate forgetting.
-- **mergeSimilarMemories(MemorySystem memorySystem)**: Merges similar memories to optimize storage.
-- **addMemory(MemorySystem memorySystem, WorkingMemorySystem working_memory, Neuron* neurons, float* input_tensor, int timestamp, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])**: Adds a new memory entry to the system.
-- **retrieveMemory(MemorySystem memorySystem)**: Retrieves the most relevant memory entry.
-- **consolidateMemory(MemorySystem memorySystem)**: Consolidates memories to reinforce learning.
-- **consolidateToLongTermMemory(WorkingMemorySystem working_memory, MemorySystem memorySystem, int step)**: Consolidates working memory to long-term memory.
+- #### `createMemorySystem(int capacity)` : Initializes a new memory system with a specified capacity. Sets up a data structure to hold a certain number of memory entries.
+- #### `loadMemorySystem(const char* filename)` : Loads a memory system from a file. Reads a file to populate the memory system with previously saved data.
+- #### `saveMemorySystem(MemorySystem memorySystem, const char* filename)` : Saves the current memory system to a file. Writes the current state of the memory system to a file for later use.
+- #### `freeMemorySystem(MemorySystem memorySystem)` : Frees the memory allocated for the memory system. Deallocates memory to prevent memory leaks.
+- #### `loadHierarchicalMemory(MemorySystem memorySystem, const char* filename)` : Loads hierarchical memory from a file. Involves loading memory data that has a hierarchical structure, such as categories and subcategories.
+- #### `saveHierarchicalMemory(MemorySystem memorySystem, const char* filename)` : Saves hierarchical memory to a file. Saves the hierarchical structure of the memory system to a file.
+- #### `decayMemorySystem(MemorySystem memorySystem)` : Applies decay to the memory system to simulate forgetting. Reduces the strength or importance of older memories.
+- #### `mergeSimilarMemories(MemorySystem memorySystem)` : Merges similar memories to optimize storage. Combines memories that are very similar to save space.
+- #### `addMemory(MemorySystem memorySystem, WorkingMemorySystem working_memory, Neuron* neurons, float* input_tensor, int timestamp, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` : Adds a new memory entry to the system. Takes input data and stores it as a new memory.
+- #### `retrieveMemory(MemorySystem memorySystem)` : Retrieves the most relevant memory entry. Searches the memory system for the memory that best matches a certain criterion.
+- #### `consolidateMemory(MemorySystem memorySystem)` : Consolidates memories to reinforce learning. Strengthens important memories or transfers them to long-term storage.
+- #### `consolidateToLongTermMemory(WorkingMemorySystem working_memory, MemorySystem memorySystem, int step)` : Consolidates working memory to long-term memory. Moves short-term memories to long-term storage.
 
 ### Neural Network
 
-- **initializeNeurons(Neuron* neurons, int connections, float* weights, float* input_tensor)**: Initializes the neurons with default or loaded values.
-- **initializeWeights(float* weights, int max_neurons, int max_connections, float* input_tensor)**: Initializes the weights for the neural network.
-- **updateNeuronsWithPredictiveCoding(Neuron* neurons, float* input_tensor, int max_neurons, float learning_rate)**: Updates neurons using predictive coding.
-- **updateWeights(float* weights, Neuron* neurons, int* connections, float learning_rate)**: Updates the weights based on learning rate.
-- **updateBidirectionalWeights(float* weights, float* reverse_weights, Neuron* neurons, int* connections, int* reverse_connections, float learning_rate)**: Updates bidirectional weights for reverse processing.
-- **computePredictionErrors(Neuron* neurons, float* input_tensor, int max_neurons)**: Computes prediction errors for the neurons.
-- **generatePredictiveInputs(float* predictive_inputs, NetworkStateSnapshot* previous_state, int max_neurons)**: Generates predictive inputs based on previous states.
-- **selectOptimalDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, float* previous_outputs, NetworkStateSnapshot* stateHistory, int step, MemoryEntry* relevantMemory, DynamicParameters* params)**: Selects the optimal decision path based on current states and parameters.
-- **computeRegionPerformanceMetrics(NetworkPerformanceMetrics* performanceMetrics, Neuron* neurons, float* target_outputs, int max_neurons)**: Computes performance metrics for different regions of the network.
-- **updateMetaControllerPriorities(MetaController* metaController, NetworkPerformanceMetrics* performanceMetrics, MetacognitionMetrics* metacognition)**: Updates meta-controller priorities based on performance metrics.
-- **applyMetaControllerAdaptations(Neuron* neurons, float* weights, MetaController* metaController, int max_neurons)**: Applies adaptations from the meta-controller to the network.
-- **selectOptimalMetaDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, MetaLearningState* meta_learning_state, MetacognitionMetrics* metacognition)**: Selects the optimal meta-decision path based on meta-learning state and metacognition metrics.
-- **adaptNetworkDynamic(Neuron* neurons, float* weights, DynamicParameters* params, float performance_delta, float* input_tensor)**: Adapts the network dynamically based on performance delta and input tensor.
+- #### `initializeNeurons(Neuron* neurons, int connections, float* weights, float* input_tensor)` : Initializes the neurons with default or loaded values. Sets up the neurons in the network with initial values for weights and connections.
+- #### `initializeWeights(float* weights, int max_neurons, int max_connections, float* input_tensor)` : Initializes the weights for the neural network. Sets the initial weights for the connections between neurons.
+- #### `updateNeuronsWithPredictiveCoding(Neuron* neurons, float* input_tensor, int max_neurons, float learning_rate)` : Updates neurons using predictive coding. Adjusts the neurons based on the difference between predicted and actual inputs.
+- #### `updateWeights(float* weights, Neuron* neurons, int* connections, float learning_rate)` : Updates the weights based on learning rate. Adjusts the weights of the connections between neurons to improve the network's performance.
+- #### `updateBidirectionalWeights(float* weights, float* reverse_weights, Neuron* neurons, int* connections, int* reverse_connections, float learning_rate)` : Updates bidirectional weights for reverse processing. Adjusts weights for connections that go in both directions between neurons.
+- #### `computePredictionErrors(Neuron* neurons, float* input_tensor, int max_neurons)` : Computes prediction errors for the neurons. Calculates the difference between the predicted and actual outputs of the neurons.
+- #### `generatePredictiveInputs(float* predictive_inputs, NetworkStateSnapshot* previous_state, int max_neurons)` : Generates predictive inputs based on previous states. Creates inputs for the network based on its previous state.
+- #### `selectOptimalDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, float* previous_outputs, NetworkStateSnapshot* stateHistory, int step, MemoryEntry* relevantMemory, DynamicParameters* params)` : Selects the optimal decision path based on current states and parameters. Chooses the best course of action based on the network's current state and relevant memories.
+- #### `computeRegionPerformanceMetrics(NetworkPerformanceMetrics* performanceMetrics, Neuron* neurons, float* target_outputs, int max_neurons)` : Computes performance metrics for different regions of the network. Evaluates how well different parts of the network are performing.
+- #### `updateMetaControllerPriorities(MetaController* metaController, NetworkPerformanceMetrics* performanceMetrics, MetacognitionMetrics* metacognition)` : Updates meta-controller priorities based on performance metrics. Adjusts the priorities of the meta-controller based on the network's performance.
+- #### `applyMetaControllerAdaptations(Neuron* neurons, float* weights, MetaController* metaController, int max_neurons)` : Applies adaptations from the meta-controller to the network. Makes changes to the network based on the meta-controller's instructions.
+- #### `selectOptimalMetaDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, MetaLearningState* meta_learning_state, MetacognitionMetrics* metacognition)` : Selects the optimal meta-decision path based on meta-learning state and metacognition metrics. Chooses the best course of action based on the meta-learning state and metacognition metrics.
+- #### `adaptNetworkDynamic(Neuron* neurons, float* weights, DynamicParameters* params, float performance_delta, float* input_tensor)` : Adapts the network dynamically based on performance delta and input tensor. Makes real-time adjustments to the network based on its performance.
 
 ### Dynamic Parameters and Optimization
 
-- **initDynamicParameters()**: Initializes dynamic parameters for the system.
-- **updateDynamicParameters(DynamicParameters* params, float performance_delta, float stability, float error_rate)**: Updates dynamic parameters based on performance delta, stability, and error rate.
-- **optimizeParameters(OptimizationState* opt_state, PerformanceMetrics* performance_history, int step)**: Optimizes parameters based on performance history.
-- **analyzeNetworkPerformance(PerformanceMetrics* performance_history, int step)**: Analyzes network performance and generates insights.
-- **generatePerformanceGraph(PerformanceMetrics* performance_history, int step)**: Generates a performance graph based on performance history.
+- #### `initDynamicParameters()` : Initializes dynamic parameters for the system. Sets up parameters that can change over time.
+- #### `updateDynamicParameters(DynamicParameters* params, float performance_delta, float stability, float error_rate)` : Updates dynamic parameters based on performance delta, stability, and error rate. Adjusts the parameters based on the network's performance and stability.
+- #### `optimizeParameters(OptimizationState* opt_state, PerformanceMetrics* performance_history, int step)` : Optimizes parameters based on performance history. Finds the best values for the parameters based on past performance.
+- #### `analyzeNetworkPerformance(PerformanceMetrics* performance_history, int step)` : Analyzes network performance and generates insights. Evaluates the network's performance over time and provides insights.
+- #### `generatePerformanceGraph(PerformanceMetrics* performance_history, int step)` : Generates a performance graph based on performance history. Creates a visual representation of the network's performance over time.
 
 ### Context and Reflection
 
-- **updateGlobalContext(GlobalContextManager* contextManager, Neuron* neurons, int max_neurons, float* input_tensor)**: Updates the global context based on current network state.
-- **integrateGlobalContext(GlobalContextManager* contextManager, Neuron* neurons, int max_neurons, float* weights, int max_connections)**: Integrates global context into network processing.
-- **integrateReflectionSystem(Neuron* neurons, MemorySystem* memorySystem, NetworkStateSnapshot* stateHistory, int step, float* weights, int* connections, ReflectionParameters* reflection_params)**: Integrates the reflection system into the network processing.
-- **updateIdentity(SelfIdentitySystem* identity_system, Neuron* neurons, int max_neurons, MemorySystem* memorySystem, float* input_tensor)**: Updates the identity system based on current states.
-- **verifyIdentity(SelfIdentitySystem* identity_system)**: Verifies the consistency of the identity system.
-- **analyzeIdentitySystem(SelfIdentitySystem* identity_system)**: Analyzes the identity system for potential issues.
-- **createIdentityBackup(SelfIdentitySystem* identity_system)**: Creates a backup of the identity system.
-- **restoreIdentityFromBackup(SelfIdentitySystem* identity_system, SelfIdentityBackup* backup)**: Restores the identity system from a backup.
-- **freeIdentityBackup(SelfIdentityBackup* backup)**: Frees the memory allocated for the identity backup.
-- **generateIdentityReflection(SelfIdentitySystem* identity_system)**: Generates a reflection based on the identity system.
+- #### `updateGlobalContext(GlobalContextManager* contextManager, Neuron* neurons, int max_neurons, float* input_tensor)` : Updates the global context based on current network state. Adjusts the global context to reflect the current state of the network.
+- #### `integrateGlobalContext(GlobalContextManager* contextManager, Neuron* neurons, int max_neurons, float* weights, int max_connections)` : Integrates global context into network processing. Uses the global context to influence the network's processing.
+- #### `integrateReflectionSystem(Neuron* neurons, MemorySystem* memorySystem, NetworkStateSnapshot* stateHistory, int step, float* weights, int* connections, ReflectionParameters* reflection_params)` : Integrates the reflection system into the network processing. Uses the reflection system to influence the network's processing.
+- #### `updateIdentity(SelfIdentitySystem* identity_system, Neuron* neurons, int max_neurons, MemorySystem* memorySystem, float* input_tensor)` : Updates the identity system based on current states. Adjusts the identity system to reflect the current state of the network and memories.
+- #### `verifyIdentity(SelfIdentitySystem* identity_system)` : Verifies the consistency of the identity system. Checks the identity system for errors or inconsistencies.
+- #### `analyzeIdentitySystem(SelfIdentitySystem* identity_system)` : Analyzes the identity system for potential issues. Evaluates the identity system for problems or areas of improvement.
+- #### `createIdentityBackup(SelfIdentitySystem* identity_system)` : Creates a backup of the identity system. Saves the current state of the identity system for later restoration.
+- #### `restoreIdentityFromBackup(SelfIdentitySystem* identity_system, SelfIdentityBackup* backup)` : Restores the identity system from a backup. Loads a previously saved state of the identity system.
+- #### `freeIdentityBackup(SelfIdentityBackup* backup)` : Frees the memory allocated for the identity backup. Deallocates memory to prevent memory leaks.
+- #### `generateIdentityReflection(SelfIdentitySystem* identity_system)` : Generates a reflection based on the identity system. Creates a summary or evaluation of the identity system.
 
 ### Motivation and Goals
 
-- **updateMotivationSystem(IntrinsicMotivation* motivation, float performance_delta, float novelty, float task_difficulty)**: Updates the motivation system based on performance delta, novelty, and task difficulty.
-- **addGoal(GoalSystem* goalSystem, const char* description, float priority)**: Adds a new goal to the goal system.
-- **evaluateGoalProgress(Goal* goal, Neuron* neurons, float* target_outputs)**: Evaluates the progress of a goal.
+- #### `updateMotivationSystem(IntrinsicMotivation* motivation, float performance_delta, float novelty, float task_difficulty)` : Updates the motivation system based on performance delta, novelty, and task difficulty. Adjusts the motivation system based on the network's performance and the difficulty of the task.
+- #### `addGoal(GoalSystem* goalSystem, const char* description, float priority)` : Adds a new goal to the goal system. Creates a new goal with a given description and priority.
+- #### `evaluateGoalProgress(Goal* goal, Neuron* neurons, float* target_outputs)` : Evaluates the progress of a goal. Checks how close the network is to achieving the goal.
 
 ### Security and Validation
 
-- **validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections, MemorySystem* memorySystem)**: Validates critical security aspects of the system.
-- **criticalSecurityShutdown(Neuron* neurons, float* weights, int* connections, MemorySystem* memorySystem, SecurityValidationStatus* secStatus)**: Performs a critical security shutdown if necessary.
+- #### `validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections, MemorySystem* memorySystem)` : Validates critical security aspects of the system. Checks the system for security vulnerabilities or issues.
+- #### `criticalSecurityShutdown(Neuron* neurons, float* weights, int* connections, MemorySystem* memorySystem, SecurityValidationStatus* secStatus)` : Performs a critical security shutdown if necessary. Shuts down the system if a security issue is detected.
 
 ### Knowledge and Insights
 
-- **integrateKnowledgeFilter(KnowledgeFilter* knowledge_filter, MemorySystem* memorySystem, Neuron* neurons, float* input_tensor)**: Integrates a knowledge filter into the system.
-- **updateKnowledgeSystem(Neuron* neurons, float* input_tensor, MemorySystem* memory_system, KnowledgeFilter* filter, float current_performance)**: Updates the knowledge system based on current performance.
-- **printCategoryInsights(KnowledgeFilter* knowledge_filter)**: Prints insights from the knowledge filter.
+- #### `integrateKnowledgeFilter(KnowledgeFilter* knowledge_filter, MemorySystem* memorySystem, Neuron* neurons, float* input_tensor)` : Integrates a knowledge filter into the system. Uses the knowledge filter to influence the network's processing.
+- #### `updateKnowledgeSystem(Neuron* neurons, float* input_tensor, MemorySystem* memory_system, KnowledgeFilter* filter, float current_performance)` : Updates the knowledge system based on current performance. Adjusts the knowledge system to reflect the network's current performance.
+- #### `printCategoryInsights(KnowledgeFilter* knowledge_filter)` : Prints insights from the knowledge filter. Provides information or insights generated by the knowledge filter.
 
-### Internal Self-Expression System 
+### Internal Self-Expression System
 
-- **addSymbol(int symbol_id, const char* description);** adds a symbol to the internal self-expression system.
-- **addQuestion(int question_id, int symbol_ids[], int num_symbols)** adds a question to the internal self-expression system.
-- **askQuestion(int question_id, Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float* learning_rate)** asks a question to the internal self-expression system.
-- **expandMemoryCapacity(MemorySystem *memorySystem)** expands the memory capacity of the memory system
-- **adjustBehaviorBasedOnAnswers(Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float *learning_rate, float *input_noise_scale, float *weight_noise_scale);** adjusts the behavior based on answers from the internal self-expression system.
+- #### `addSymbol(int symbol_id, const char* description);` : Adds a symbol to the internal self-expression system. Creates a new symbol with a given ID and description.
+- #### `addQuestion(int question_id, int symbol_ids[], int num_symbols)` : Adds a question to the internal self-expression system. Creates a new question using the provided symbols.
+- #### `askQuestion(int question_id, Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float* learning_rate)` : Asks a question to the internal self-expression system. Processes the question and generates a response.
+- #### `expandMemoryCapacity(MemorySystem *memorySystem)` : Expands the memory capacity of the memory system. Increases the amount of memory available in the system.
+- #### `adjustBehaviorBasedOnAnswers(Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float *learning_rate, float *input_noise_scale, float *weight_noise_scale);` : Adjusts the behavior based on answers from the internal self-expression system. Makes changes to the network based on the responses to questions.
 
 ### Utility Functions
 
-- **getCurrentTime()**: Returns the current time.
-- **computeMSELoss(Neuron* neurons, float* target_outputs, int max_neurons)**: Computes the mean squared error loss.
-- **verifyNetworkState(Neuron* neurons, TaskPrompt* current_prompt)**: Verifies the current state of the network.
-- **transformOutputsToText(float* previous_outputs, int max_neurons, char* outputText, size_t size)**: Transforms numerical outputs to text.
-- **findSimilarMemoriesInCluster(MemorySystem* memorySystem, float* vector, float similarity_threshold, int* num_matches)**: Finds similar memories in a cluster.
-- **captureNetworkState(Neuron* neurons, float* input_tensor, NetworkStateSnapshot* stateHistory, float* weights, int step)**: Captures the current state of the network.
-- **printNetworkStates(Neuron* neurons, float* input_tensor, int step)**: Prints the current state of the network.
-- **saveNetworkStates(NetworkStateSnapshot* stateHistory, int steps)**: Saves the network states to a file.
-- **printReplayStatistics(MemorySystem* memorySystem)**: Prints statistics related to memory replay.
-- **addEmbedding(const char* text, float* embedding)**: Adds an embedding for a given text.
-- **initializeEmbeddings()**: Initializes embeddings for text inputs.
-- **updateEmbeddings(float* embeddings, float* input_tensor, int max_embeddings, int max_neurons)**: Updates embeddings based on input tensor.
-- **isWordMeaningful(const char* word)**: Checks if a word is meaningful.
-- **importPretrainedEmbeddings(const char* embedding_file)** Import pretrained embeddings
+- #### `getCurrentTime()` : Returns the current time. Provides the current date and time.
+- #### `computeMSELoss(Neuron* neurons, float* target_outputs, int max_neurons)` : Computes the mean squared error loss. Calculates the difference between the network's outputs and the target outputs.
+- #### `verifyNetworkState(Neuron* neurons, TaskPrompt* current_prompt)` : Verifies the current state of the network. Checks the network's state for errors or inconsistencies.
+- #### `transformOutputsToText(float* previous_outputs, int max_neurons, char* outputText, size_t size)` : Transforms numerical outputs to text. Converts the network's outputs into a readable format.
+- #### `findSimilarMemoriesInCluster(MemorySystem* memorySystem, float* vector, float similarity_threshold, int* num_matches)` : Finds similar memories in a cluster. Searches for memories that are similar to a given vector.
+- #### `captureNetworkState(Neuron* neurons, float* input_tensor, NetworkStateSnapshot* stateHistory, float* weights, int step)` : Captures the current state of the network. Saves the network's state for later use.
+- #### `printNetworkStates(Neuron* neurons, float* input_tensor, int step)` : Prints the current state of the network. Provides information about the network's current state.
+- #### `saveNetworkStates(NetworkStateSnapshot* stateHistory, int steps)` : Saves the network states to a file. Writes the network's state history to a file for later use.
+- #### `printReplayStatistics(MemorySystem* memorySystem)` : Prints statistics related to memory replay. Provides information about how often memories are replayed.
+- #### `addEmbedding(const char* text, float* embedding)` : Adds an embedding for a given text. Converts text into a numerical format that the network can use.
+- #### `initializeEmbeddings()` : Initializes embeddings for text inputs. Sets up the embeddings for use with the network.
+- #### `updateEmbeddings(float* embeddings, float* input_tensor, int max_embeddings, int max_neurons)` : Updates embeddings based on input tensor. Adjusts the embeddings to better represent the input data.
+- #### `isWordMeaningful(const char* word)` : Checks if a word is meaningful. Determines whether a word is relevant or important.
+- #### `importPretrainedEmbeddings(const char* embedding_file)` : Import pretrained embeddings. Loads pre-trained embeddings from a file for use with the network.
 
 ## Initialization Functions
 
-- **initializeMetaController(int network_regions)**: Initializes the meta-controller.
-- **initializeMotivationSystem()**: Initializes the motivation system.
-- **initializeGoalSystem(int num_goals)**: Initializes the goal system.
-- **initializeGlobalContextManager(int max_neurons)**: Initializes the global context manager.
-- **initializePerformanceMetrics(int network_regions)**: Initializes performance metrics.
-- **initializeReflectionParameters()**: Initializes reflection parameters.
-- **initializeSelfIdentity(int num_values, int num_beliefs, int num_markers, int history_size, int pattern_size)**: Initializes the self-identity system.
-- **initializeKnowledgeFilter(int size)**: Initializes the knowledge filter.
-- **initializeMetacognitionMetrics()**: Initializes metacognition metrics.
-- **initializeMetaLearningState(int size)**: Initializes the meta-learning state.
-- **createWorkingMemorySystem(int capacity)**: Creates a working memory system.
+- #### `initializeMetaController(int network_regions)` : Initializes the meta-controller. Sets up the meta-controller with initial values for each network region.
+- #### `initializeMotivationSystem()` : Initializes the motivation system. Sets up the motivation system with default values.
+- #### `initializeGoalSystem(int num_goals)` : Initializes the goal system. Sets up the goal system with a specified number of goals.
+- #### `initializeGlobalContextManager(int max_neurons)` : Initializes the global context manager. Sets up the global context manager with initial values for each neuron.
+- #### `initializePerformanceMetrics(int network_regions)` : Initializes performance metrics. Sets up performance metrics for each network region.
+- #### `initializeReflectionParameters()` : Initializes reflection parameters. Sets up the reflection parameters with default values.
+- #### `initializeSelfIdentity(int num_values, int num_beliefs, int num_markers, int history_size, int pattern_size)` : Initializes the self-identity system. Sets up the self-identity system with initial values for values, beliefs, markers, history, and patterns.
+- #### `initializeKnowledgeFilter(int size)` : Initializes the knowledge filter. Sets up the knowledge filter with a specified size.
+- #### `initializeMetacognitionMetrics()` : Initializes metacognition metrics. Sets up the metacognition metrics with default values.
+- #### `initializeMetaLearningState(int size)` : Initializes the meta-learning state. Sets up the meta-learning state with a specified size.
+- #### `createWorkingMemorySystem(int capacity)` : Creates a working memory system. Sets up a working memory system with a specified capacity.
 
 ## Usage
 
