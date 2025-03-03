@@ -3997,7 +3997,7 @@ void addNewNeuron(Neuron *neurons, uint *connections, float *weights,
   Neuron new_neuron = {
       .state = 0.0f,
       .output = 0.0f,
-      .num_connections = MAX_CONECTIONS,
+      .num_connections = MAX_CONNECTIONS,
       .layer_id = (*num_neurons) % 2 // Alternate layers
   };
 
