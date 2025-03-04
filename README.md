@@ -530,7 +530,7 @@ typedef struct {
 ### Security and Validation
 
 - #### `validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections)` : Validates critical security aspects of the system. Checks the system for security vulnerabilities or issues.
-- #### `handleCriticalSecurity(Neuron* neurons, float* weights, int* connections, SecurityValidationStatus* secStatus)` : Performs a critical security shutdown of the memory accesed if necessary. 
+- #### `handleCriticalSecurityViolation(Neuron* neurons, float* weights, int* connections, SecurityValidationStatus* secStatus)` : Performs a critical security shutdown of the memory accesed if necessary. 
 
 ### Knowledge and Insights
 
