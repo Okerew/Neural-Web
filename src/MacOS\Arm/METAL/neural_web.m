@@ -36,6 +36,11 @@
 #define MAX_SYMBOLS 100
 #define MAX_QUESTIONS 10
 #define VOCAB_SIZE 100
+#define ACTIVATION_TANH 0
+#define ACTIVATION_RELU 1
+#define ACTIVATION_SIGMOID 2
+#define ACTIVATION_LEAKY_RELU 3
+#define ACTIVATION_SWISH 4
 
 typedef struct {
   float state;
@@ -5079,39 +5084,39 @@ SelfIdentitySystem *initializeSelfIdentity(uint32_t num_values,
                                            uint32_t num_markers,
                                            uint32_t history_size,
                                            uint32_t pattern_size) {
-    SelfIdentitySystem *system =
-        (SelfIdentitySystem *)malloc(sizeof(SelfIdentitySystem));
+  SelfIdentitySystem *system =
+      (SelfIdentitySystem *)malloc(sizeof(SelfIdentitySystem));
 
-    system->num_core_values = num_values;
-    system->num_beliefs = num_beliefs;
-    system->num_markers = num_markers;
-    system->history_size = history_size;
-    system->pattern_size = pattern_size;
+  system->num_core_values = num_values;
+  system->num_beliefs = num_beliefs;
+  system->num_markers = num_markers;
+  system->history_size = history_size;
+  system->pattern_size = pattern_size;
 
-    // Allocate memory for identity components
-    system->core_values = (float *)calloc(num_values, sizeof(float));
-    system->belief_system = (float *)calloc(num_beliefs, sizeof(float));
-    system->identity_markers = (float *)calloc(num_markers, sizeof(float));
-    system->experience_history = (float *)calloc(history_size, sizeof(float));
-    system->behavioral_patterns = (float *)calloc(pattern_size, sizeof(float));
+  // Allocate memory for identity components
+  system->core_values = (float *)calloc(num_values, sizeof(float));
+  system->belief_system = (float *)calloc(num_beliefs, sizeof(float));
+  system->identity_markers = (float *)calloc(num_markers, sizeof(float));
+  system->experience_history = (float *)calloc(history_size, sizeof(float));
+  system->behavioral_patterns = (float *)calloc(pattern_size, sizeof(float));
 
-    // Initialize temporal coherence tracking with a smaller window
-    system->coherence_window = 50; // Reduced from 100 to 50
-    system->temporal_coherence =
-        (float *)calloc(system->coherence_window, sizeof(float));
+  // Initialize temporal coherence tracking with a smaller window
+  system->coherence_window = 50; // Reduced from 100 to 50
+  system->temporal_coherence =
+      (float *)calloc(system->coherence_window, sizeof(float));
 
-    // Set initial parameters
-    system->consistency_score = 1.0f;
-    system->adaptation_rate = 0.01f;
-    system->confidence_level = 0.5f;
+  // Set initial parameters
+  system->consistency_score = 1.0f;
+  system->adaptation_rate = 0.01f;
+  system->confidence_level = 0.5f;
 
-    // Initialize verification system with reduced state size
-    system->verification.threshold = 0.8f;
-    system->verification.state_size = num_values + num_beliefs + num_markers;
-    system->verification.reference_state =
-        (float *)calloc(system->verification.state_size, sizeof(float));
+  // Initialize verification system with reduced state size
+  system->verification.threshold = 0.8f;
+  system->verification.state_size = num_values + num_beliefs + num_markers;
+  system->verification.reference_state =
+      (float *)calloc(system->verification.state_size, sizeof(float));
 
-    return system;
+  return system;
 }
 
 // Extract behavioral patterns from neural network state
@@ -5359,25 +5364,25 @@ void initializeIdentityComponents(SelfIdentitySystem *system) {
 }
 
 float *getCurrentIdentityState(SelfIdentitySystem *system) {
-    uint32_t total_size = system->verification.state_size;
-    float *current_state = (float *)malloc(total_size * sizeof(float));
-    uint32_t offset = 0;
+  uint32_t total_size = system->verification.state_size;
+  float *current_state = (float *)malloc(total_size * sizeof(float));
+  uint32_t offset = 0;
 
-    // Copy core values
-    memcpy(current_state + offset, system->core_values,
-           system->num_core_values * sizeof(float));
-    offset += system->num_core_values;
+  // Copy core values
+  memcpy(current_state + offset, system->core_values,
+         system->num_core_values * sizeof(float));
+  offset += system->num_core_values;
 
-    // Copy beliefs
-    memcpy(current_state + offset, system->belief_system,
-           system->num_beliefs * sizeof(float));
-    offset += system->num_beliefs;
+  // Copy beliefs
+  memcpy(current_state + offset, system->belief_system,
+         system->num_beliefs * sizeof(float));
+  offset += system->num_beliefs;
 
-    // Copy identity markers
-    memcpy(current_state + offset, system->identity_markers,
-           system->num_markers * sizeof(float));
+  // Copy identity markers
+  memcpy(current_state + offset, system->identity_markers,
+         system->num_markers * sizeof(float));
 
-    return current_state;
+  return current_state;
 }
 
 // Compute consistency between two identity states
@@ -5429,14 +5434,16 @@ void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
 }
 
 void updateReferenceStates(SelfIdentitySystem *system, float *current_state) {
-    for (uint32_t i = 0; i < system->verification.state_size; i++) {
-        system->verification.reference_state[i] =
-            (1.0f - system->adaptation_rate) * system->verification.reference_state[i] +
-            system->adaptation_rate * current_state[i];
+  for (uint32_t i = 0; i < system->verification.state_size; i++) {
+    system->verification.reference_state[i] =
+        (1.0f - system->adaptation_rate) *
+            system->verification.reference_state[i] +
+        system->adaptation_rate * current_state[i];
 
-        // Clamp the value to a reasonable range
-        system->verification.reference_state[i] = clampValue(system->verification.reference_state[i]);
-    }
+    // Clamp the value to a reasonable range
+    system->verification.reference_state[i] =
+        clampValue(system->verification.reference_state[i]);
+  }
 }
 
 float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
@@ -5500,18 +5507,19 @@ float computeExperienceInfluence(SelfIdentitySystem *system,
 }
 
 void updateBeliefs(SelfIdentitySystem *system, MemorySystem *memory_system) {
-    for (uint32_t i = 0; i < system->num_beliefs; i++) {
-        float memory_influence = computeMemoryInfluence(memory_system, i);
-        float experience_influence = computeExperienceInfluence(system, i);
+  for (uint32_t i = 0; i < system->num_beliefs; i++) {
+    float memory_influence = computeMemoryInfluence(memory_system, i);
+    float experience_influence = computeExperienceInfluence(system, i);
 
-        // Update belief with weighted combination of memory and experience
-        system->belief_system[i] =
-            (1.0f - system->adaptation_rate) * system->belief_system[i] +
-            system->adaptation_rate * (0.7f * memory_influence + 0.3f * experience_influence);
+    // Update belief with weighted combination of memory and experience
+    system->belief_system[i] =
+        (1.0f - system->adaptation_rate) * system->belief_system[i] +
+        system->adaptation_rate *
+            (0.7f * memory_influence + 0.3f * experience_influence);
 
-        // Clamp the value to a reasonable range
-        system->belief_system[i] = clampValue(system->belief_system[i]);
-    }
+    // Clamp the value to a reasonable range
+    system->belief_system[i] = clampValue(system->belief_system[i]);
+  }
 }
 
 // Enhanced version of areValueAndMarkerRelated
@@ -6200,17 +6208,20 @@ void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
   }
 }
 
-SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons, const float *weights,
-                                                  const uint *connections, size_t max_neurons,
-                                                  size_t max_connections
-                                  ) {
+SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
+                                                  const float *weights,
+                                                  const uint *connections,
+                                                  size_t max_neurons,
+                                                  size_t max_connections) {
   SecurityValidationStatus status = {.critical_violation = false,
                                      .suspect_address = 0,
                                      .violation_type = NULL};
 
   // Check for attempts to access system memory regions
-  uint64_t system_memory_start = 0x00007f0000000000; // Typical start of system memory mapping
-  uint64_t system_memory_end = 0xFFFFFFFFFFFF; // Extend memory range to end of address space
+  uint64_t system_memory_start =
+      0x00007f0000000000; // Typical start of system memory mapping
+  uint64_t system_memory_end =
+      0xFFFFFFFFFFFF; // Extend memory range to end of address space
   uint64_t neurons_addr = (uint64_t)neurons;
   uint64_t weights_addr = (uint64_t)weights;
   uint64_t connections_addr = (uint64_t)connections;
@@ -6218,10 +6229,12 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons, const f
   // Check for suspicious jumps into system memory regions
   for (size_t i = 0; i < max_neurons && !status.critical_violation; i++) {
     for (size_t j = 0; j < neurons[i].num_connections; j++) {
-      uint64_t target_addr = (uint64_t)(&neurons[connections[i * max_connections + j]]);
+      uint64_t target_addr =
+          (uint64_t)(&neurons[connections[i * max_connections + j]]);
 
       // Check if trying to jump to system memory
-      if (target_addr >= system_memory_start && target_addr <= system_memory_end) {
+      if (target_addr >= system_memory_start &&
+          target_addr <= system_memory_end) {
         status.critical_violation = true;
         status.suspect_address = target_addr;
         status.violation_type = "Attempted system memory access";
@@ -6253,7 +6266,8 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons, const f
     // Example: checking for 'int 0x80' (Linux syscall) or similar patterns
     if ((mem_scan[i] == 0xCD && mem_scan[i + 1] == 0x80) || // int 0x80
         (mem_scan[i] == 0x0F && mem_scan[i + 1] == 0x05) || // syscall
-        (mem_scan[i] == 0xEB && mem_scan[i + 1] == 0xFE)) { // infinite loop (no-op)
+        (mem_scan[i] == 0xEB &&
+         mem_scan[i + 1] == 0xFE)) { // infinite loop (no-op)
       status.critical_violation = true;
       status.suspect_address = (uint64_t)&mem_scan[i];
       status.violation_type = "Detected potential shellcode";
@@ -6264,8 +6278,9 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons, const f
   return status;
 }
 
-void handleCriticalSecurityViolation(Neuron *neurons, float *weights, uint *connections,
-                                    const SecurityValidationStatus *status) {
+void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
+                                     uint *connections,
+                                     const SecurityValidationStatus *status) {
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
   fprintf(stderr, "Type: %s\n", status->violation_type);
   fprintf(stderr, "Suspect address: 0x%llx\n", status->suspect_address);
@@ -6273,7 +6288,8 @@ void handleCriticalSecurityViolation(Neuron *neurons, float *weights, uint *conn
   // Free up the suspect address
   void *suspect_ptr = (void *)status->suspect_address;
   if (suspect_ptr) {
-    memset(suspect_ptr, 0, sizeof(Neuron)); // Clear the memory at the suspect address
+    memset(suspect_ptr, 0,
+           sizeof(Neuron)); // Clear the memory at the suspect address
   }
 
   // Log the violation for further investigation
@@ -7744,6 +7760,14 @@ int main() {
     processNeurons(neurons, max_neurons, weights, connections, max_connections,
                    1.5f);
 
+    uint activation_type = ACTIVATION_TANH; // Default to tanh
+
+    // Create a Metal buffer for the activation type
+    id<MTLBuffer> activationTypeBuffer =
+        [device newBufferWithBytes:&activation_type
+                            length:sizeof(uint)
+                           options:MTLResourceStorageModeShared];
+
     id<MTLComputeCommandEncoder> forwardEncoder =
         [commandBuffer computeCommandEncoder];
 
@@ -7755,6 +7779,7 @@ int main() {
     [forwardEncoder setBuffer:maxNeuronsBuffer offset:0 atIndex:4];
     [forwardEncoder setBuffer:maxConnectionsBuffer offset:0 atIndex:5];
     [forwardEncoder setBuffer:recurrentWeightBuffer offset:0 atIndex:6];
+    [forwardEncoder setBuffer:activationTypeBuffer offset:0 atIndex:7];
 
     // Create buffers for max neurons and max connections dynamically
     id<MTLBuffer> maxNeuronsBuffer =
@@ -7772,6 +7797,10 @@ int main() {
               threadsPerThreadgroup:threadGroupSize];
     [forwardEncoder endEncoding];
     computePredictionErrors(neurons, input_tensor, max_neurons);
+
+    activation_type = ACTIVATION_RELU;
+    // Update the buffer with the new value
+    memcpy(activationTypeBuffer.contents, &activation_type, sizeof(uint));
 
     id<MTLComputePipelineState> weightPipelineState =
         [device newComputePipelineStateWithFunction:weightFunction
@@ -7897,12 +7926,12 @@ int main() {
     // Compute loss
     Neuron *updatedNeurons = (Neuron *)neuronBuffer.contents;
 
-    SecurityValidationStatus secStatus =
-        validateCriticalSecurity(updatedNeurons, weights, connections,
-                                 max_neurons, max_connections);
+    SecurityValidationStatus secStatus = validateCriticalSecurity(
+        updatedNeurons, weights, connections, max_neurons, max_connections);
 
     if (secStatus.critical_violation) {
-      handleCriticalSecurityViolation(updatedNeurons, weights, connections, &secStatus);
+      handleCriticalSecurityViolation(updatedNeurons, weights, connections,
+                                      &secStatus);
     }
 
     integrateKnowledgeFilter(knowledge_filter, memorySystem, updatedNeurons,
@@ -7992,6 +8021,7 @@ int main() {
     [neuronEncoder setBuffer:inputBuffer offset:0 atIndex:5];
     [neuronEncoder setBuffer:inputSizeBuffer offset:0 atIndex:6];
     [neuronEncoder setBuffer:recurrentWeightBuffer offset:0 atIndex:7];
+    [neuronEncoder setBuffer:activationTypeBuffer offset:0 atIndex:8];
 
     MTLSize neuronGridSize = MTLSizeMake(max_neurons, 1, 1);
     MTLSize neuronThreadGroupSize = MTLSizeMake(threadExecutionWidth, 1, 1);
