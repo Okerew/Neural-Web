@@ -34,7 +34,7 @@ COPY --chown=$USERNAME:$USERNAME custom_embeddings.txt ./
 COPY --chown=$USERNAME:$USERNAME vocabulary.txt ./
 
 # Compile the CUDA program using NVCC
-RUN nvcc -o neural_web neural_web.cu -I/usr/include -ljson-c
+RUN nvcc -o neural_web neural_web.cu -I/usr/include -ljson-c -lcurl
 
 # Set the default command to run the program
 CMD ["./neural_web"]
