@@ -15,6 +15,12 @@ constant float MIN_WEIGHT = -1.0f;
 constant float MAX_WEIGHT = 1.0f;
 constant uint MAX_NEURONS = 1024;      // Adjust as needed
 constant uint MAX_CONNECTIONS = 16;    // Adjust as needed
+constant uint ACTIVATION_TANH = 0;
+constant uint ACTIVATION_RELU = 1;
+constant uint ACTIVATION_SIGMOID =  2;
+constant uint ACTIVATION_LEAKY_RELU =  3;
+constant uint ACTIVATION_SWISH = 4;
+
 
 // Define MemoryEntry structure
 struct MemoryEntry {
@@ -38,18 +44,62 @@ static inline float fast_tanh(float x) {
     return clamp(a / b, MIN_ACTIVATION, MAX_ACTIVATION);
 }
 
-// Activation function with configurable response curve
-static inline float activation_function(float x, float scale, float bias) {
+// ReLU activation function
+static inline float relu(float x) {
+    return metal::max(0.0f, x);
+}
+
+// Sigmoid activation function
+static inline float sigmoid(float x) {
+    return 1.0f / (1.0f + metal::exp(-x));
+}
+
+// Leaky ReLU activation function
+static inline float leaky_relu(float x, float alpha = 0.01f) {
+    return x > 0.0f ? x : alpha * x;
+}
+
+// Swish activation function (x * sigmoid(x))
+static inline float swish(float x) {
+    return x * sigmoid(x);
+}
+
+// Activation function with configurable response curve and type
+static inline float activation_function(float x, float scale, float bias, uint activation_type) {
     // Apply scale and bias
     float scaled = x * scale + bias;
     
-    // Use fast tanh approximation
-    float base_activation = fast_tanh(scaled);
+    // Select activation function based on type
+    float base_activation;
+    switch (activation_type) {
+        case ACTIVATION_RELU:
+            base_activation = relu(scaled);
+            break;
+        case ACTIVATION_SIGMOID:
+            base_activation = sigmoid(scaled);
+            break;
+        case ACTIVATION_LEAKY_RELU:
+            base_activation = leaky_relu(scaled);
+            break;
+        case ACTIVATION_SWISH:
+            base_activation = swish(scaled);
+            break;
+        case ACTIVATION_TANH:
+        default:
+            base_activation = fast_tanh(scaled);
+            break;
+    }
     
     // Add nonlinearity for more dynamic response
     float sign_val = metal::sign(base_activation);
     float abs_val = metal::abs(base_activation);
-    return sign_val * metal::pow(abs_val, 1.1f);
+    
+    // Apply additional nonlinearity for tanh and sigmoid only
+    if (activation_type == ACTIVATION_TANH || activation_type == ACTIVATION_SIGMOID) {
+        return sign_val * metal::pow(abs_val, 1.1f);
+    } else {
+        return base_activation;
+    }
 }
 
 kernel void update_neurons(device Neuron* neurons [[buffer(0)]],
@@ -60,6 +110,7 @@ kernel void update_neurons(device Neuron* neurons [[buffer(0)]],
                          device const float* input_tensor [[buffer(5)]],
                          device const uint& input_size [[buffer(6)]],
                          device const float* recurrent_weights [[buffer(7)]],
+                         device const uint& activation_type [[buffer(8)]],
                          uint id [[thread_position_in_grid]]) {
     // Early exit for out of bounds threads
     if (id >= max_neurons) return;
@@ -102,7 +153,7 @@ kernel void update_neurons(device Neuron* neurons [[buffer(0)]],
     
     // Apply activation function with dynamic scaling
     float dynamic_scale = ACTIVATION_SCALE * (1.0f + 0.1f * metal::sin(input_influence * M_PI_F));
-    float new_output = activation_function(new_state, dynamic_scale, ACTIVATION_BIAS);
+    float new_output = activation_function(new_state, dynamic_scale, ACTIVATION_BIAS, activation_type);
     
     // Add slight randomization for variability
     float random_val = metal::fract(metal::sin(dot(float2(float(id), new_state), 
@@ -153,7 +204,6 @@ kernel void update_weights(device float* weights [[buffer(0)]],
     weights[id] = metal::clamp(new_weight, MIN_WEIGHT, MAX_WEIGHT);
 }
 
-// Updated neuron processing kernel
 kernel void process_neurons(device Neuron* neurons [[buffer(0)]],
                           device const float* weights [[buffer(1)]],
                           device const uint* connections [[buffer(2)]],
@@ -162,6 +212,7 @@ kernel void process_neurons(device Neuron* neurons [[buffer(0)]],
                           device const float* input_tensor [[buffer(5)]],
                           device const uint& input_size [[buffer(6)]],
                           device const float* recurrent_weights [[buffer(7)]],
+                          device const uint& activation_type [[buffer(8)]],
                           uint id [[thread_position_in_grid]]) {
     if (id >= max_neurons) return;
     
@@ -198,7 +249,7 @@ kernel void process_neurons(device Neuron* neurons [[buffer(0)]],
     
     // Dynamic activation
     float dynamic_scale = ACTIVATION_SCALE * (1.0f + 0.1f * metal::sin(input_influence * M_PI_F));
-    float new_output = activation_function(new_state, dynamic_scale, ACTIVATION_BIAS);
+    float new_output = activation_function(new_state, dynamic_scale, ACTIVATION_BIAS, activation_type);
     
     // Add controlled randomization
     float random_val = metal::fract(metal::sin(dot(float2(float(id), new_state),
