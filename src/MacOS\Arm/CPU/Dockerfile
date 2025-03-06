@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     clang \
     gnuplot \
     libjson-c-dev \
+    curl \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,7 +36,7 @@ COPY --chown=$USERNAME:$USERNAME custom_embeddings.txt ./
 COPY --chown=$USERNAME:$USERNAME vocabulary.txt ./
 
 # Compile the C program using Clang
-RUN clang -o neural_web neural_web.c -I/usr/include -ljson-c -lm
+RUN clang -o neural_web neural_web.c -I/usr/include -ljson-c -lcurl -lm
 
 # Set the default command to run the program
 CMD ["./neural_web"]
