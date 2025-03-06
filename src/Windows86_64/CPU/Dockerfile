@@ -10,7 +10,7 @@ RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
     iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 
 # Install Clang, Make, and json-c
-RUN choco install -y llvm make json-c
+RUN choco install -y llvm make json-c curl
 
 # Set working directory
 WORKDIR C:\app
@@ -21,7 +21,7 @@ COPY custom_embeddings.txt ./
 COPY vocabulary.txt ./
 
 # Compile the C program with json-c
-RUN clang -o neural_web.exe neural_web64.c -I"C:\ProgramData\chocolatey\lib\json-c\include" -L"C:\ProgramData\chocolatey\lib\json-c\lib" -ljson-c -lm
+RUN clang -o neural_web.exe neural_web64.c -lcurl -I"C:\ProgramData\chocolatey\lib\json-c\include" -L"C:\ProgramData\chocolatey\lib\json-c\lib" -ljson-c -lm
 
 # Set the default command to run the program
 CMD ["C:\\app\\neural_web.exe"]
