@@ -55,6 +55,12 @@
 #define MAX_DECISION_STEPS 20
 #define MAX_SYMBOLS 100
 #define MAX_QUESTIONS 10
+#define VOCAB_SIZE 100
+#define ACTIVATION_TANH 0
+#define ACTIVATION_RELU 1
+#define ACTIVATION_SIGMOID 2
+#define ACTIVATION_LEAKY_RELU 3
+#define ACTIVATION_SWISH 4
 
 typedef struct {
   float state;
@@ -3600,7 +3606,7 @@ void addNewNeuron(Neuron *neurons, int *connections, float *weights,
   Neuron new_neuron = {
       .state = 0.0f,
       .output = 0.0f,
-      .num_connections = MAX_CONNECTIONS,
+      .num_connections = 2,
       .layer_id = (*num_neurons) % 2 // Alternate layers
   };
 
@@ -4296,51 +4302,127 @@ void selectOptimalMetaDecisionPath(Neuron *neurons, float *weights,
                     metacog->confidence_level);
 }
 
+static inline float fast_tanh(float x) {
+  float x2 = x * x;
+  float a = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
+  float b = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
+  return fmax(fmin(a / b, MAX_ACTIVATION), MIN_ACTIVATION);
+}
+
+// ReLU activation function
+static inline float relu(float x) { return fmax(0.0f, x); }
+
+// Sigmoid activation function
+static inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
+
+// Leaky ReLU activation function
+static inline float leaky_relu(float x, float alpha) {
+  return x > 0.0f ? x : alpha * x;
+}
+
+// Swish activation function (x * sigmoid(x))
+static inline float swish(float x) { return x * sigmoid(x); }
+
+// Activation function with configurable response curve and type
+static inline float activation_function(float x, float scale, float bias,
+                                        unsigned int activation_type) {
+  // Apply scale and bias
+  float scaled = x * scale + bias;
+
+  // Select activation function based on type
+  float base_activation;
+  switch (activation_type) {
+  case ACTIVATION_RELU:
+    base_activation = relu(scaled);
+    break;
+  case ACTIVATION_SIGMOID:
+    base_activation = sigmoid(scaled);
+    break;
+  case ACTIVATION_LEAKY_RELU:
+    base_activation = leaky_relu(scaled, 0.01f);
+    break;
+  case ACTIVATION_SWISH:
+    base_activation = swish(scaled);
+    break;
+  case ACTIVATION_TANH:
+  default:
+    base_activation = fast_tanh(scaled);
+    break;
+  }
+
+  // Add nonlinearity for more dynamic response for tanh and sigmoid only
+  if (activation_type == ACTIVATION_TANH ||
+      activation_type == ACTIVATION_SIGMOID) {
+    float sign_val = base_activation >= 0 ? 1.0f : -1.0f;
+    float abs_val = fabsf(base_activation);
+    return sign_val * powf(abs_val, 1.1f);
+  } else {
+    return base_activation;
+  }
+}
+
+// Generate random value based on seed and input value
+float generate_random(int seed, float value) {
+  float x = sinf(seed * 12.9898f + value * 78.233f) * 43758.5453f;
+  return x - floorf(x);
+}
+
 void updateNeuronsOnCPU(Neuron *neurons, const float *weights,
                         const int *connections, int max_neurons,
                         int max_connections, const float *input_tensor,
-                        int input_size, const float *recurrent_weights) {
+                        int input_size, const unsigned int activation_type) {
   for (int id = 0; id < max_neurons; id++) {
+    // Load neuron data into thread-local storage
     float current_state = neurons[id].state;
     float current_output = neurons[id].output;
     int num_conn = neurons[id].num_connections;
     int layer = neurons[id].layer_id;
 
-    // Calculate weighted sum
+    // Calculate weighted sum of inputs from connected neurons
     float weighted_sum = 0.0f;
+
+    // Process connections
     for (int i = 0; i < num_conn; i++) {
       int conn_idx = id * max_connections + i;
       int target = connections[conn_idx];
 
+      // Add weight scaling based on layer depth
       float depth_scale = 1.0f / (1.0f + layer);
       float connection_strength = weights[conn_idx] * depth_scale;
 
+      // Combine state and output influences
       weighted_sum += neurons[target].state * connection_strength * 0.6f +
                       neurons[target].output * connection_strength * 0.4f;
     }
 
+    // Calculate input influence with temporal dynamics
     float input_influence = input_tensor[id % input_size];
-    float temporal_factor = 1.0f / (1.0f + id % 4);
+    float temporal_factor =
+        1.0f / (1.0f + id % 4); // Creates wave-like temporal patterns
 
+    // Update state with multiple influences
     float new_state = current_state * DECAY_RATE +
                       weighted_sum * CONNECTION_WEIGHT +
                       input_influence * INPUT_WEIGHT * temporal_factor;
 
-    float recurrent_influence = current_output * recurrent_weights[id];
+    // Add recurrent connection influence
+    float recurrent_influence = current_output * weights[id];
     new_state += recurrent_influence * 0.15f;
 
-    // Activation function
+    // Apply activation function with dynamic scaling
     float dynamic_scale =
-        ACTIVATION_SCALE * (1.0f + 0.1f * sin(input_influence * M_PI));
-    float new_output = tanh(new_state * dynamic_scale + ACTIVATION_BIAS);
+        ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
+    float new_output = activation_function(new_state, dynamic_scale,
+                                           ACTIVATION_BIAS, activation_type);
 
-    // Add small random noise
-    float random_val = ((float)rand() / RAND_MAX) * 0.01f;
-    new_output += random_val;
+    // Add slight randomization for variability
+    float random_val = generate_random(id, new_state);
+    new_output += random_val * 0.01f;
 
-    // Clamp output
-    new_output = fmax(-1.0f, fmin(1.0f, new_output));
+    // Ensure outputs stay within valid range
+    new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
 
+    // Write back results
     neurons[id].state = new_state;
     neurons[id].output = new_output;
   }
@@ -4459,7 +4541,8 @@ float generate_random(int seed, float value) {
 void processNeuronsOnCPU(Neuron *neurons, const float *weights,
                          const int *connections, const int max_neurons,
                          const int max_connections, const float *input_tensor,
-                         const int input_size) {
+                         const int input_size,
+                         const unsigned int activation_type) {
   for (int id = 0; id < max_neurons; id++) {
     float current_state = neurons[id].state;
     float current_output = neurons[id].output;
@@ -4488,11 +4571,15 @@ void processNeuronsOnCPU(Neuron *neurons, const float *weights,
                       weighted_sum * CONNECTION_WEIGHT +
                       input_influence * INPUT_WEIGHT * temporal_factor;
 
+    // Add recurrent influence
+    float recurrent_influence = current_output * weights[id];
+    new_state += recurrent_influence * 0.15f;
+
     // Dynamic activation
     float dynamic_scale =
         ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-    float new_output =
-        activation_function(new_state, dynamic_scale, ACTIVATION_BIAS);
+    float new_output = activation_function(new_state, dynamic_scale,
+                                           ACTIVATION_BIAS, activation_type);
 
     // Add controlled randomization
     float random_val = generate_random(id, new_state);
@@ -7897,9 +7984,12 @@ int main() {
              memorySystem->hierarchy.long_term.size);
     }
 
+    int activation_type = ACTIVATION_TANH;
+
     // Forward pass using CPU implementation
     updateNeuronsOnCPU(neurons, weights, connections, max_neurons,
-                       max_connections, input_tensor, input_size, weights);
+                       max_connections, input_tensor, input_size,
+                       activation_type);
 
     computePredictionErrors(neurons, input_tensor, max_neurons);
 
@@ -7933,13 +8023,12 @@ int main() {
     applyMetaControllerAdaptations(neurons, weights, metaController,
                                    MAX_NEURONS);
 
-    SecurityValidationStatus secStatus =
-        validateCriticalSecurity(neurons, weights, connections, max_neurons,
-                                 max_connections, memorySystem);
+    SecurityValidationStatus secStatus = validateCriticalSecurity(
+        neurons, weights, connections, max_neurons, max_connections);
 
     if (secStatus.critical_violation) {
-      criticalSecurityShutdown(neurons, weights, connections, memorySystem,
-                               &secStatus);
+      handleCriticalSecurityViolation(neurons, weights, connections,
+                                      &secStatus);
     }
 
     integrateKnowledgeFilter(knowledge_filter, memorySystem, neurons,
@@ -7996,8 +8085,11 @@ int main() {
     // Update weights using CPU implementation
     updateWeightsOnCPU(weights, neurons, connections, learning_rate,
                        max_neurons, max_connections);
+
+    activation_type = ACTIVATION_RELU;
     processNeuronsOnCPU(neurons, weights, connections, max_neurons,
-                        max_connections, input_tensor, input_size);
+                        max_connections, input_tensor, input_size,
+                        activation_type);
     // Reverse process using CPU implementation
     reverseProcessOnCPU(neurons, reverse_weights, reverse_connections,
                         max_neurons, max_connections);
@@ -8482,9 +8574,10 @@ int main() {
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
     printf("Memory Usage Benchmark:\n");
-    printMemoryUsage();
+    printf("Max Resident Set Size: %ld KB\n", usage.ru_maxrss);
   }
 
+  // Save final state
   saveNetworkStates(stateHistory, STEPS);
   saveMemorySystem(memorySystem, "memory_system.dat");
   saveHierarchicalMemory(memorySystem, "hierarchical_memory.dat");
