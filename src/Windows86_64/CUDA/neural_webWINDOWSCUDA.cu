@@ -60,6 +60,12 @@
 #define MAX_USAGE_COUNT 1000 // Maximum usage count for normalization
 #define MAX_SYMBOLS 100
 #define MAX_QUESTIONS 10
+#define VOCAB_SIZE 100
+#define ACTIVATION_TANH 0
+#define ACTIVATION_RELU 1
+#define ACTIVATION_SIGMOID 2
+#define ACTIVATION_LEAKY_RELU 3
+#define ACTIVATION_SWISH 4
 
 typedef struct {
   float state;
@@ -617,25 +623,64 @@ __device__ float fast_tanh(float x) {
   return fminf(fmaxf(a / b, MIN_ACTIVATION), MAX_ACTIVATION);
 }
 
-// Activation function with configurable response curve
-__device__ float activation_function(float x, float scale, float bias) {
+// ReLU activation function
+__device__ float relu(float x) { return fmaxf(0.0f, x); }
+
+// Sigmoid activation function
+__device__ float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
+
+// Leaky ReLU activation function
+__device__ float leaky_relu(float x, float alpha = 0.01f) {
+  return x > 0.0f ? x : alpha * x;
+}
+
+// Swish activation function (x * sigmoid(x))
+__device__ float swish(float x) { return x * sigmoid(x); }
+
+// Activation function with configurable response curve and type
+__device__ float activation_function(float x, float scale, float bias,
+                                     unsigned int activation_type) {
   // Apply scale and bias
   float scaled = x * scale + bias;
 
-  // Use fast tanh approximation
-  float base_activation = fast_tanh(scaled);
+  // Select activation function based on type
+  float base_activation;
+  switch (activation_type) {
+  case ACTIVATION_RELU:
+    base_activation = relu(scaled);
+    break;
+  case ACTIVATION_SIGMOID:
+    base_activation = sigmoid(scaled);
+    break;
+  case ACTIVATION_LEAKY_RELU:
+    base_activation = leaky_relu(scaled);
+    break;
+  case ACTIVATION_SWISH:
+    base_activation = swish(scaled);
+    break;
+  case ACTIVATION_TANH:
+  default:
+    base_activation = fast_tanh(scaled);
+    break;
+  }
 
   // Add nonlinearity for more dynamic response
-  float sign_val = copysignf(1.0f, base_activation);
-  float abs_val = fabsf(base_activation);
-  return sign_val * powf(abs_val, 1.1f);
+  if (activation_type == ACTIVATION_TANH ||
+      activation_type == ACTIVATION_SIGMOID) {
+    float sign_val = copysignf(1.0f, base_activation);
+    float abs_val = fabsf(base_activation);
+    return sign_val * powf(abs_val, 1.1f);
+  } else {
+    return base_activation;
+  }
 }
 
 __global__ void
 update_neurons(Neuron *neurons, const float *weights,
                const unsigned int *connections, const unsigned int max_neurons,
                const unsigned int max_connections, const float *input_tensor,
-               const unsigned int input_size, const float *recurrent_weights) {
+               const unsigned int input_size, const float *recurrent_weights,
+               const unsigned int activation_type) {
   unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id >= max_neurons)
     return;
@@ -680,8 +725,8 @@ update_neurons(Neuron *neurons, const float *weights,
   // Apply activation function with dynamic scaling
   float dynamic_scale =
       ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-  float new_output =
-      activation_function(new_state, dynamic_scale, ACTIVATION_BIAS);
+  float new_output = activation_function(new_state, dynamic_scale,
+                                         ACTIVATION_BIAS, activation_type);
 
   // Add slight randomization for variability
   float2 hash_input = make_float2(id, new_state);
@@ -737,7 +782,8 @@ __global__ void
 process_neurons(Neuron *neurons, const float *weights,
                 const unsigned int *connections, const unsigned int max_neurons,
                 const unsigned int max_connections, const float *input_tensor,
-                const unsigned int input_size, const float *recurrent_weights) {
+                const unsigned int input_size, const float *recurrent_weights,
+                const unsigned int activation_type) {
   unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id >= max_neurons)
     return;
@@ -776,8 +822,8 @@ process_neurons(Neuron *neurons, const float *weights,
   // Dynamic activation
   float dynamic_scale =
       ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-  float new_output =
-      activation_function(new_state, dynamic_scale, ACTIVATION_BIAS);
+  float new_output = activation_function(new_state, dynamic_scale,
+                                         ACTIVATION_BIAS, activation_type);
 
   // Add controlled randomization
   float2 hash_input = make_float2(id, new_state);
@@ -3888,7 +3934,7 @@ void addNewNeuron(Neuron *neurons, int *connections, float *weights,
   Neuron new_neuron = {
       .state = 0.0f,
       .output = 0.0f,
-      .num_connections = MAX_CONNECTIONS,
+      .num_connections = 2,
       .layer_id =
           static_cast<unsigned int>(*num_neurons) % 2 // Alternate layers
   };
@@ -7985,9 +8031,11 @@ int main() {
     dim3 blockDim(256);
     dim3 gridDim((max_neurons + blockDim.x - 1) / blockDim.x);
 
+    int activation_type = ACTIVATION_TANH;
+
     update_neurons<<<gridDim, blockDim>>>(
         d_neurons, d_weights, d_connections, max_neurons, max_connections,
-        d_input_tensor, input_size, d_recurrent_weights);
+        d_input_tensor, input_size, d_recurrent_weights, activation_type);
 
     cudaMemcpy(neurons, d_neurons, max_neurons * sizeof(Neuron),
                cudaMemcpyDeviceToHost);
@@ -8086,9 +8134,11 @@ int main() {
                                           learning_rate, max_neurons,
                                           max_connections);
 
+    activation_type = ACTIVATION_RELU;
+
     process_neurons<<<gridDim, blockDim>>>(
         d_neurons, d_weights, d_connections, max_neurons, max_connections,
-        d_input_tensor, input_size, d_recurrent_weights);
+        d_input_tensor, input_size, d_recurrent_weights, activation_type);
 
     reverse_process<<<gridDim, blockDim>>>(d_neurons, d_weights, d_connections,
                                            max_neurons, max_connections);
