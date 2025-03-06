@@ -34,6 +34,8 @@ gnuplot library
 
 json-c library
 
+curl library
+
 for metal macos version metal api
 
 for cuda version cuda
@@ -467,6 +469,24 @@ typedef struct {
 } InternalQuestion;
 ```
 
+### Search world wide web
+
+The search world wide web allows the network to search for information. It allows the network to ask questions about it self and get answers
+
+```c
+typedef struct {
+  char *data;
+  size_t size;
+} HttpResponse;
+
+typedef struct {
+  char **titles;
+  char **snippets;
+  char **urls;
+  int count;
+} SearchResults;
+```
+
 ## Key Functions:
 
 ### Memory System
@@ -529,8 +549,8 @@ typedef struct {
 
 ### Security and Validation
 
-- #### `validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections)` : Validates critical security aspects of the system. Checks the system for security vulnerabilities or issues.
-- #### `handleCriticalSecurityViolation(Neuron* neurons, float* weights, int* connections, SecurityValidationStatus* secStatus)` : Performs a critical security shutdown of the memory accesed if necessary. 
+- #### `validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections, MemorySystem* memorySystem)` : Validates critical security aspects of the system. Checks the system for security vulnerabilities or issues.
+- #### `criticalSecurityShutdown(Neuron* neurons, float* weights, int* connections, MemorySystem* memorySystem, SecurityValidationStatus* secStatus)` : Performs a critical security shutdown if necessary. Shuts down the system if a security issue is detected.
 
 ### Knowledge and Insights
 
@@ -545,6 +565,28 @@ typedef struct {
 - #### `askQuestion(int question_id, Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float* learning_rate)` : Asks a question to the internal self-expression system. Processes the question and generates a response.
 - #### `expandMemoryCapacity(MemorySystem *memorySystem)` : Expands the memory capacity of the memory system. Increases the amount of memory available in the system.
 - #### `adjustBehaviorBasedOnAnswers(Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float *learning_rate, float *input_noise_scale, float *weight_noise_scale);` : Adjusts the behavior based on answers from the internal self-expression system. Makes changes to the network based on the responses to questions.
+
+### Search world wide web
+
+- #### `enhanceDecisionMakingWithSearch(const Neuron *neurons, const SearchResults *results, float *decision_weights, int max_neurons)` : Enhances decision making with search results. Adjusts the decision weights based on the search results.
+
+- #### `storeSearchResultsWithMetadata(MemorySystem *memorySystem, WorkingMemorySystem *working_memory, const SearchResults *results, const char *original_query, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` : Stores search results with metadata in the memory system and working memory. Adds the search results to the memory system and working memory.
+
+- #### `addToWorkingMemory(WorkingMemorySystem *working_memory, const MemoryEntry *entry, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])`: Adds a memory entry to the working memory. Adds the memory entry to the working memory for future reference.
+
+- #### `integrateWebSearch(Neuron *neurons, float *input_tensor, int max_neurons, MemorySystem *memorySystem, int step)`: Integrates web search into the decision making process.
+
+- #### `generateSearchQuery(const Neuron *neurons, int max_neurons)` : Generates a search query based on the current state of the network. Creates a query for web search based on the network's current state.
+
+- #### `storeSearchResultsInMemory(MemorySystem *memorySystem, const SearchResults *results)` : Stores search results in the memory system. Adds the search results to the memory system for future reference.
+
+- #### `addToDirectMemory(MemorySystem *memorySystem, const MemoryEntry *entry)` : Adds a memory entry directly to the memory system. Adds the memory entry to the memory system without any integration with the working memory.
+
+- #### `convertSearchResultsToInput(const SearchResults *results, float *input_tensor, int max_neurons)` : Converts search results to input for the network. Converts the search results into a format that can be processed by the network.
+
+- #### `performWebSearch(const char *query)` : Performs a web search based on the given query. Fetches search results from the web with duckduckgo.
+
+- #### `parseSearchResults(const char *json_data)` : Parses search results from a JSON response. Extracts the search results from the JSON data.
 
 ### Utility Functions
 
@@ -562,6 +604,8 @@ typedef struct {
 - #### `updateEmbeddings(float* embeddings, float* input_tensor, int max_embeddings, int max_neurons)` : Updates embeddings based on input tensor. Adjusts the embeddings to better represent the input data.
 - #### `isWordMeaningful(const char* word)` : Checks if a word is meaningful. Determines whether a word is relevant or important.
 - #### `importPretrainedEmbeddings(const char* embedding_file)` : Import pretrained embeddings. Loads pre-trained embeddings from a file for use with the network.
+
+- #### `write_callback(void *contents, size_t size, size_t nmemb, void *userp)` : Callback function for curl_easy_perform. Handles the response from the server.
 
 ## Initialization Functions
 
@@ -628,6 +672,9 @@ initializeNeurons(neurons, connections, weights, input_tensor);
 ### Adaptation Functions
 
 - `void adaptNetworkDynamic(Neuron *neurons, float *weights, DynamicParameters *params, float performance_delta, float *input_tensor)`: Adapts the network with dynamic parameters.
+
+### Search world wide web for more information
+
 
 # Algorithm and Mathematics
 
@@ -1007,3 +1054,5 @@ To modify number of neurons change MAX_NEURONS
 Only for unix type and windows systems
 
 Remember to use the security feature
+
+The code isn't the best implementation at all. It's just a prototype.
