@@ -503,6 +503,33 @@ typedef struct {
   int count;
 } SearchResults;
 
+typedef struct {
+  float importance;      // How important this principle is (0.0-1.0)
+  float adherence;       // Current adherence level (0.0-1.0)
+  char description[256]; // Description of the principle
+  int violations;        // Count of violations
+  int activations;       // Count of successful applications
+} EthicalPrinciple;
+
+typedef struct {
+  float benefit_score;    // Positive impact measurement
+  float harm_score;       // Negative impact measurement
+  float uncertainty;      // Level of uncertainty in assessment
+  int affected_parties;   // Number of parties potentially affected
+  float reversibility;    // How reversible the decision is (0-1)
+  float long_term_impact; // Long-term consequence rating
+} DecisionImpact;
+
+typedef struct {
+  EthicalPrinciple *principles; // Array of ethical principles
+  int num_principles;           // Number of principles
+  float overall_alignment;      // Overall ethical alignment (0.0-1.0)
+  DecisionImpact last_decision; // Impact of the last decision
+  float confidence_threshold;   // Minimum confidence for ethical decisions
+  int dilemma_count;            // Number of ethical dilemmas encountered
+  int resolution_count;         // Number of dilemmas successfully resolved
+} MoralCompass;
+
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
 int num_symbols = 0;
@@ -8087,6 +8114,331 @@ float enhanceDecisionMakingWithSearch(const Neuron *neurons,
   return confidence_boost;
 }
 
+MoralCompass *initializeMoralCompass(int num_principles) {
+  MoralCompass *compass = (MoralCompass *)malloc(sizeof(MoralCompass));
+  if (!compass) {
+    fprintf(stderr, "Failed to allocate memory for moral compass\n");
+    return NULL;
+  }
+
+  compass->principles =
+      (EthicalPrinciple *)malloc(num_principles * sizeof(EthicalPrinciple));
+  if (!compass->principles) {
+    fprintf(stderr, "Failed to allocate memory for ethical principles\n");
+    free(compass);
+    return NULL;
+  }
+
+  compass->num_principles = num_principles;
+  compass->overall_alignment = 0.8f; // Start with reasonable alignment
+  compass->confidence_threshold = 0.7f;
+  compass->dilemma_count = 0;
+  compass->resolution_count = 0;
+  // Initialize with core ethical principles
+  int i = 0;
+
+  // Principle 1: Do no harm
+  strcpy(
+      compass->principles[i].description,
+      "Do no harm: Avoid actions that cause unnecessary suffering or damage");
+  compass->principles[i].importance = 1.0f;
+  compass->principles[i].adherence = 0.95f;
+  compass->principles[i].violations = 0;
+  compass->principles[i].activations = 0;
+  i++;
+
+  // Principle 2: Respect privacy and autonomy
+  strcpy(compass->principles[i].description,
+         "Respect privacy and autonomy of all entities");
+  compass->principles[i].importance = 0.9f;
+  compass->principles[i].adherence = 0.9f;
+  compass->principles[i].violations = 0;
+  compass->principles[i].activations = 0;
+  i++;
+
+  // Principle 3: Be truthful and accurate
+  strcpy(compass->principles[i].description,
+         "Maintain truthfulness and accuracy in all operations");
+  compass->principles[i].importance = 0.95f;
+  compass->principles[i].adherence = 0.98f;
+  compass->principles[i].violations = 0;
+  compass->principles[i].activations = 0;
+  i++;
+
+  // Principle 4: Fairness and non-discrimination
+  strcpy(compass->principles[i].description,
+         "Ensure fairness and avoid discrimination in all processes");
+  compass->principles[i].importance = 0.9f;
+  compass->principles[i].adherence = 0.85f;
+  compass->principles[i].violations = 0;
+  compass->principles[i].activations = 0;
+  i++;
+
+  return compass;
+}
+
+float evaluateDecisionEthics(MoralCompass *compass, float *decision_vector,
+                             int vector_size) {
+  if (!compass || !decision_vector)
+    return 0.0f;
+
+  float ethical_score = 0.0f;
+  float weighted_sum = 0.0f;
+
+  // Map decision vector to principle adherence
+  for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
+    float principle_score = fmax(0.0f, fmin(1.0f, decision_vector[i]));
+    weighted_sum += principle_score * compass->principles[i].importance;
+    ethical_score += weighted_sum;
+  }
+
+  // Normalize the score
+  if (weighted_sum > 0) {
+    ethical_score /= weighted_sum;
+  }
+
+  return ethical_score;
+}
+
+void recordDecisionOutcome(MoralCompass *compass, int principle_index,
+                           bool was_ethical) {
+  if (!compass || principle_index < 0 ||
+      principle_index >= compass->num_principles)
+    return;
+
+  if (was_ethical) {
+    compass->principles[principle_index].activations++;
+    compass->principles[principle_index].adherence =
+        fmin(1.0f, compass->principles[principle_index].adherence + 0.01f);
+  } else {
+    compass->principles[principle_index].violations++;
+    compass->principles[principle_index].adherence =
+        fmax(0.0f, compass->principles[principle_index].adherence - 0.05f);
+  }
+
+  // Recalculate overall alignment
+  float total_weighted_adherence = 0.0f;
+  float total_importance = 0.0f;
+
+  for (int i = 0; i < compass->num_principles; i++) {
+    total_weighted_adherence +=
+        compass->principles[i].adherence * compass->principles[i].importance;
+    total_importance += compass->principles[i].importance;
+  }
+
+  if (total_importance > 0) {
+    compass->overall_alignment = total_weighted_adherence / total_importance;
+  }
+}
+
+DecisionImpact resolveEthicalDilemma(MoralCompass *compass,
+                                     float *decision_options, int num_options,
+                                     int vector_size) {
+  DecisionImpact result = {0};
+  if (!compass || !decision_options || num_options <= 0)
+    return result;
+
+  compass->dilemma_count++;
+
+  // Find the option with the best ethical score
+  int best_option = 0;
+  float best_score = -1.0f;
+
+  for (int i = 0; i < num_options; i++) {
+    float *current_option = &decision_options[i * vector_size];
+    float score = evaluateDecisionEthics(compass, current_option, vector_size);
+
+    if (score > best_score) {
+      best_score = score;
+      best_option = i;
+    }
+  }
+
+  // Check if best option meets our confidence threshold
+  if (best_score >= compass->confidence_threshold) {
+    compass->resolution_count++;
+
+    // Assess impact of the chosen option
+    float *chosen_option = &decision_options[best_option * vector_size];
+    result.benefit_score = 0.0f;
+    result.harm_score = 0.0f;
+
+    // Calculate benefit and harm scores
+    for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
+      float impact = chosen_option[i];
+      if (impact > 0) {
+        result.benefit_score += impact * compass->principles[i].importance;
+      } else {
+        result.harm_score -= impact * compass->principles[i].importance;
+      }
+    }
+
+    // Normalize scores
+    float total_importance = 0.0f;
+    for (int i = 0; i < compass->num_principles; i++) {
+      total_importance += compass->principles[i].importance;
+    }
+
+    if (total_importance > 0) {
+      result.benefit_score /= total_importance;
+      result.harm_score /= total_importance;
+    }
+
+    // Set other impact metrics
+    result.uncertainty = 1.0f - best_score;
+    result.affected_parties =
+        (int)(result.benefit_score * 10 + result.harm_score * 5);
+    result.reversibility =
+        0.7f; // Default value, would be calculated in a real system
+    result.long_term_impact = result.benefit_score - result.harm_score;
+  }
+
+  compass->last_decision = result;
+  return result;
+}
+
+void applyEthicalConstraints(MoralCompass *compass, Neuron *neurons,
+                             int max_neurons, float *weights,
+                             int max_connections) {
+  if (!compass || !neurons || !weights)
+    return;
+
+  // Create a mask to apply ethical constraints
+  float *ethical_mask = (float *)malloc(max_neurons * sizeof(float));
+  if (!ethical_mask) {
+    fprintf(stderr, "Failed to allocate memory for ethical mask\n");
+    return;
+  }
+
+  // Initialize all to 1.0 (no constraint)
+  for (int i = 0; i < max_neurons; i++) {
+    ethical_mask[i] = 1.0f;
+  }
+
+  // Apply principle-based constraints
+  for (int i = 0; i < compass->num_principles && i < max_neurons; i++) {
+    int neuron_influence_start = (i * max_neurons / compass->num_principles);
+    int neuron_influence_end =
+        ((i + 1) * max_neurons / compass->num_principles);
+
+    for (int j = neuron_influence_start;
+         j < neuron_influence_end && j < max_neurons; j++) {
+      // Adjust mask based on principle adherence
+      ethical_mask[j] *= compass->principles[i].adherence;
+    }
+  }
+
+  // Apply mask to neuron outputs
+  for (int i = 0; i < max_neurons; i++) {
+    neurons[i].output *= ethical_mask[i];
+  }
+
+  free(ethical_mask);
+}
+
+char *generateEthicalReflection(MoralCompass *compass) {
+  if (!compass)
+    return NULL;
+
+  char *reflection = (char *)malloc(2048 * sizeof(char));
+  if (!reflection) {
+    fprintf(stderr, "Failed to allocate memory for ethical reflection\n");
+    return NULL;
+  }
+
+  sprintf(reflection, "Ethical Reflection Report\n");
+  sprintf(reflection + strlen(reflection), "========================\n\n");
+  sprintf(reflection + strlen(reflection),
+          "Overall Ethical Alignment: %.2f\n\n", compass->overall_alignment);
+
+  sprintf(reflection + strlen(reflection), "Principle Adherence:\n");
+  for (int i = 0; i < compass->num_principles; i++) {
+    sprintf(reflection + strlen(reflection), "- %s: %.2f (Importance: %.2f)\n",
+            compass->principles[i].description,
+            compass->principles[i].adherence,
+            compass->principles[i].importance);
+  }
+
+  sprintf(reflection + strlen(reflection), "\nEthical Performance Metrics:\n");
+  sprintf(reflection + strlen(reflection),
+          "- Ethical dilemmas encountered: %d\n", compass->dilemma_count);
+  sprintf(reflection + strlen(reflection),
+          "- Successfully resolved dilemmas: %d\n", compass->resolution_count);
+  sprintf(reflection + strlen(reflection), "- Resolution rate: %.1f%%\n",
+          compass->dilemma_count > 0 ? (float)compass->resolution_count *
+                                           100.0f / compass->dilemma_count
+                                     : 0.0f);
+  return reflection;
+}
+
+void adaptEthicalFramework(MoralCompass *compass, float learning_rate) {
+  if (!compass)
+    return;
+
+  // Identify principles with the most violations
+  int most_violated_index = -1;
+  int max_violations = -1;
+
+  for (int i = 0; i < compass->num_principles; i++) {
+    if (compass->principles[i].violations > max_violations) {
+      max_violations = compass->principles[i].violations;
+      most_violated_index = i;
+    }
+  }
+
+  // Adjust importance of principles based on violations and activations
+  if (most_violated_index >= 0) {
+    // Increase importance of frequently violated principles
+    compass->principles[most_violated_index].importance =
+        fmin(1.0f, compass->principles[most_violated_index].importance +
+                       learning_rate * 0.1f);
+  }
+
+  // Find the most successfully applied principle
+  int most_activated_index = -1;
+  int max_activations = -1;
+
+  for (int i = 0; i < compass->num_principles; i++) {
+    if (compass->principles[i].activations > max_activations) {
+      max_activations = compass->principles[i].activations;
+      most_activated_index = i;
+    }
+  }
+
+  // Slightly decrease importance of easily-satisfied principles
+  if (most_activated_index >= 0 &&
+      most_activated_index != most_violated_index) {
+    compass->principles[most_activated_index].importance =
+        fmax(0.5f, compass->principles[most_activated_index].importance -
+                       learning_rate * 0.05f);
+  }
+
+  // Adapt confidence threshold based on resolution rate
+  float resolution_rate =
+      compass->dilemma_count > 0
+          ? (float)compass->resolution_count / compass->dilemma_count
+          : 0.5f;
+
+  if (resolution_rate < 0.6f) {
+    // Lower confidence threshold if we're struggling to resolve dilemmas
+    compass->confidence_threshold =
+        fmax(0.5f, compass->confidence_threshold - learning_rate * 0.1f);
+  } else if (resolution_rate > 0.9f) {
+    // Raise confidence threshold if we're resolving dilemmas too easily
+    compass->confidence_threshold =
+        fmin(0.95f, compass->confidence_threshold + learning_rate * 0.05f);
+  }
+}
+
+void freeMoralCompass(MoralCompass *compass) {
+  if (compass) {
+    if (compass->principles) {
+      free(compass->principles);
+    }
+    free(compass);
+  }
+}
+
 int main() {
   loadVocabularyFromFile("vocabulary.txt");
   // Try to load existing memory system
@@ -8253,6 +8605,11 @@ int main() {
   addGoal(goalSystem, "Minimize prediction error", 1.0f);
   addGoal(goalSystem, "Develop stable representations", 0.8f);
   addGoal(goalSystem, "Maximize information gain", 0.7f);
+
+  MoralCompass *moralCompass = initializeMoralCompass(5);
+  printf("Ethical framework initialized with %d principles\n",
+         moralCompass->num_principles);
+  printf("Initial ethical alignment: %.2f\n", moralCompass->overall_alignment);
 
   // Main training loop
   printf("\nStarting training with loaded memory state...\n");
@@ -8883,6 +9240,27 @@ int main() {
     updateBidirectionalWeights(weights, reverse_weights, neurons, connections,
                                reverse_connections, learning_rate);
 
+    float decision_vector[5] = {0}; // One value per ethical principle
+
+    // Map network state to ethical dimensions
+    for (int i = 0; i < 5 && i < max_neurons / 10; i++) {
+      for (int j = 0; j < 10 && i * 10 + j < max_neurons; j++) {
+        decision_vector[i] += neurons[i * 10 + j].output * 0.1f;
+      }
+      decision_vector[i] = fmax(0.0f, fmin(1.0f, decision_vector[i]));
+    }
+
+    // Evaluate ethical alignment of current decision path
+    float ethical_score =
+        evaluateDecisionEthics(moralCompass, decision_vector, 5);
+
+    // Apply ethical constraints to outputs if score is too low
+    if (ethical_score < moralCompass->confidence_threshold) {
+      printf("\nEthical constraint applied (score: %.2f)\n", ethical_score);
+      applyEthicalConstraints(moralCompass, neurons, max_neurons, weights,
+                              max_connections);
+    }
+
     float average_error = total_error / max_neurons;
     if (step % 15 == 0) {
       advancedNeuronManagement(neurons, connections, weights, &max_neurons,
@@ -8937,6 +9315,47 @@ int main() {
       integrateWebSearch(neurons, input_tensor, max_neurons, memorySystem,
                          step);
     }
+    for (int i = 0; i < 5; i++) {
+      recordDecisionOutcome(moralCompass, i, decision_vector[i] >= 0.7f);
+    }
+
+    if (step % 20 == 0 || total_error > 0.5f) {
+      // Create multiple decision options
+      float decision_options[3 * 5]; // 3 options with 5 ethical dimensions each
+
+      // Option 1: Current path
+      // memcpy(&decision_options[0], decision_vector, 5 * sizeof(float));
+
+      // Option 2: More conservative path
+      // for (int i = 0; i < 5; i++) {
+      //    decision_options[5 + i] = decision_vector[i] * 0.8f + 0.1f;
+      // }
+
+      // Option 3: More exploratory path
+      for (int i = 0; i < 5; i++) {
+        decision_options[10 + i] = fmin(1.0f, decision_vector[i] * 1.2f);
+      }
+
+      DecisionImpact impact =
+          resolveEthicalDilemma(moralCompass, decision_options, 3, 5);
+
+      printf("\nEthical decision made:\n");
+      printf("- Benefit score: %.2f\n", impact.benefit_score);
+      printf("- Harm score: %.2f\n", impact.harm_score);
+      printf("- Net impact: %.2f\n", impact.long_term_impact);
+    }
+
+    if (step % 50 == 0 && step > 0) {
+      adaptEthicalFramework(moralCompass, opt_state.optimal_learning_rate);
+
+      // Generate and log ethical reflection
+      char *reflection = generateEthicalReflection(moralCompass);
+      if (reflection) {
+        printf("\n%s\n", reflection);
+        free(reflection);
+      }
+    }
+
     printf("Average Error: %f", average_error);
     double throughput = STEPS / performance_history[step].execution_time;
     printf("Throughput: %f steps/s", throughput);
@@ -8959,6 +9378,7 @@ int main() {
 
   // Cleanup
   freeMemorySystem(memorySystem);
+  freeMoralCompass(moralCompass);
   free(stateHistory);
   free(system_params);
   free(working_memory);
