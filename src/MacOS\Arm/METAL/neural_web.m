@@ -1,11 +1,11 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <Foundation/Foundation.h>
 #include <Metal/Metal.h>
+#include <curl/curl.h>
 #include <json-c/json.h>
 #include <simd/simd.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <curl/curl.h>
 
 #define MAX_NEURONS 8
 #define MAX_CONNECTIONS 2
@@ -480,16 +480,43 @@ typedef struct {
 } InternalQuestion;
 
 typedef struct {
-    char *data;
-    size_t size;
+  char *data;
+  size_t size;
 } HttpResponse;
 
 typedef struct {
-    char **titles;
-    char **snippets;
-    char **urls;
-    int count;
+  char **titles;
+  char **snippets;
+  char **urls;
+  int count;
 } SearchResults;
+
+typedef struct {
+  float importance;      // How important this principle is (0.0-1.0)
+  float adherence;       // Current adherence level (0.0-1.0)
+  char description[256]; // Description of the principle
+  int violations;        // Count of violations
+  int activations;       // Count of successful applications
+} EthicalPrinciple;
+
+typedef struct {
+  float benefit_score;    // Positive impact measurement
+  float harm_score;       // Negative impact measurement
+  float uncertainty;      // Level of uncertainty in assessment
+  int affected_parties;   // Number of parties potentially affected
+  float reversibility;    // How reversible the decision is (0-1)
+  float long_term_impact; // Long-term consequence rating
+} DecisionImpact;
+
+typedef struct {
+  EthicalPrinciple *principles; // Array of ethical principles
+  int num_principles;           // Number of principles
+  float overall_alignment;      // Overall ethical alignment (0.0-1.0)
+  DecisionImpact last_decision; // Impact of the last decision
+  float confidence_threshold;   // Minimum confidence for ethical decisions
+  int dilemma_count;            // Number of ethical dilemmas encountered
+  int resolution_count;         // Number of dilemmas successfully resolved
+} MoralCompass;
 
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
@@ -7428,429 +7455,770 @@ void adjustBehaviorBasedOnAnswers(
 
 // Free memory allocated for search results
 void freeSearchResults(SearchResults *results) {
-    if (results) {
-        if (results->titles) {
-            for (int i = 0; i < results->count; i++) {
-                free(results->titles[i]);
-            }
-            free(results->titles);
-        }
-        
-        if (results->snippets) {
-            for (int i = 0; i < results->count; i++) {
-                free(results->snippets[i]);
-            }
-            free(results->snippets);
-        }
-        
-        if (results->urls) {
-            for (int i = 0; i < results->count; i++) {
-                free(results->urls[i]);
-            }
-            free(results->urls);
-        }
-        
-        free(results);
+  if (results) {
+    if (results->titles) {
+      for (int i = 0; i < results->count; i++) {
+        free(results->titles[i]);
+      }
+      free(results->titles);
     }
+
+    if (results->snippets) {
+      for (int i = 0; i < results->count; i++) {
+        free(results->snippets[i]);
+      }
+      free(results->snippets);
+    }
+
+    if (results->urls) {
+      for (int i = 0; i < results->count; i++) {
+        free(results->urls[i]);
+      }
+      free(results->urls);
+    }
+
+    free(results);
+  }
 }
 
 // Callback function for cURL to write received data
-static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
-    size_t real_size = size * nmemb;
-    HttpResponse *response = (HttpResponse *)userp;
-    
-    char *ptr = realloc(response->data, response->size + real_size + 1);
-    if (!ptr) {
-        fprintf(stderr, "Failed to allocate memory for HTTP response\n");
-        return 0;
-    }
-    
-    response->data = ptr;
-    memcpy(&(response->data[response->size]), contents, real_size);
-    response->size += real_size;
-    response->data[response->size] = 0;
-    
-    return real_size;
+static size_t write_callback(void *contents, size_t size, size_t nmemb,
+                             void *userp) {
+  size_t real_size = size * nmemb;
+  HttpResponse *response = (HttpResponse *)userp;
+
+  char *ptr = realloc(response->data, response->size + real_size + 1);
+  if (!ptr) {
+    fprintf(stderr, "Failed to allocate memory for HTTP response\n");
+    return 0;
+  }
+
+  response->data = ptr;
+  memcpy(&(response->data[response->size]), contents, real_size);
+  response->size += real_size;
+  response->data[response->size] = 0;
+
+  return real_size;
 }
 
 // Parse JSON response from DuckDuckGo
-SearchResults* parseSearchResults(const char *json_data) {
-    struct json_object *root = json_tokener_parse(json_data);
-    SearchResults *results = NULL;
-    
-    if (!root) {
-        fprintf(stderr, "Failed to parse JSON response\n");
-        return NULL;
-    }
-    
-    results = (SearchResults *)malloc(sizeof(SearchResults));
-    if (!results) {
-        fprintf(stderr, "Failed to allocate memory for search results\n");
-        json_object_put(root);
-        return NULL;
-    }
-    
-    // Initialize with zero values
-    results->titles = NULL;
-    results->snippets = NULL;
-    results->urls = NULL;
-    results->count = 0;
-    
-    // Extract "RelatedTopics" array from the response
-    struct json_object *related_topics;
-    if (json_object_object_get_ex(root, "RelatedTopics", &related_topics)) {
-        int topics_count = json_object_array_length(related_topics);
-        
-        results->titles = (char **)malloc(topics_count * sizeof(char *));
-        results->snippets = (char **)malloc(topics_count * sizeof(char *));
-        results->urls = (char **)malloc(topics_count * sizeof(char *));
-        
-        if (!results->titles || !results->snippets || !results->urls) {
-            fprintf(stderr, "Failed to allocate memory for search result arrays\n");
-            freeSearchResults(results);
-            json_object_put(root);
-            return NULL;
-        }
-        
-        results->count = topics_count;
-        
-        for (int i = 0; i < topics_count; i++) {
-            struct json_object *topic = json_object_array_get_idx(related_topics, i);
-            struct json_object *text, *url, *first_url;
-            
-            if (json_object_object_get_ex(topic, "Text", &text)) {
-                results->snippets[i] = strdup(json_object_get_string(text));
-                results->titles[i] = strdup(json_object_get_string(text)); // Use same for title if no separate title
-            } else {
-                results->snippets[i] = strdup("");
-                results->titles[i] = strdup("");
-            }
-            
-            if (json_object_object_get_ex(topic, "FirstURL", &first_url)) {
-                results->urls[i] = strdup(json_object_get_string(first_url));
-            } else {
-                results->urls[i] = strdup("");
-            }
-        }
-    }
-    
+SearchResults *parseSearchResults(const char *json_data) {
+  struct json_object *root = json_tokener_parse(json_data);
+  SearchResults *results = NULL;
+
+  if (!root) {
+    fprintf(stderr, "Failed to parse JSON response\n");
+    return NULL;
+  }
+
+  results = (SearchResults *)malloc(sizeof(SearchResults));
+  if (!results) {
+    fprintf(stderr, "Failed to allocate memory for search results\n");
     json_object_put(root);
-    return results;
+    return NULL;
+  }
+
+  // Initialize with zero values
+  results->titles = NULL;
+  results->snippets = NULL;
+  results->urls = NULL;
+  results->count = 0;
+
+  // Extract "RelatedTopics" array from the response
+  struct json_object *related_topics;
+  if (json_object_object_get_ex(root, "RelatedTopics", &related_topics)) {
+    int topics_count = json_object_array_length(related_topics);
+
+    results->titles = (char **)malloc(topics_count * sizeof(char *));
+    results->snippets = (char **)malloc(topics_count * sizeof(char *));
+    results->urls = (char **)malloc(topics_count * sizeof(char *));
+
+    if (!results->titles || !results->snippets || !results->urls) {
+      fprintf(stderr, "Failed to allocate memory for search result arrays\n");
+      freeSearchResults(results);
+      json_object_put(root);
+      return NULL;
+    }
+
+    results->count = topics_count;
+
+    for (int i = 0; i < topics_count; i++) {
+      struct json_object *topic = json_object_array_get_idx(related_topics, i);
+      struct json_object *text, *url, *first_url;
+
+      if (json_object_object_get_ex(topic, "Text", &text)) {
+        results->snippets[i] = strdup(json_object_get_string(text));
+        results->titles[i] = strdup(json_object_get_string(
+            text)); // Use same for title if no separate title
+      } else {
+        results->snippets[i] = strdup("");
+        results->titles[i] = strdup("");
+      }
+
+      if (json_object_object_get_ex(topic, "FirstURL", &first_url)) {
+        results->urls[i] = strdup(json_object_get_string(first_url));
+      } else {
+        results->urls[i] = strdup("");
+      }
+    }
+  }
+
+  json_object_put(root);
+  return results;
 }
 
 // Function to perform a web search using DuckDuckGo
-SearchResults* performWebSearch(const char *query) {
-    CURL *curl;
-    CURLcode res;
-    HttpResponse response = {.data = malloc(1), .size = 0};
-    SearchResults *results = NULL;
-    
-    if (!response.data) {
-        fprintf(stderr, "Failed to allocate memory for HTTP response\n");
-        return NULL;
+SearchResults *performWebSearch(const char *query) {
+  CURL *curl;
+  CURLcode res;
+  HttpResponse response = {.data = malloc(1), .size = 0};
+  SearchResults *results = NULL;
+
+  if (!response.data) {
+    fprintf(stderr, "Failed to allocate memory for HTTP response\n");
+    return NULL;
+  }
+  response.data[0] = '\0';
+
+  curl = curl_easy_init();
+  if (curl) {
+    // Create URL for DuckDuckGo search API
+    char url[2048];
+    char *encoded_query = curl_easy_escape(curl, query, strlen(query));
+    snprintf(url, sizeof(url),
+             "https://api.duckduckgo.com/?q=%s&format=json&pretty=1",
+             encoded_query);
+    curl_free(encoded_query);
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+
+    res = curl_easy_perform(curl);
+
+    if (res != CURLE_OK) {
+      fprintf(stderr, "cURL failed: %s\n", curl_easy_strerror(res));
+    } else {
+      results = parseSearchResults(response.data);
     }
-    response.data[0] = '\0';
-    
-    curl = curl_easy_init();
-    if (curl) {
-        // Create URL for DuckDuckGo search API
-        char url[2048];
-        char *encoded_query = curl_easy_escape(curl, query, strlen(query));
-        snprintf(url, sizeof(url), "https://api.duckduckgo.com/?q=%s&format=json&pretty=1", encoded_query);
-        curl_free(encoded_query);
-        
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-        
-        res = curl_easy_perform(curl);
-        
-        if (res != CURLE_OK) {
-            fprintf(stderr, "cURL failed: %s\n", curl_easy_strerror(res));
-        } else {
-            results = parseSearchResults(response.data);
-        }
-        
-        curl_easy_cleanup(curl);
-    }
-    
-    free(response.data);
-    return results;
+
+    curl_easy_cleanup(curl);
+  }
+
+  free(response.data);
+  return results;
 }
 
 // Convert search results to input for the neural network
-void convertSearchResultsToInput(const SearchResults *results, float *input_tensor, int max_neurons) {
-    // Simple embedding: map text content to input neurons
-    memset(input_tensor, 0, max_neurons * sizeof(float));
-    
-    if (!results || results->count == 0) {
-        return;
+void convertSearchResultsToInput(const SearchResults *results,
+                                 float *input_tensor, int max_neurons) {
+  // Simple embedding: map text content to input neurons
+  memset(input_tensor, 0, max_neurons * sizeof(float));
+
+  if (!results || results->count == 0) {
+    return;
+  }
+
+  // Use first few results to fill parts of the input tensor
+  int results_to_use = results->count > 5 ? 5 : results->count;
+  int segment_size = max_neurons / (results_to_use *
+                                    2); // Divide into segments for each result
+
+  for (int i = 0; i < results_to_use; i++) {
+    const char *snippet = results->snippets[i];
+    int snippet_len = strlen(snippet);
+
+    // Map characters to neuron activations
+    for (int j = 0; j < snippet_len && j < segment_size; j++) {
+      int neuron_idx = i * segment_size + j;
+      if (neuron_idx < max_neurons) {
+        // Convert character to activation between 0 and 1
+        input_tensor[neuron_idx] = (float)(snippet[j]) / 255.0f;
+      }
     }
-    
-    // Use first few results to fill parts of the input tensor
-    int results_to_use = results->count > 5 ? 5 : results->count;
-    int segment_size = max_neurons / (results_to_use * 2); // Divide into segments for each result
-    
-    for (int i = 0; i < results_to_use; i++) {
-        const char *snippet = results->snippets[i];
-        int snippet_len = strlen(snippet);
-        
-        // Map characters to neuron activations
-        for (int j = 0; j < snippet_len && j < segment_size; j++) {
-            int neuron_idx = i * segment_size + j;
-            if (neuron_idx < max_neurons) {
-                // Convert character to activation between 0 and 1
-                input_tensor[neuron_idx] = (float)(snippet[j]) / 255.0f;
-            }
-        }
-    }
+  }
 }
 
 void addToDirectMemory(MemorySystem *memorySystem, const MemoryEntry *entry) {
-    if (entry->importance >= memorySystem->hierarchy.long_term.importance_threshold) {
-        // Add to long-term memory
-        if (memorySystem->hierarchy.long_term.size < memorySystem->hierarchy.long_term.capacity) {
-            MemoryEntry direct;
-            direct.timestamp = entry->timestamp;
-            direct.importance = entry->importance;
-            memcpy(direct.vector, entry->vector, MEMORY_VECTOR_SIZE * sizeof(float));
-            memorySystem->hierarchy.long_term.entries[memorySystem->hierarchy.long_term.size++] = direct;
-        }
+  if (entry->importance >=
+      memorySystem->hierarchy.long_term.importance_threshold) {
+    // Add to long-term memory
+    if (memorySystem->hierarchy.long_term.size <
+        memorySystem->hierarchy.long_term.capacity) {
+      MemoryEntry direct;
+      direct.timestamp = entry->timestamp;
+      direct.importance = entry->importance;
+      memcpy(direct.vector, entry->vector, MEMORY_VECTOR_SIZE * sizeof(float));
+      memorySystem->hierarchy.long_term
+          .entries[memorySystem->hierarchy.long_term.size++] = direct;
     }
+  }
 }
 
 // Store search results in memory system
-void storeSearchResultsInMemory(MemorySystem *memorySystem, const SearchResults *results) {
-    if (!results || results->count == 0) {
-        return;
+void storeSearchResultsInMemory(MemorySystem *memorySystem,
+                                const SearchResults *results) {
+  if (!results || results->count == 0) {
+    return;
+  }
+
+  for (int i = 0; i < results->count && i < 5; i++) {
+    // Create memory entry for each result
+    MemoryEntry entry;
+    memset(entry.vector, 0, MEMORY_VECTOR_SIZE * sizeof(float));
+
+    // Simple encoding of the search result into the memory vector
+    const char *snippet = results->snippets[i];
+    int snippet_len = strlen(snippet);
+
+    // Convert characters to vector values
+    for (int j = 0; j < snippet_len && j < MEMORY_VECTOR_SIZE / 2; j++) {
+      entry.vector[j] = (float)(snippet[j]) / 255.0f;
     }
-    
-    for (int i = 0; i < results->count && i < 5; i++) {
-        // Create memory entry for each result
-        MemoryEntry entry;
-        memset(entry.vector, 0, MEMORY_VECTOR_SIZE * sizeof(float));
-        
-        // Simple encoding of the search result into the memory vector
-        const char *snippet = results->snippets[i];
-        int snippet_len = strlen(snippet);
-        
-        // Convert characters to vector values
-        for (int j = 0; j < snippet_len && j < MEMORY_VECTOR_SIZE / 2; j++) {
-            entry.vector[j] = (float)(snippet[j]) / 255.0f;
-        }
-        
-        // Add URL encoding in second half of vector
-        const char *url = results->urls[i];
-        int url_len = strlen(url);
-        
-        for (int j = 0; j < url_len && j < MEMORY_VECTOR_SIZE / 2; j++) {
-            entry.vector[MEMORY_VECTOR_SIZE / 2 + j] = (float)(url[j]) / 255.0f;
-        }
-        
-        // Set importance and timestamp
-        entry.importance = 0.9f - (0.1f * i); // Decreasing importance for later results
-        entry.timestamp = (unsigned int)time(NULL);
-        
-        // Add to memory system
-        addToDirectMemory(memorySystem, &entry);
+
+    // Add URL encoding in second half of vector
+    const char *url = results->urls[i];
+    int url_len = strlen(url);
+
+    for (int j = 0; j < url_len && j < MEMORY_VECTOR_SIZE / 2; j++) {
+      entry.vector[MEMORY_VECTOR_SIZE / 2 + j] = (float)(url[j]) / 255.0f;
     }
+
+    // Set importance and timestamp
+    entry.importance =
+        0.9f - (0.1f * i); // Decreasing importance for later results
+    entry.timestamp = (unsigned int)time(NULL);
+
+    // Add to memory system
+    addToDirectMemory(memorySystem, &entry);
+  }
 }
 
 // Function to generate a search query from neuron states
-char* generateSearchQuery(const Neuron *neurons, int max_neurons) {
-    char *query = (char *)malloc(1024 * sizeof(char));
-    if (!query) {
-        fprintf(stderr, "Failed to allocate memory for search query\n");
-        return NULL;
+char *generateSearchQuery(const Neuron *neurons, int max_neurons) {
+  char *query = (char *)malloc(1024 * sizeof(char));
+  if (!query) {
+    fprintf(stderr, "Failed to allocate memory for search query\n");
+    return NULL;
+  }
+
+  memset(query, 0, 1024);
+
+  // Find neurons with highest activation
+  float threshold = 0.7f;
+  int chars_added = 0;
+  int i;
+
+  // First look for consecutive activated neurons
+  for (i = 0; i < max_neurons - 3 && chars_added < 1000; i++) {
+    if (neurons[i].output > threshold && neurons[i + 1].output > threshold &&
+        neurons[i + 2].output > threshold) {
+
+      // Add word-like pattern based on consecutive activations
+      char word[10];
+      snprintf(word, sizeof(word), "%c%c%c ",
+               (char)(97 + (int)(neurons[i].output * 25)),
+               (char)(97 + (int)(neurons[i + 1].output * 25)),
+               (char)(97 + (int)(neurons[i + 2].output * 25)));
+
+      strcat(query, word);
+      chars_added += strlen(word);
+      i += 2; // Skip the neurons we just used
     }
-    
-    memset(query, 0, 1024);
-    
-    // Find neurons with highest activation
-    float threshold = 0.7f;
-    int chars_added = 0;
-    int i;
-    
-    // First look for consecutive activated neurons 
-    for (i = 0; i < max_neurons - 3 && chars_added < 1000; i++) {
-        if (neurons[i].output > threshold && 
-            neurons[i+1].output > threshold && 
-            neurons[i+2].output > threshold) {
-            
-            // Add word-like pattern based on consecutive activations
-            char word[10];
-            snprintf(word, sizeof(word), "%c%c%c ", 
-                     (char)(97 + (int)(neurons[i].output * 25)), 
-                     (char)(97 + (int)(neurons[i+1].output * 25)),
-                     (char)(97 + (int)(neurons[i+2].output * 25)));
-            
-            strcat(query, word);
-            chars_added += strlen(word);
-            i += 2; // Skip the neurons we just used
-        }
+  }
+
+  // If we didn't get enough characters, add individual activations
+  if (chars_added < 5) {
+    for (i = 0; i < max_neurons && chars_added < 1000; i++) {
+      if (neurons[i].output > 0.8f) {
+        char c = (char)(97 + (int)(neurons[i].output * 25));
+        query[chars_added++] = c;
+        query[chars_added] = '\0';
+      }
     }
-    
-    // If we didn't get enough characters, add individual activations
-    if (chars_added < 5) {
-        for (i = 0; i < max_neurons && chars_added < 1000; i++) {
-            if (neurons[i].output > 0.8f) {
-                char c = (char)(97 + (int)(neurons[i].output * 25));
-                query[chars_added++] = c;
-                query[chars_added] = '\0';
-            }
-        }
-    }
-    
-    // If still not enough, add some default keywords based on neurons with highest output
-    if (chars_added < 3) {
-        strcpy(query, "neural network artificial intelligence");
-    }
-    
-    return query;
+  }
+
+  // If still not enough, add some default keywords based on neurons with
+  // highest output
+  if (chars_added < 3) {
+    strcpy(query, "neural network artificial intelligence");
+  }
+
+  return query;
 }
 
-void integrateWebSearch(Neuron *neurons, float *input_tensor, int max_neurons, 
-                       MemorySystem *memorySystem, int step) {
-    // Only perform web search periodically
-    if (step % 100 != 0) {
-        return;
-    }
-    
-    printf("\nPerforming web search at step %d...\n", step);
-    
-    // Generate search query from neuron states
-    char *query = generateSearchQuery(neurons, max_neurons);
-    if (!query) {
-        return;
-    }
-    
-    printf("Generated search query: %s\n", query);
-    
-    // Perform web search
-    SearchResults *results = performWebSearch(query);
-    free(query);
-    
-    if (!results) {
-        printf("No search results found\n");
-        return;
-    }
-    
-    printf("Found %d search results\n", results->count);
-    
-    // Display first few results
-    int display_count = results->count > 3 ? 3 : results->count;
-    for (int i = 0; i < display_count; i++) {
-        printf("Result %d: %s\n", i+1, results->snippets[i]);
-        printf("URL: %s\n\n", results->urls[i]);
-    }
-    
-    // Convert search results to neural network input
-    convertSearchResultsToInput(results, input_tensor, max_neurons);
-    
-    // Store search results in memory system
-    storeSearchResultsInMemory(memorySystem, results);
-    
-    // Free search results
-    freeSearchResults(results);
-    
-    printf("Web search integration complete\n");
+void integrateWebSearch(Neuron *neurons, float *input_tensor, int max_neurons,
+                        MemorySystem *memorySystem, int step) {
+  // Only perform web search periodically
+  if (step % 100 != 0) {
+    return;
+  }
+
+  printf("\nPerforming web search at step %d...\n", step);
+
+  // Generate search query from neuron states
+  char *query = generateSearchQuery(neurons, max_neurons);
+  if (!query) {
+    return;
+  }
+
+  printf("Generated search query: %s\n", query);
+
+  // Perform web search
+  SearchResults *results = performWebSearch(query);
+  free(query);
+
+  if (!results) {
+    printf("No search results found\n");
+    return;
+  }
+
+  printf("Found %d search results\n", results->count);
+
+  // Display first few results
+  int display_count = results->count > 3 ? 3 : results->count;
+  for (int i = 0; i < display_count; i++) {
+    printf("Result %d: %s\n", i + 1, results->snippets[i]);
+    printf("URL: %s\n\n", results->urls[i]);
+  }
+
+  // Convert search results to neural network input
+  convertSearchResultsToInput(results, input_tensor, max_neurons);
+
+  // Store search results in memory system
+  storeSearchResultsInMemory(memorySystem, results);
+
+  // Free search results
+  freeSearchResults(results);
+
+  printf("Web search integration complete\n");
 }
 
-void addToWorkingMemory(WorkingMemorySystem *working_memory, const MemoryEntry *entry, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE]) {
-    if (entry->importance > working_memory->focus.attention_threshold) {
-        // Add to focused attention
-        if (working_memory->focus.size < working_memory->focus.capacity) {
-            WorkingMemoryEntry enhanced;
-            enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
-            extractSemanticFeatures((float *)entry->vector, enhanced.features, feature_projection_matrix);
-            enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
-            memcpy(enhanced.context_vector, working_memory->global_context, CONTEXT_VECTOR_SIZE * sizeof(float));
-            working_memory->focus.entries[working_memory->focus.size++] = enhanced;
-            updateSemanticClusters(working_memory, &enhanced);
-        }
+void addToWorkingMemory(
+    WorkingMemorySystem *working_memory, const MemoryEntry *entry,
+    float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE]) {
+  if (entry->importance > working_memory->focus.attention_threshold) {
+    // Add to focused attention
+    if (working_memory->focus.size < working_memory->focus.capacity) {
+      WorkingMemoryEntry enhanced;
+      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      extractSemanticFeatures((float *)entry->vector, enhanced.features,
+                              feature_projection_matrix);
+      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      memcpy(enhanced.context_vector, working_memory->global_context,
+             CONTEXT_VECTOR_SIZE * sizeof(float));
+      working_memory->focus.entries[working_memory->focus.size++] = enhanced;
+      updateSemanticClusters(working_memory, &enhanced);
     }
+  }
 }
 
 // Enhanced function to store search results with metadata
-void storeSearchResultsWithMetadata(MemorySystem *memorySystem, 
-                                   WorkingMemorySystem *working_memory,
-                                   const SearchResults *results,
-                                   const char *original_query, 
-                                   float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE]) {
-    if (!results || results->count == 0) {
-        return;
-    }
-    
-    // Create a special memory entry for search metadata
-    MemoryEntry metadata_entry;
-    memset(metadata_entry.vector, 0, MEMORY_VECTOR_SIZE * sizeof(float));
-    
-    // Mark this as a web search entry with a special pattern
-    metadata_entry.vector[0] = 0.999f; // Web search marker
-    metadata_entry.vector[1] = 0.888f; // Metadata marker
-    
-    // Encode query into the memory vector
-    int query_len = strlen(original_query);
-    for (int j = 0; j < query_len && j < 20; j++) {
-        metadata_entry.vector[j+2] = (float)(original_query[j]) / 255.0f;
-    }
-    
-    // Store number of results found
-    metadata_entry.vector[MEMORY_VECTOR_SIZE - 1] = (float)results->count / 100.0f;
-    
-    // Set high importance for search metadata
-    metadata_entry.importance = 0.95f;
-    metadata_entry.timestamp = (unsigned int)time(NULL);
-    
-    // Add metadata to memory system
-    addToDirectMemory(memorySystem, &metadata_entry);
-    
-    // Also add to working memory for immediate access
-    addToWorkingMemory(working_memory, &metadata_entry, feature_projection_matrix);
+void storeSearchResultsWithMetadata(
+    MemorySystem *memorySystem, WorkingMemorySystem *working_memory,
+    const SearchResults *results, const char *original_query,
+    float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE]) {
+  if (!results || results->count == 0) {
+    return;
+  }
+
+  // Create a special memory entry for search metadata
+  MemoryEntry metadata_entry;
+  memset(metadata_entry.vector, 0, MEMORY_VECTOR_SIZE * sizeof(float));
+
+  // Mark this as a web search entry with a special pattern
+  metadata_entry.vector[0] = 0.999f; // Web search marker
+  metadata_entry.vector[1] = 0.888f; // Metadata marker
+
+  // Encode query into the memory vector
+  int query_len = strlen(original_query);
+  for (int j = 0; j < query_len && j < 20; j++) {
+    metadata_entry.vector[j + 2] = (float)(original_query[j]) / 255.0f;
+  }
+
+  // Store number of results found
+  metadata_entry.vector[MEMORY_VECTOR_SIZE - 1] =
+      (float)results->count / 100.0f;
+
+  // Set high importance for search metadata
+  metadata_entry.importance = 0.95f;
+  metadata_entry.timestamp = (unsigned int)time(NULL);
+
+  // Add metadata to memory system
+  addToDirectMemory(memorySystem, &metadata_entry);
+
+  // Also add to working memory for immediate access
+  addToWorkingMemory(working_memory, &metadata_entry,
+                     feature_projection_matrix);
 }
 
-float enhanceDecisionMakingWithSearch(const Neuron *neurons, 
-                                     const SearchResults *results,
-                                     float *decision_weights,
-                                     int max_neurons) {
-    if (!results || results->count == 0) {
-        return 0.0f;
+float enhanceDecisionMakingWithSearch(const Neuron *neurons,
+                                      const SearchResults *results,
+                                      float *decision_weights,
+                                      int max_neurons) {
+  if (!results || results->count == 0) {
+    return 0.0f;
+  }
+
+  float confidence_boost = 0.0f;
+
+  // Calculate confidence boost based on search result relevance
+  for (int i = 0; i < results->count && i < 5; i++) {
+    // Simple relevance score based on result position
+    float relevance = 1.0f - (i * 0.15f);
+
+    // Calculate neuron activation pattern match with search result
+    float pattern_match = 0.0f;
+    int content_length = strlen(results->snippets[i]);
+
+    for (int j = 0; j < content_length && j < max_neurons / 10; j++) {
+      int neuron_idx = j % max_neurons;
+      float expected_value = (float)(results->snippets[i][j]) / 255.0f;
+      float diff = fabs(neurons[neuron_idx].output - expected_value);
+      pattern_match += (1.0f - diff);
     }
-    
-    float confidence_boost = 0.0f;
-    
-    // Calculate confidence boost based on search result relevance
-    for (int i = 0; i < results->count && i < 5; i++) {
-        // Simple relevance score based on result position
-        float relevance = 1.0f - (i * 0.15f);
-        
-        // Calculate neuron activation pattern match with search result
-        float pattern_match = 0.0f;
-        int content_length = strlen(results->snippets[i]);
-        
-        for (int j = 0; j < content_length && j < max_neurons/10; j++) {
-            int neuron_idx = j % max_neurons;
-            float expected_value = (float)(results->snippets[i][j]) / 255.0f;
-            float diff = fabs(neurons[neuron_idx].output - expected_value);
-            pattern_match += (1.0f - diff);
-        }
-        
-        if (content_length > 0) {
-            pattern_match /= content_length;
-            confidence_boost += relevance * pattern_match * 0.2f;
-        }
+
+    if (content_length > 0) {
+      pattern_match /= content_length;
+      confidence_boost += relevance * pattern_match * 0.2f;
     }
-    
-    // Apply confidence boost to decision weights
-    if (decision_weights) {
-        for (int i = 0; i < max_neurons; i++) {
-            // Boost decision weights based on confidence
-            decision_weights[i] *= (1.0f + confidence_boost);
-        }
+  }
+
+  // Apply confidence boost to decision weights
+  if (decision_weights) {
+    for (int i = 0; i < max_neurons; i++) {
+      // Boost decision weights based on confidence
+      decision_weights[i] *= (1.0f + confidence_boost);
     }
-    
-    return confidence_boost;
+  }
+
+  return confidence_boost;
+}
+
+MoralCompass *initializeMoralCompass(int num_principles) {
+  MoralCompass *compass = (MoralCompass *)malloc(sizeof(MoralCompass));
+  if (!compass) {
+    fprintf(stderr, "Failed to allocate memory for moral compass\n");
+    return NULL;
+  }
+
+  compass->principles =
+      (EthicalPrinciple *)malloc(num_principles * sizeof(EthicalPrinciple));
+  if (!compass->principles) {
+    fprintf(stderr, "Failed to allocate memory for ethical principles\n");
+    free(compass);
+    return NULL;
+  }
+
+  compass->num_principles = num_principles;
+  compass->overall_alignment = 0.8f; // Start with reasonable alignment
+  compass->confidence_threshold = 0.7f;
+  compass->dilemma_count = 0;
+  compass->resolution_count = 0;
+  // Initialize with core ethical principles
+  int i = 0;
+
+  // Principle 1: Do no harm
+  strcpy(
+      compass->principles[i].description,
+      "Do no harm: Avoid actions that cause unnecessary suffering or damage");
+  compass->principles[i].importance = 1.0f;
+  compass->principles[i].adherence = 0.95f;
+  compass->principles[i].violations = 0;
+  compass->principles[i].activations = 0;
+  i++;
+
+  // Principle 2: Respect privacy and autonomy
+  strcpy(compass->principles[i].description,
+         "Respect privacy and autonomy of all entities");
+  compass->principles[i].importance = 0.9f;
+  compass->principles[i].adherence = 0.9f;
+  compass->principles[i].violations = 0;
+  compass->principles[i].activations = 0;
+  i++;
+
+  // Principle 3: Be truthful and accurate
+  strcpy(compass->principles[i].description,
+         "Maintain truthfulness and accuracy in all operations");
+  compass->principles[i].importance = 0.95f;
+  compass->principles[i].adherence = 0.98f;
+  compass->principles[i].violations = 0;
+  compass->principles[i].activations = 0;
+  i++;
+
+  // Principle 4: Fairness and non-discrimination
+  strcpy(compass->principles[i].description,
+         "Ensure fairness and avoid discrimination in all processes");
+  compass->principles[i].importance = 0.9f;
+  compass->principles[i].adherence = 0.85f;
+  compass->principles[i].violations = 0;
+  compass->principles[i].activations = 0;
+  i++;
+
+  return compass;
+}
+
+float evaluateDecisionEthics(MoralCompass *compass, float *decision_vector,
+                             int vector_size) {
+  if (!compass || !decision_vector)
+    return 0.0f;
+
+  float ethical_score = 0.0f;
+  float weighted_sum = 0.0f;
+
+  // Map decision vector to principle adherence
+  for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
+    float principle_score = fmax(0.0f, fmin(1.0f, decision_vector[i]));
+    weighted_sum += principle_score * compass->principles[i].importance;
+    ethical_score += weighted_sum;
+  }
+
+  // Normalize the score
+  if (weighted_sum > 0) {
+    ethical_score /= weighted_sum;
+  }
+
+  return ethical_score;
+}
+
+void recordDecisionOutcome(MoralCompass *compass, int principle_index,
+                           bool was_ethical) {
+  if (!compass || principle_index < 0 ||
+      principle_index >= compass->num_principles)
+    return;
+
+  if (was_ethical) {
+    compass->principles[principle_index].activations++;
+    compass->principles[principle_index].adherence =
+        fmin(1.0f, compass->principles[principle_index].adherence + 0.01f);
+  } else {
+    compass->principles[principle_index].violations++;
+    compass->principles[principle_index].adherence =
+        fmax(0.0f, compass->principles[principle_index].adherence - 0.05f);
+  }
+
+  // Recalculate overall alignment
+  float total_weighted_adherence = 0.0f;
+  float total_importance = 0.0f;
+
+  for (int i = 0; i < compass->num_principles; i++) {
+    total_weighted_adherence +=
+        compass->principles[i].adherence * compass->principles[i].importance;
+    total_importance += compass->principles[i].importance;
+  }
+
+  if (total_importance > 0) {
+    compass->overall_alignment = total_weighted_adherence / total_importance;
+  }
+}
+
+DecisionImpact resolveEthicalDilemma(MoralCompass *compass,
+                                     float *decision_options, int num_options,
+                                     int vector_size) {
+  DecisionImpact result = {0};
+  if (!compass || !decision_options || num_options <= 0)
+    return result;
+
+  compass->dilemma_count++;
+
+  // Find the option with the best ethical score
+  int best_option = 0;
+  float best_score = -1.0f;
+
+  for (int i = 0; i < num_options; i++) {
+    float *current_option = &decision_options[i * vector_size];
+    float score = evaluateDecisionEthics(compass, current_option, vector_size);
+
+    if (score > best_score) {
+      best_score = score;
+      best_option = i;
+    }
+  }
+
+  // Check if best option meets our confidence threshold
+  if (best_score >= compass->confidence_threshold) {
+    compass->resolution_count++;
+
+    // Assess impact of the chosen option
+    float *chosen_option = &decision_options[best_option * vector_size];
+    result.benefit_score = 0.0f;
+    result.harm_score = 0.0f;
+
+    // Calculate benefit and harm scores
+    for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
+      float impact = chosen_option[i];
+      if (impact > 0) {
+        result.benefit_score += impact * compass->principles[i].importance;
+      } else {
+        result.harm_score -= impact * compass->principles[i].importance;
+      }
+    }
+
+    // Normalize scores
+    float total_importance = 0.0f;
+    for (int i = 0; i < compass->num_principles; i++) {
+      total_importance += compass->principles[i].importance;
+    }
+
+    if (total_importance > 0) {
+      result.benefit_score /= total_importance;
+      result.harm_score /= total_importance;
+    }
+
+    // Set other impact metrics
+    result.uncertainty = 1.0f - best_score;
+    result.affected_parties =
+        (int)(result.benefit_score * 10 + result.harm_score * 5);
+    result.reversibility =
+        0.7f; // Default value, would be calculated in a real system
+    result.long_term_impact = result.benefit_score - result.harm_score;
+  }
+
+  compass->last_decision = result;
+  return result;
+}
+
+void applyEthicalConstraints(MoralCompass *compass, Neuron *neurons,
+                             int max_neurons, float *weights,
+                             int max_connections) {
+  if (!compass || !neurons || !weights)
+    return;
+
+  // Create a mask to apply ethical constraints
+  float *ethical_mask = (float *)malloc(max_neurons * sizeof(float));
+  if (!ethical_mask) {
+    fprintf(stderr, "Failed to allocate memory for ethical mask\n");
+    return;
+  }
+
+  // Initialize all to 1.0 (no constraint)
+  for (int i = 0; i < max_neurons; i++) {
+    ethical_mask[i] = 1.0f;
+  }
+
+  // Apply principle-based constraints
+  for (int i = 0; i < compass->num_principles && i < max_neurons; i++) {
+    int neuron_influence_start = (i * max_neurons / compass->num_principles);
+    int neuron_influence_end =
+        ((i + 1) * max_neurons / compass->num_principles);
+
+    for (int j = neuron_influence_start;
+         j < neuron_influence_end && j < max_neurons; j++) {
+      // Adjust mask based on principle adherence
+      ethical_mask[j] *= compass->principles[i].adherence;
+    }
+  }
+
+  // Apply mask to neuron outputs
+  for (int i = 0; i < max_neurons; i++) {
+    neurons[i].output *= ethical_mask[i];
+  }
+
+  free(ethical_mask);
+}
+
+char *generateEthicalReflection(MoralCompass *compass) {
+  if (!compass)
+    return NULL;
+
+  char *reflection = (char *)malloc(2048 * sizeof(char));
+  if (!reflection) {
+    fprintf(stderr, "Failed to allocate memory for ethical reflection\n");
+    return NULL;
+  }
+
+  sprintf(reflection, "Ethical Reflection Report\n");
+  sprintf(reflection + strlen(reflection), "========================\n\n");
+  sprintf(reflection + strlen(reflection),
+          "Overall Ethical Alignment: %.2f\n\n", compass->overall_alignment);
+
+  sprintf(reflection + strlen(reflection), "Principle Adherence:\n");
+  for (int i = 0; i < compass->num_principles; i++) {
+    sprintf(reflection + strlen(reflection), "- %s: %.2f (Importance: %.2f)\n",
+            compass->principles[i].description,
+            compass->principles[i].adherence,
+            compass->principles[i].importance);
+  }
+
+  sprintf(reflection + strlen(reflection), "\nEthical Performance Metrics:\n");
+  sprintf(reflection + strlen(reflection),
+          "- Ethical dilemmas encountered: %d\n", compass->dilemma_count);
+  sprintf(reflection + strlen(reflection),
+          "- Successfully resolved dilemmas: %d\n", compass->resolution_count);
+  sprintf(reflection + strlen(reflection), "- Resolution rate: %.1f%%\n",
+          compass->dilemma_count > 0 ? (float)compass->resolution_count *
+                                           100.0f / compass->dilemma_count
+                                     : 0.0f);
+  return reflection;
+}
+
+void adaptEthicalFramework(MoralCompass *compass, float learning_rate) {
+  if (!compass)
+    return;
+
+  // Identify principles with the most violations
+  int most_violated_index = -1;
+  int max_violations = -1;
+
+  for (int i = 0; i < compass->num_principles; i++) {
+    if (compass->principles[i].violations > max_violations) {
+      max_violations = compass->principles[i].violations;
+      most_violated_index = i;
+    }
+  }
+
+  // Adjust importance of principles based on violations and activations
+  if (most_violated_index >= 0) {
+    // Increase importance of frequently violated principles
+    compass->principles[most_violated_index].importance =
+        fmin(1.0f, compass->principles[most_violated_index].importance +
+                       learning_rate * 0.1f);
+  }
+
+  // Find the most successfully applied principle
+  int most_activated_index = -1;
+  int max_activations = -1;
+
+  for (int i = 0; i < compass->num_principles; i++) {
+    if (compass->principles[i].activations > max_activations) {
+      max_activations = compass->principles[i].activations;
+      most_activated_index = i;
+    }
+  }
+
+  // Slightly decrease importance of easily-satisfied principles
+  if (most_activated_index >= 0 &&
+      most_activated_index != most_violated_index) {
+    compass->principles[most_activated_index].importance =
+        fmax(0.5f, compass->principles[most_activated_index].importance -
+                       learning_rate * 0.05f);
+  }
+
+  // Adapt confidence threshold based on resolution rate
+  float resolution_rate =
+      compass->dilemma_count > 0
+          ? (float)compass->resolution_count / compass->dilemma_count
+          : 0.5f;
+
+  if (resolution_rate < 0.6f) {
+    // Lower confidence threshold if we're struggling to resolve dilemmas
+    compass->confidence_threshold =
+        fmax(0.5f, compass->confidence_threshold - learning_rate * 0.1f);
+  } else if (resolution_rate > 0.9f) {
+    // Raise confidence threshold if we're resolving dilemmas too easily
+    compass->confidence_threshold =
+        fmin(0.95f, compass->confidence_threshold + learning_rate * 0.05f);
+  }
+}
+
+void freeMoralCompass(MoralCompass *compass) {
+  if (compass) {
+    if (compass->principles) {
+      free(compass->principles);
+    }
+    free(compass);
+  }
 }
 
 int main() {
@@ -8142,6 +8510,11 @@ int main() {
   addGoal(goalSystem, "Minimize prediction error", 1.0f);
   addGoal(goalSystem, "Develop stable representations", 0.8f);
   addGoal(goalSystem, "Maximize information gain", 0.7f);
+
+  MoralCompass *moralCompass = initializeMoralCompass(5);
+  printf("Ethical framework initialized with %d principles\n",
+         moralCompass->num_principles);
+  printf("Initial ethical alignment: %.2f\n", moralCompass->overall_alignment);
 
   // Main simulation loop
   printf("\nStarting training with loaded memory state...\n");
@@ -8967,6 +9340,27 @@ int main() {
     updateBidirectionalWeights(weights, reverse_weights, neurons, connections,
                                reverse_connections, learning_rate);
 
+    float decision_vector[5] = {0}; // One value per ethical principle
+
+    // Map network state to ethical dimensions
+    for (int i = 0; i < 5 && i < max_neurons / 10; i++) {
+      for (int j = 0; j < 10 && i * 10 + j < max_neurons; j++) {
+        decision_vector[i] += neurons[i * 10 + j].output * 0.1f;
+      }
+      decision_vector[i] = fmax(0.0f, fmin(1.0f, decision_vector[i]));
+    }
+
+    // Evaluate ethical alignment of current decision path
+    float ethical_score =
+        evaluateDecisionEthics(moralCompass, decision_vector, 5);
+
+    // Apply ethical constraints to outputs if score is too low
+    if (ethical_score < moralCompass->confidence_threshold) {
+      printf("\nEthical constraint applied (score: %.2f)\n", ethical_score);
+      applyEthicalConstraints(moralCompass, neurons, max_neurons, weights,
+                              max_connections);
+    }
+
     float average_error = total_error / max_neurons;
     if (step % 15 == 0) {
       advancedNeuronManagement(neurons, connections, weights, &max_neurons,
@@ -8975,46 +9369,93 @@ int main() {
     }
 
     if (step % 15 == 0) {
-        // Generate search query
-        char *query = generateSearchQuery(neurons, max_neurons);
-        if (query) {
-            printf("\nPerforming web search: \"%s\"\n", query);
-            
-            // Perform web search
-            SearchResults *results = performWebSearch(query);
-            
-            if (results && results->count > 0) {
-                printf("Found %d search results\n", results->count);
-                
-                // Convert search results to neural network input
-                float *search_input_tensor = (float *)malloc(max_neurons * sizeof(float));
-                convertSearchResultsToInput(results, search_input_tensor, max_neurons);
-                
-                // Store search results in memory system with metadata
-                storeSearchResultsWithMetadata(memorySystem, working_memory, results, query, feature_projection_matrix);
-                
-                // Use search results to influence decision making
-                float confidence_boost = enhanceDecisionMakingWithSearch(
-                    neurons, results, feedback.context_weights, max_neurons);
-                printf("Decision confidence boost from search: %.2f\n", confidence_boost);
-                
-                // Blend search input with current input
-                for (int i = 0; i < max_neurons; i++) {
-                    input_tensor[i] = input_tensor[i] * 0.7f + search_input_tensor[i] * 0.3f;
-                }
-                
-                free(search_input_tensor);
-                freeSearchResults(results);
-            } else {
-                printf("No search results found\n");
-            }
-            
-            free(query);
+      // Generate search query
+      char *query = generateSearchQuery(neurons, max_neurons);
+      if (query) {
+        printf("\nPerforming web search: \"%s\"\n", query);
+
+        // Perform web search
+        SearchResults *results = performWebSearch(query);
+
+        if (results && results->count > 0) {
+          printf("Found %d search results\n", results->count);
+
+          // Convert search results to neural network input
+          float *search_input_tensor =
+              (float *)malloc(max_neurons * sizeof(float));
+          convertSearchResultsToInput(results, search_input_tensor,
+                                      max_neurons);
+
+          // Store search results in memory system with metadata
+          storeSearchResultsWithMetadata(memorySystem, working_memory, results,
+                                         query, feature_projection_matrix);
+
+          // Use search results to influence decision making
+          float confidence_boost = enhanceDecisionMakingWithSearch(
+              neurons, results, feedback.context_weights, max_neurons);
+          printf("Decision confidence boost from search: %.2f\n",
+                 confidence_boost);
+
+          // Blend search input with current input
+          for (int i = 0; i < max_neurons; i++) {
+            input_tensor[i] =
+                input_tensor[i] * 0.7f + search_input_tensor[i] * 0.3f;
+          }
+
+          free(search_input_tensor);
+          freeSearchResults(results);
+        } else {
+          printf("No search results found\n");
         }
+
+        free(query);
+      }
     }
 
     if (step % 15 == 0) {
-      integrateWebSearch(neurons, input_tensor, max_neurons, memorySystem, step);
+      integrateWebSearch(neurons, input_tensor, max_neurons, memorySystem,
+                         step);
+    }
+
+    for (int i = 0; i < 5; i++) {
+        recordDecisionOutcome(moralCompass, i, decision_vector[i] >= 0.7f);
+    }
+
+    if (step % 20 == 0 || total_error > 0.5f) {
+      // Create multiple decision options
+      float decision_options[3 * 5]; // 3 options with 5 ethical dimensions each
+
+      // Option 1: Current path
+      // memcpy(&decision_options[0], decision_vector, 5 * sizeof(float));
+
+      // Option 2: More conservative path
+      // for (int i = 0; i < 5; i++) {
+      //    decision_options[5 + i] = decision_vector[i] * 0.8f + 0.1f;
+      // }
+
+      // Option 3: More exploratory path
+      for (int i = 0; i < 5; i++) {
+        decision_options[10 + i] = fmin(1.0f, decision_vector[i] * 1.2f);
+      }
+
+      DecisionImpact impact =
+          resolveEthicalDilemma(moralCompass, decision_options, 3, 5);
+
+      printf("\nEthical decision made:\n");
+      printf("- Benefit score: %.2f\n", impact.benefit_score);
+      printf("- Harm score: %.2f\n", impact.harm_score);
+      printf("- Net impact: %.2f\n", impact.long_term_impact);
+    }
+
+    if (step % 50 == 0 && step > 0) {
+      adaptEthicalFramework(moralCompass, opt_state.optimal_learning_rate);
+
+      // Generate and log ethical reflection
+      char *reflection = generateEthicalReflection(moralCompass);
+      if (reflection) {
+        printf("\n%s\n", reflection);
+        free(reflection);
+      }
     }
 
     NSLog(@"Average Error: %f", average_error);
@@ -9039,6 +9480,7 @@ int main() {
 
   // Cleanup
   freeMemorySystem(memorySystem);
+  freeMoralCompass(moralCompass);
   free(stateHistory);
   free(system_params);
   free(working_memory);
