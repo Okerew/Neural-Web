@@ -163,13 +163,13 @@ To compile the code, run the following command in the root directory of the proj
 For metal version
 
 ```sh
-clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web.m
+clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -lcurl -o neural_web neural_web.m
 ```
 
 For cpu but macOS version
 
 ```sh
-clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -o neural_web neural_web.c
+clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -lcurl -o neural_web neural_web.c
 ```
 
 #### 64/86 unix
@@ -177,7 +177,7 @@ clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/
 For cpu 86/64 unix version
 
 ```sh
-clang -o neural_web neural_web64.c I/usr/include -ljson-c -lm
+clang -o neural_web neural_web64.c I/usr/include -ljson-c -lcurl -lm
 ```
 
 #### Cuda version 64/86
@@ -185,7 +185,7 @@ clang -o neural_web neural_web64.c I/usr/include -ljson-c -lm
 For cuda version
 
 ```sh
-nvcc -o neural_web neural_web.cu -I/usr/include -ljson-c      
+nvcc -o neural_web neural_web.cu -I/usr/include -ljson-c -lcurl
 ```
 
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
@@ -491,6 +491,46 @@ typedef struct {
 } SearchResults;
 ```
 
+### Moral compass
+
+The moral compass ensures the model adheres to basic ethical principles. It allows the model to make decisions that are aligned with ethical standards.
+
+```c
+typedef struct {
+  char **titles;
+  char **snippets;
+  char **urls;
+  int count;
+} SearchResults;
+
+typedef struct {
+  float importance;      // How important this principle is (0.0-1.0)
+  float adherence;       // Current adherence level (0.0-1.0)
+  char description[256]; // Description of the principle
+  int violations;        // Count of violations
+  int activations;       // Count of successful applications
+} EthicalPrinciple;
+
+typedef struct {
+  float benefit_score;    // Positive impact measurement
+  float harm_score;       // Negative impact measurement
+  float uncertainty;      // Level of uncertainty in assessment
+  int affected_parties;   // Number of parties potentially affected
+  float reversibility;    // How reversible the decision is (0-1)
+  float long_term_impact; // Long-term consequence rating
+} DecisionImpact;
+
+typedef struct {
+  EthicalPrinciple *principles; // Array of ethical principles
+  int num_principles;           // Number of principles
+  float overall_alignment;      // Overall ethical alignment (0.0-1.0)
+  DecisionImpact last_decision; // Impact of the last decision
+  float confidence_threshold;   // Minimum confidence for ethical decisions
+  int dilemma_count;            // Number of ethical dilemmas encountered
+  int resolution_count;         // Number of dilemmas successfully resolved
+} MoralCompass;
+```
+
 ## Key Functions:
 
 ### Memory System
@@ -592,6 +632,20 @@ typedef struct {
 
 - #### `parseSearchResults(const char *json_data)` : Parses search results from a JSON response. Extracts the search results from the JSON data.
 
+### Moral Compass
+
+- #### `recordDecisionOutcome(MoralCompass *compass, int principle_index, bool was_ethical)` : Records the outcome of a decision based on ethical principles. Updates the moral compass based on the decision outcome.
+
+- #### `resolveEthicalDilemma(MoralCompass *compass, float *decision_options, int num_options, int vector_size)` : Resolves ethical dilemmas based on the moral compass. Makes a decision based on ethical principles.
+
+- #### `applyEthicalConstraints(MoralCompass *compass, Neuron *neurons, int max_neurons, float *weights, int max_connections)`: Applies ethical constraints to the network. Adjusts the network's weights to align with ethical principles.
+ 
+- #### `generateEthicalReflection(MoralCompass *compass)` generate an ethical reflection report based on the current state of the moral compass.
+
+- #### `adaptEthicalFramework(MoralCompass *compass, float learning_rate)` : Adapts the ethical framework based on the current state of the network. Adjusts the importance of principles based on their violations and activations.
+
+- #### `freeMoralCompass(MoralCompass *compass)` : Frees the memory allocated for the moral compass. Releases the memory used by the moral compass.
+
 ### Utility Functions
 
 - #### `getCurrentTime()` : Returns the current time. Provides the current date and time.
@@ -624,6 +678,7 @@ typedef struct {
 - #### `initializeMetacognitionMetrics()` : Initializes metacognition metrics. Sets up the metacognition metrics with default values.
 - #### `initializeMetaLearningState(int size)` : Initializes the meta-learning state. Sets up the meta-learning state with a specified size.
 - #### `createWorkingMemorySystem(int capacity)` : Creates a working memory system. Sets up a working memory system with a specified capacity.
+- #### `initializeMoralCompass(int num_principles)` : Initializes the moral compass. Sets up the moral compass with a specified number of principles.
 
 ## Usage
 
