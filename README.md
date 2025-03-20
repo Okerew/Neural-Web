@@ -48,6 +48,8 @@ osxiec - https://github.com/Okerew/osxiec
 
 ## Disclaimer
 
+<img src="https://github.com/Okerew/Neural-Web/blob/main/security_logs.png">
+
 When using the metacognition functionality make sure to use this piece of code, because if you don't you risk the model corrupting the whole directory and potentially crashing your computer, if you ever see that on the first run of the model there is a memory error it means that the model is already able to replicate it and you should delete the model executable + the files it uses so `rm memory_system.dat hierarchical_memory.dat performance_data.dat system_parameters.dat`, make sure to delete those files because if you only recompile the neural web it will definitely replicate the memory issue, though if you have the piece of code below it won't be able to do any damage so make sure to use it.
 
 ```c
@@ -213,6 +215,8 @@ The architecture consists of several key components:
 ## Key Components
 
 ### Memory System
+
+<img src="https://github.com/Okerew/Neural-Web/blob/main/memory_system.png">
 
 The memory system is designed to store and manage memories with varying importance. It consists of:
 
