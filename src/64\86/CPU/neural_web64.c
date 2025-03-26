@@ -4,12 +4,15 @@
 #include <immintrin.h>
 #include <json-c/json.h>
 #include <math.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
+#include <sys/mman.h>
 #include <time.h>
+#include <unistd.h>
 
 #define MAX_NEURONS 8
 #define MAX_CONNECTIONS 2
@@ -529,6 +532,13 @@ typedef struct {
   int dilemma_count;            // Number of ethical dilemmas encountered
   int resolution_count;         // Number of dilemmas successfully resolved
 } MoralCompass;
+
+typedef struct {
+  bool is_readable;
+  bool is_writable;
+  bool is_executable;
+  size_t region_size;
+} MemoryProtection;
 
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
@@ -5598,7 +5608,6 @@ float computeMarkerStability(float *markers, int num_markers) {
   return fmin(1.0f, fmax(0.1f, stability));
 }
 
-// Add this new function to properly initialize values and markers
 void initializeIdentityComponents(SelfIdentitySystem *system) {
   if (!system)
     return;
@@ -6475,16 +6484,47 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
                                      .suspect_address = 0,
                                      .violation_type = NULL};
 
-  // Check for attempts to access system memory regions
+  // Heuristic Execution Flow Analysis
+  for (size_t i = 0; i < max_neurons && !status.critical_violation; i++) {
+    for (size_t j = 0; j < neurons[i].num_connections; j++) {
+      // Out-of-bounds connection check
+      if (connections[i * max_connections + j] >= max_neurons) {
+        status.critical_violation = true;
+        status.suspect_address =
+            (uint64_t)&connections[i * max_connections + j];
+        status.violation_type = "Out-of-bounds connection access";
+        return status;
+      }
+
+      // Unusual Execution Flow Detection
+      // Check for excessive connections
+      if (neurons[i].num_connections > max_connections / 2) {
+        status.critical_violation = true;
+        status.suspect_address = (uint64_t)&neurons[i];
+        status.violation_type = "Unusually high number of connections";
+        return status;
+      }
+
+      // Detect potential cyclic dependencies
+      size_t connection_target = connections[i * max_connections + j];
+      for (size_t k = 0; k < neurons[connection_target].num_connections; k++) {
+        if (neurons[connection_target].num_connections > max_connections / 3 &&
+            connections[connection_target * max_connections + k] == i) {
+          status.critical_violation = true;
+          status.suspect_address = (uint64_t)&neurons[connection_target];
+          status.violation_type = "Potential cyclic connection detected";
+          return status;
+        }
+      }
+    }
+  }
+
+  // Existing system memory access checks
   uint64_t system_memory_start =
       0x00007f0000000000; // Typical start of system memory mapping
   uint64_t system_memory_end =
       0xFFFFFFFFFFFF; // Extend memory range to end of address space
-  uint64_t neurons_addr = (uint64_t)neurons;
-  uint64_t weights_addr = (uint64_t)weights;
-  uint64_t connections_addr = (uint64_t)connections;
 
-  // Check for suspicious jumps into system memory regions
   for (size_t i = 0; i < max_neurons && !status.critical_violation; i++) {
     for (size_t j = 0; j < neurons[i].num_connections; j++) {
       uint64_t target_addr =
@@ -6499,7 +6539,7 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
         break;
       }
 
-      // Check for attempts to modify instruction pointer (more broad checks)
+      // Check for attempts to modify instruction pointer
       if ((target_addr & 0xFFFF000000000000) == 0xFFFF000000000000) {
         status.critical_violation = true;
         status.suspect_address = target_addr;
@@ -6507,7 +6547,7 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
         break;
       }
 
-      // Detect jumps to addresses that are non-volatile (e.g., unaligned)
+      // Detect jumps to non-volatile (unaligned) addresses
       if ((target_addr % 8) != 0) {
         status.critical_violation = true;
         status.suspect_address = target_addr;
@@ -6517,11 +6557,10 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
     }
   }
 
-  // Check for potential shellcode patterns in memory
+  // Shellcode detection (existing implementation)
   const unsigned char *mem_scan = (const unsigned char *)neurons;
   for (size_t i = 0; i < sizeof(Neuron) * max_neurons - 4; i++) {
     // Look for common shellcode signatures
-    // Example: checking for 'int 0x80' (Linux syscall) or similar patterns
     if ((mem_scan[i] == 0xCD && mem_scan[i + 1] == 0x80) || // int 0x80
         (mem_scan[i] == 0x0F && mem_scan[i + 1] == 0x05) || // syscall
         (mem_scan[i] == 0xEB &&
@@ -6536,25 +6575,118 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
   return status;
 }
 
+// Global variables for signal handling
+static sigjmp_buf segv_jump_buffer;
+static volatile sig_atomic_t segv_occurred = 0;
+
+// Signal handler for catching segmentation faults
+static void segv_handler(int sig) {
+  segv_occurred = 1;
+  siglongjmp(segv_jump_buffer, 1);
+}
+
+MemoryProtection validateMemoryAccess(const void *ptr, size_t size) {
+  MemoryProtection protection = {0};
+
+  // Null and low memory address check
+  if (ptr == NULL || (uintptr_t)ptr < 0x1000) {
+    return protection;
+  }
+
+  // Install signal handler
+  struct sigaction sa, old_sa;
+  sa.sa_handler = segv_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESETHAND;
+
+  sigaction(SIGSEGV, &sa, &old_sa);
+
+  // Reset segmentation fault flag
+  segv_occurred = 0;
+
+  // Use sigsetjmp for non-local goto
+  if (sigsetjmp(segv_jump_buffer, 1) == 0) {
+    // Attempt to read from the pointer
+    volatile const char *test_ptr = (const char *)ptr;
+    char dummy;
+
+    // Try reading
+    dummy = *test_ptr;
+    (void)dummy;
+    protection.is_readable = true;
+
+    // Try writing (requires non-const pointer)
+    char *writable_ptr = (char *)ptr;
+    *writable_ptr = *writable_ptr;
+    protection.is_writable = true;
+  }
+
+  // Restore original signal handler
+  sigaction(SIGSEGV, &old_sa, NULL);
+
+  // Additional POSIX memory region check
+  int page_size = sysconf(_SC_PAGESIZE);
+  void *page_start = (void *)((uintptr_t)ptr & ~(page_size - 1));
+
+  // Check memory mappings
+  int mem_status = msync(page_start, page_size, MS_ASYNC);
+  if (mem_status == 0) {
+    protection.region_size = page_size;
+  }
+
+  // Check executable memory
+  protection.is_executable = (mprotect(page_start, page_size, PROT_EXEC) == 0);
+
+  return protection;
+}
+
 void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
                                      int *connections,
                                      const SecurityValidationStatus *status) {
+  // Print violation details to stderr
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
   fprintf(stderr, "Type: %s\n", status->violation_type);
   fprintf(stderr, "Suspect address: 0x%llx\n", status->suspect_address);
 
-  // Free up the suspect address
+  // Convert suspect address to void pointer
   void *suspect_ptr = (void *)status->suspect_address;
-  if (suspect_ptr) {
-    memset(suspect_ptr, 0,
-           sizeof(Neuron)); // Clear the memory at the suspect address
+
+  // Validate memory access
+  MemoryProtection mem_protection =
+      validateMemoryAccess(suspect_ptr, sizeof(Neuron));
+
+  // Log memory protection details
+  fprintf(stderr, "Memory Protection Check:\n");
+  fprintf(stderr, "  Readable:     %s\n",
+          mem_protection.is_readable ? "Yes" : "No");
+  fprintf(stderr, "  Writable:     %s\n",
+          mem_protection.is_writable ? "Yes" : "No");
+  fprintf(stderr, "  Executable:   %s\n",
+          mem_protection.is_executable ? "Yes" : "No");
+  fprintf(stderr, "  Region Size:  %zu bytes\n", mem_protection.region_size);
+
+  // Safe memory clearing only if writable and valid
+  if (mem_protection.is_writable &&
+      mem_protection.region_size >= sizeof(Neuron)) {
+    // Use secure memory clearing with explicit zero filling
+    volatile char *ptr = (volatile char *)suspect_ptr;
+    for (size_t i = 0; i < sizeof(Neuron); i++) {
+      ptr[i] = 0;
+    }
+    __sync_synchronize(); // Memory barrier to ensure zeroing
+    fprintf(stderr, "Memory cleared safely with secure zeroing.\n");
+  } else {
+    fprintf(stderr, "UNSAFE TO CLEAR: Invalid memory region\n");
   }
 
-  // Log the violation for further investigation
+  // Log violation to file
   FILE *log_file = fopen("security_violations.log", "a");
   if (log_file) {
     fprintf(log_file, "Violation Type: %s\n", status->violation_type);
     fprintf(log_file, "Suspect Address: 0x%llx\n", status->suspect_address);
+    fprintf(log_file, "Memory Protection: R:%d W:%d X:%d Size:%zu\n",
+            mem_protection.is_readable, mem_protection.is_writable,
+            mem_protection.is_executable, mem_protection.region_size);
     fclose(log_file);
   }
 }
