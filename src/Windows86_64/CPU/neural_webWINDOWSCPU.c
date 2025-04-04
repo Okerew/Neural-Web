@@ -63,6 +63,9 @@
 #define ACTIVATION_SIGMOID 2
 #define ACTIVATION_LEAKY_RELU 3
 #define ACTIVATION_SWISH 4
+#define MAX_EMOTION_TYPES 8
+#define EMOTION_LOVE 0
+#define EMOTION_HATE 1
 
 typedef struct {
   float state;
@@ -545,6 +548,25 @@ typedef struct {
   bool is_executable;
   size_t region_size;
 } MemoryProtection;
+
+typedef struct {
+  float intensity;          // Strength of the emotion (0.0 to 1.0)
+  float decay_rate;         // How quickly the emotion fades
+  float influence_factor;   // How much this emotion affects decision making
+  float threshold;          // Activation threshold for this emotion
+  float previous_intensity; // For tracking changes
+  float momentum;           // Carries emotional momentum across steps
+  unsigned int last_update; // Timestamp of last update
+} EmotionState;
+
+typedef struct {
+  EmotionState emotions[MAX_EMOTION_TYPES];
+  float cognitive_impact;     // How much emotions affect logical processing
+  float emotional_regulation; // System's ability to regulate emotions (0.0-1.0)
+  float emotional_memory[MAX_EMOTION_TYPES]
+                        [10]; // Recent emotional memory traces
+  int memory_index;           // Current index in circular memory buffer
+} EmotionalSystem;
 
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
@@ -1626,16 +1648,43 @@ const char *mapToWord(float value) {
 }
 
 void tokenizeString(const char *input, char **tokens, int *num_tokens) {
-  char buffer[1024];
-  strncpy(buffer, input, sizeof(buffer));
-  buffer[sizeof(buffer) - 1] = '\0'; // Ensure null-termination
-
   *num_tokens = 0;
-  char *token = strtok(buffer, " ");
-  while (token != NULL && *num_tokens < INPUT_SIZE) {
-    tokens[*num_tokens] = token;
-    (*num_tokens)++;
-    token = strtok(NULL, " ");
+  int input_len = strlen(input);
+  int i = 0;
+
+  while (i < input_len && *num_tokens < INPUT_SIZE) {
+    int best_match_len = 0;
+    const char *best_match = NULL;
+
+    // Greedy longest subword match
+    for (int j = 0; j < vocab_size; j++) {
+      const char *vocab_word = vocabulary[j].word;
+      int vocab_len = strlen(vocab_word);
+
+      if (vocab_len == 0 || i + vocab_len > input_len)
+        continue;
+
+      if (strncmp(&input[i], vocab_word, vocab_len) == 0) {
+        if (vocab_len > best_match_len) {
+          best_match_len = vocab_len;
+          best_match = vocab_word;
+        }
+      }
+    }
+
+    if (best_match_len > 0) {
+      tokens[*num_tokens] = strdup(best_match); 
+      (*num_tokens)++;
+      i += best_match_len;
+    } else {
+      // Fallback to single character token
+      char *fallback = (char *)malloc(2);
+      fallback[0] = input[i];
+      fallback[1] = '\0';
+      tokens[*num_tokens] = fallback;
+      (*num_tokens)++;
+      i++;
+    }
   }
 }
 
@@ -1944,67 +1993,81 @@ float *getWordEmbedding(const char *word) {
   }
 
   if (word_index == -1) {
-    // Word not found - use subword tokenization approach (like BERT/GPT)
-    // This is a simplified version of subword tokenization
+    // Word not found — fallback to subword tokenization
     memset(contextual_embedding, 0, EMBEDDING_SIZE * sizeof(float));
 
-    // Generate embedding from character n-grams (industry standard approach for
-    // OOV words)
-    size_t len = strlen(word);
-    for (size_t i = 0; i < len; i++) {
-      for (size_t n = 1; n <= 3 && i + n <= len; n++) {
-        // Use character n-grams to build embedding
-        unsigned int hash = 0;
-        for (size_t j = i; j < i + n; j++) {
-          hash = hash * 101 + word[j];
-        }
+    char *subword_tokens[INPUT_SIZE];
+    int num_subwords = 0;
 
-        // Use hash to modify embedding (similar to FastText approach)
-        for (int j = 0; j < EMBEDDING_SIZE / 10; j++) {
-          int idx = (hash + j) % EMBEDDING_SIZE;
-          contextual_embedding[idx] +=
-              letter_weights[(word[i] - 'a') % 26] / (float)len;
+    tokenizeString(word, subword_tokens, &num_subwords); // Greedy vocab match
+
+    if (num_subwords == 0) {
+      size_t len = strlen(word);
+      for (size_t i = 0; i < len; i++) {
+        for (size_t n = 1; n <= 3 && i + n <= len; n++) {
+          unsigned int hash = 0;
+          for (size_t j = i; j < i + n; j++) {
+            hash = hash * 101 + word[j];
+          }
+
+          for (int j = 0; j < EMBEDDING_SIZE / 10; j++) {
+            int idx = (hash + j) % EMBEDDING_SIZE;
+            contextual_embedding[idx] +=
+                letter_weights[(word[i] - 'a') % 26] / (float)len;
+          }
         }
+      }
+    } else {
+      // Subwords found in vocab — average their embeddings
+      for (int i = 0; i < num_subwords; i++) {
+        for (int k = 0; k < vocab_size; k++) {
+          if (strcmp(subword_tokens[i], vocabulary[k].word) == 0) {
+            for (int j = 0; j < EMBEDDING_SIZE; j++) {
+              contextual_embedding[j] += embeddings[k][j];
+            }
+            break;
+          }
+        }
+        free(subword_tokens[i]); // Clean up strdup
+      }
+
+      // Average the embeddings
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        contextual_embedding[j] /= (float)num_subwords;
       }
     }
 
-    // Normalize the embedding
+    // Normalize
     float norm = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       norm += contextual_embedding[j] * contextual_embedding[j];
     }
-    norm = sqrt(norm);
-
-    if (norm > 1e-8) {
+    norm = sqrtf(norm);
+    if (norm > 1e-8f) {
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
         contextual_embedding[j] /= norm;
       }
     }
-  } else {
-    // Word found - use base embedding and apply custom modifications
-    memcpy(contextual_embedding, embeddings[word_index],
-           EMBEDDING_SIZE * sizeof(float));
 
-    // Apply the custom modifiers as in the original code
-    float complexity_factor =
-        strlen(vocabulary[word_index].description) / 50.0f;
+  } else {
+    // Standard embedding found in vocabulary
+    memcpy(contextual_embedding, embeddings[word_index], sizeof(float) * EMBEDDING_SIZE);
+
+    float complexity_factor = strlen(vocabulary[word_index].description) / 50.0f;
     float scaling_factor = (vocabulary[word_index].semantic_weight +
                             vocabulary[word_index].letter_weight) *
                            (1.0f + complexity_factor);
 
-    // Apply scaling but maintain vector magnitude (more stable)
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       contextual_embedding[j] *= scaling_factor;
     }
 
-    // Re-normalize (standard practice)
     float norm = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       norm += contextual_embedding[j] * contextual_embedding[j];
     }
-    norm = sqrt(norm);
-
-    if (norm > 1e-8) {
+    norm = sqrtf(norm);
+    if (norm > 1e-8f) {
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
         contextual_embedding[j] /= norm;
       }
@@ -2131,12 +2194,10 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
   float letter_weights[INPUT_SIZE] = {0};
   float category_weights[INPUT_SIZE] = {0};
 
-  // First pass: get basic embeddings and weights
   for (int i = 0; i < num_tokens; i++) {
     token_embeddings[i] = getWordEmbedding(tokens[i]);
     letter_weights[i] = computeLetterWeight(tokens[i]);
 
-    // Find category weights (preserving custom logic)
     for (int j = 0; j < vocab_size; j++) {
       if (strcmp(tokens[i], vocabulary[j].word) == 0) {
         // Weight based on category and semantic significance
@@ -2177,10 +2238,7 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
     }
   }
 
-  // Generate the input tensor combining embeddings, attention, and your custom
-  // signal logic
   for (int i = 0; i < INPUT_SIZE; i++) {
-    // Start with base signal (from original code)
     float phase = (float)i / INPUT_SIZE;
     float signal = 0.4f * sinf(2.0f * M_PI * (t + phase));
     signal += 0.4f * sinf(2.0f * M_PI * (t + phase * 1.5f));
@@ -8832,6 +8890,7 @@ int main() {
   MetacognitionMetrics *metacognition = initializeMetacognitionMetrics();
   initializeKnowledgeMetrics(knowledge_filter);
   MetaLearningState *meta_learning_state = initializeMetaLearningState(4);
+  EmotionalSystem *emotional_system = initializeEmotionalSystem();
   addSymbol(0, "What is the current task?");
   addSymbol(1, "What is the current error rate?");
   addSymbol(2, "What is the current learning rate?");
@@ -9455,6 +9514,28 @@ int main() {
     updateNeuronsWithPredictiveCoding(neurons, input_tensor, max_neurons,
                                       learning_rate);
 
+    detectEmotionalTriggers(emotional_system, neurons, target_outputs,
+                            max_neurons, lastTimestamp);
+
+    applyEmotionalProcessing(emotional_system, neurons, max_neurons,
+                             input_tensor, learning_rate, params.plasticity);
+
+    // Periodically print emotional state
+    if (step % 10 == 0) {
+      printEmotionalState(emotional_system);
+    }
+
+    // Adjust emotional regulation based on performance
+    if (step % 20 == 0) {
+      // Increase regulation as the system learns
+      emotional_system->emotional_regulation =
+          fmin(0.9f, emotional_system->emotional_regulation + 0.01f);
+
+      // Slowly increase cognitive impact to allow more emotional influence
+      emotional_system->cognitive_impact =
+          fmin(0.5f, emotional_system->cognitive_impact + 0.005f);
+    }
+
     updateWorkingMemory(working_memory, neurons, input_tensor, target_outputs,
                         step);
 
@@ -9620,6 +9701,7 @@ int main() {
   // Cleanup
   freeMemorySystem(memorySystem);
   freeMoralCompass(moralCompass);
+  freeEmotionalSystem(emotional_system);
   free(stateHistory);
   free(system_params);
   free(working_memory);
