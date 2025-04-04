@@ -8738,6 +8738,295 @@ void freeMoralCompass(MoralCompass *compass) {
   }
 }
 
+EmotionalSystem *initializeEmotionalSystem() {
+  EmotionalSystem *system = (EmotionalSystem *)malloc(sizeof(EmotionalSystem));
+  if (!system) {
+    fprintf(stderr, "Failed to allocate memory for emotional system\n");
+    return NULL;
+  }
+
+  // Initialize all emotions with default values
+  for (int i = 0; i < MAX_EMOTION_TYPES; i++) {
+    system->emotions[i].intensity = 0.0f;
+    system->emotions[i].decay_rate = 0.05f;
+    system->emotions[i].influence_factor = 0.3f;
+    system->emotions[i].threshold = 0.2f;
+    system->emotions[i].previous_intensity = 0.0f;
+    system->emotions[i].momentum = 0.0f;
+    system->emotions[i].last_update = 0;
+
+    // Initialize emotional memory traces
+    for (int j = 0; j < 10; j++) {
+      system->emotional_memory[i][j] = 0.0f;
+    }
+  }
+
+  // Customize primary emotions (love and hate)
+  system->emotions[EMOTION_LOVE].decay_rate = 0.02f; // Love decays slowly
+  system->emotions[EMOTION_LOVE].influence_factor =
+      0.4f; // Love has stronger influence
+  system->emotions[EMOTION_LOVE].threshold = 0.15f; // Love triggers more easily
+
+  system->emotions[EMOTION_HATE].decay_rate = 0.03f; // Hate decays moderately
+  system->emotions[EMOTION_HATE].influence_factor =
+      0.5f; // Hate has strong influence
+  system->emotions[EMOTION_HATE].threshold =
+      0.25f; // Hate has higher trigger threshold
+
+  system->cognitive_impact = 0.3f; // Initial impact of emotions on cognition
+  system->emotional_regulation = 0.5f; // Initial emotional regulation capacity
+  system->memory_index = 0;
+
+  return system;
+}
+
+void triggerEmotion(EmotionalSystem *system, int emotion_type,
+                    float trigger_strength, unsigned int timestamp) {
+  if (!system || emotion_type >= MAX_EMOTION_TYPES) {
+    return;
+  }
+
+  EmotionState *emotion = &system->emotions[emotion_type];
+
+  // Store previous intensity for change tracking
+  emotion->previous_intensity = emotion->intensity;
+
+  // Calculate time elapsed since last update to scale decay
+  float time_factor = 1.0f;
+  if (emotion->last_update > 0) {
+    time_factor = fmin(10.0f, (timestamp - emotion->last_update) / 10.0f);
+  }
+
+  // Apply decay based on time elapsed
+  emotion->intensity *= powf(1.0f - emotion->decay_rate, time_factor);
+
+  // Apply new trigger if it exceeds threshold
+  if (trigger_strength > emotion->threshold) {
+    // Increase intensity based on trigger strength and regulation ability
+    float regulated_trigger =
+        trigger_strength * (1.0f - 0.5f * system->emotional_regulation);
+
+    // Add momentum effect for emotional continuity
+    emotion->momentum = emotion->momentum * 0.8f + regulated_trigger * 0.2f;
+
+    // Update intensity with momentum factor
+    emotion->intensity += regulated_trigger * (1.0f + emotion->momentum);
+
+    // Cap intensity at 1.0
+    emotion->intensity = fmin(1.0f, emotion->intensity);
+  }
+
+  // Update timestamp
+  emotion->last_update = timestamp;
+
+  // Store in emotional memory
+  system->emotional_memory[emotion_type][system->memory_index] =
+      emotion->intensity;
+}
+
+void updateEmotionalMemory(EmotionalSystem *system) {
+  system->memory_index = (system->memory_index + 1) % 10;
+}
+
+float calculateEmotionalBias(EmotionalSystem *system, float *input,
+                             int input_size) {
+  float emotional_weight = 0.0f;
+
+  // Sum weighted emotional influences
+  for (int i = 0; i < MAX_EMOTION_TYPES; i++) {
+    emotional_weight +=
+        system->emotions[i].intensity * system->emotions[i].influence_factor;
+  }
+
+  // Scale by cognitive impact factor
+  return emotional_weight * system->cognitive_impact;
+}
+
+void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
+                              int num_neurons, float *input_tensor,
+                              float learning_rate, float plasticity) {
+  float emotional_bias =
+      calculateEmotionalBias(system, input_tensor, num_neurons);
+
+  float love_intensity = system->emotions[EMOTION_LOVE].intensity;
+  float hate_intensity = system->emotions[EMOTION_HATE].intensity;
+
+  float fear_intensity = 0.0f;
+  float joy_intensity = 0.0f;
+  float sadness_intensity = 0.0f;
+  float surprise_intensity = 0.0f;
+  float disgust_intensity = 0.0f;
+  float anticipation_intensity = 0.0f;
+  float trust_intensity = 0.0f;
+
+  // Positive-based derivations
+  if (love_intensity > 0.2f) {
+    trust_intensity += love_intensity * 0.6f;
+    joy_intensity += love_intensity * 0.5f;
+    anticipation_intensity += love_intensity * 0.3f;
+  }
+
+  if (trust_intensity > 0.2f && fear_intensity < 0.2f) {
+    anticipation_intensity += trust_intensity * 0.4f;
+  }
+
+  // Negative-based derivations
+  if (hate_intensity > 0.2f) {
+    disgust_intensity += hate_intensity * 0.5f;
+    fear_intensity += hate_intensity * 0.4f;
+    sadness_intensity += hate_intensity * 0.3f;
+  }
+
+  if (fear_intensity > 0.2f && trust_intensity < 0.2f) {
+    anticipation_intensity += fear_intensity * 0.3f;
+  }
+
+  // Joy and trust may lead to surprise (delight)
+  if (joy_intensity > 0.3f && surprise_intensity < 0.2f) {
+    surprise_intensity += joy_intensity * 0.2f;
+  }
+
+  float positive_valence =
+      love_intensity + joy_intensity + trust_intensity + anticipation_intensity;
+  float negative_valence =
+      hate_intensity + fear_intensity + sadness_intensity + disgust_intensity;
+  float valence_bias = positive_valence - negative_valence;
+
+  float arousal = love_intensity + hate_intensity + fear_intensity +
+                  joy_intensity + surprise_intensity +
+                  0.5f * anticipation_intensity;
+
+  for (int i = 0; i < num_neurons; i++) {
+    // Shift perception based on valence
+    neurons[i].state += valence_bias * 0.25f;
+
+    // Enhance activation based on arousal
+    neurons[i].state *= (1.0f + arousal * 0.15f);
+
+    // Apply emotional bias uniformly
+    neurons[i].state += emotional_bias * 0.2f;
+
+    // Emotion-specific modulation
+    if (love_intensity > 0.2f) {
+      plasticity *= (1.0f + love_intensity * 0.3f);
+      neurons[i].state += love_intensity * 0.15f;
+    }
+
+    if (hate_intensity > 0.2f) {
+      neurons[i].state -= hate_intensity * 0.1f;
+    }
+
+    if (fear_intensity > 0.1f) {
+      neurons[i].state +=
+          fear_intensity * 0.2f * (neurons[i].state < 0 ? 1.0f : -0.5f);
+    }
+
+    if (joy_intensity > 0.2f) {
+      neurons[i].num_connections *=
+          (1.0f + joy_intensity * 0.15f) / MAX_NEURONS;
+      neurons[i].state += joy_intensity * 0.1f;
+    }
+
+    if (surprise_intensity > 0.1f) {
+      learning_rate *= (1.0f + surprise_intensity * 0.5f);
+    }
+
+    // Small emotional noise
+    float emotional_noise = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) *
+                            (positive_valence + negative_valence) * 0.05f;
+    neurons[i].state += emotional_noise;
+  }
+
+  if (love_intensity > 0.5f || hate_intensity > 0.5f) {
+    printf("Emotional processing applied - Valence: %.2f, Arousal: %.2f\n",
+           valence_bias, arousal);
+    printf("Emotional dimensions - Love: %.2f, Hate: %.2f, Joy: %.2f, Fear: "
+           "%.2f, Trust: %.2f, Surprise: %.2f\n",
+           love_intensity, hate_intensity, joy_intensity, fear_intensity,
+           trust_intensity, surprise_intensity);
+  }
+}
+
+void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
+                             float *target_outputs, int num_neurons,
+                             unsigned int timestamp) {
+  float love_trigger = 0.0f;
+  float hate_trigger = 0.0f;
+  float problem_difficulty = 0.0f;
+  float error_rate = 0.0f;
+
+  // Calculate error rate as a measure of problem difficulty
+  for (int i = 0; i < num_neurons; i++) {
+    error_rate += fabs(neurons[i].output - target_outputs[i]);
+  }
+  error_rate /= num_neurons;
+
+  // Problem difficulty indicator
+  problem_difficulty = fmin(1.0f, error_rate * 2.0f);
+
+  float social_context = 0.0f;
+  for (int i = 0; i < num_neurons; i += 2) {
+    social_context += neurons[i].output * 0.01f;
+  }
+  social_context = fmin(1.0f, social_context);
+
+  // Cooperation context detection
+  float cooperation_context = 0.0f;
+  for (int i = 0; i < num_neurons; i += 3) {
+    cooperation_context += neurons[i].output * 0.015f;
+  }
+  cooperation_context = fmin(1.0f, cooperation_context);
+
+  // Generate love trigger based on social context and problem-solving success
+  love_trigger =
+      social_context * (1.0f - problem_difficulty) * cooperation_context;
+
+  // Generate hate trigger based on conflict context and problem-solving
+  // difficulty
+  hate_trigger = problem_difficulty * (1.0f - cooperation_context) * 0.7f;
+
+  // Apply triggers
+  triggerEmotion(system, EMOTION_LOVE, love_trigger, timestamp);
+  triggerEmotion(system, EMOTION_HATE, hate_trigger, timestamp);
+
+  // Update memory
+  updateEmotionalMemory(system);
+}
+
+void printEmotionalState(EmotionalSystem *system) {
+  printf("\nEmotional System Status:\n");
+  printf("Love: %.2f (Influence: %.2f)\n",
+         system->emotions[EMOTION_LOVE].intensity,
+         system->emotions[EMOTION_LOVE].intensity *
+             system->emotions[EMOTION_LOVE].influence_factor);
+  printf("Hate: %.2f (Influence: %.2f)\n",
+         system->emotions[EMOTION_HATE].intensity,
+         system->emotions[EMOTION_HATE].intensity *
+             system->emotions[EMOTION_HATE].influence_factor);
+  printf("Cognitive Impact: %.2f\n", system->cognitive_impact);
+  printf("Emotional Regulation: %.2f\n", system->emotional_regulation);
+
+  // Print emotional memory trends
+  printf("Emotional memory (last 5 steps):\n");
+  printf("Love: ");
+  for (int i = 0; i < 5; i++) {
+    int idx = (system->memory_index - i - 1 + 10) % 10;
+    printf("%.2f ", system->emotional_memory[EMOTION_LOVE][idx]);
+  }
+  printf("\nHate: ");
+  for (int i = 0; i < 5; i++) {
+    int idx = (system->memory_index - i - 1 + 10) % 10;
+    printf("%.2f ", system->emotional_memory[EMOTION_HATE][idx]);
+  }
+  printf("\n");
+}
+
+void freeEmotionalSystem(EmotionalSystem *system) {
+  if (system) {
+    free(system);
+  }
+}
+
 int main() {
   loadVocabularyFromFile("vocabulary.txt");
   // Try to load existing memory system
