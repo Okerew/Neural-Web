@@ -533,6 +533,31 @@ typedef struct {
 } MoralCompass;
 ```
 
+### Emotion system
+
+The emotion system allows the network to express emotions. It allows the network to express emotions and get answers
+
+```c
+typedef struct {
+  float intensity;          // Strength of the emotion (0.0 to 1.0)
+  float decay_rate;         // How quickly the emotion fades
+  float influence_factor;   // How much this emotion affects decision making
+  float threshold;          // Activation threshold for this emotion
+  float previous_intensity; // For tracking changes
+  float momentum;           // Carries emotional momentum across steps
+  unsigned int last_update; // Timestamp of last update
+} EmotionState;
+
+typedef struct {
+  EmotionState emotions[MAX_EMOTION_TYPES];
+  float cognitive_impact;     // How much emotions affect logical processing
+  float emotional_regulation; // System's ability to regulate emotions (0.0-1.0)
+  float emotional_memory[MAX_EMOTION_TYPES]
+                        [10]; // Recent emotional memory traces
+  int memory_index;           // Current index in circular memory buffer
+} EmotionalSystem;
+```
+
 ## Key Functions:
 
 ### Memory System
