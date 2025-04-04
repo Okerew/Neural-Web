@@ -51,6 +51,15 @@ graph TD;
     MS -->|Adjust Learning Rate| M["Dynamic Adaptation"];
     MS -->|Influence Output Decisions| P;
 
+    %% Emotion System - NEW
+    B -->|Affect Processing Biases| EMO["Emotion System"];
+    EMO -->|Modulate Attention & Priority| MS;
+    EMO -->|Enhance or Suppress Memories| G;
+    EMO -->|Influence Ethical Reasoning| ME;
+    EMO -->|Inform Context| GC;
+    EMO -->|Trigger Adaptive Responses| P;
+    RS -->|Emotional Feedback| EMO;
+
     %% Learning and Optimization
     J -->|Enhance Learning| L["Performance Optimization"];
     L -->|Update Parameters| M;
