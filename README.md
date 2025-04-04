@@ -1158,3 +1158,5 @@ Only for unix type and windows systems
 Remember to use the security feature
 
 The code isn't the best implementation at all. It's just a prototype.
+
+If you want to use the key functions you can compile the neural web along with the key_functions header file by including it note the code special to each version so on cpu, cuda kernels, metal kernels is not in it. Also key_functions.h support for windows might be bad.
