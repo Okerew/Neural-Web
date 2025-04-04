@@ -28,7 +28,7 @@ Video explanation:
 This documentation provides a comprehensive guide to the decentralized neural web architecture implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization.
 The goal of this architecture is to present an alternative to modern neural models, which are often complex and resource-intensive, taking inspiration from our brains, neurons are decentralized organized in layers, allowing them to interact with themselves and change themselves overtime in more than just sates and weights, while also creating a dynamic memory system.
 
-<a href="https://mermaid.live/edit#pako:eNqNV2tvGjkU_SvWSEWtlHSbh9SUlVYiARLa0NBMHtrd7AczY8DbGRt5PGlp6X_fc23Pi2S7ywdg8H3fe84136NEpyLqR0vD1yt2M_z1QTG8Bn8-RBO1Li0bcssfor_Y_v5v25nRiSgKkbL5ZstOIfNRlEarAgJB8dQJ3q5TbgWLLd637KwW9L8wf7yrdKZzOBTsqrT4LLZsCL1BYuUjtxK641Il7stLy9XqVaN-1vZ5L-RyRdojaPuH4I-9vBDzueSKXQpulFTLlo2RszFI_y4L29g4DadDd3oulDBkaCpybTbsTiRWmy0bw1P4acoVX4pcKNuY9u8vXlRq8aawIve_jp3hGGaCVSng9hwGLyR8mWQlE54FzcbkuVO7Fhbyj4JN8rU2KIpt2bhoggpyPGsMXDgDU2GW6JLMZcZNS3fSSggiqNSu5m0h2EIbNjMila4rW_YeWtUzgjrTaUfRpzoUCd-wHk5VoTOZcq_7ofFYJZM8nZMPzsTV2iLib3UbqHooOsoGsbrY99p8hv9KaKKswIyTt3Y4N4K88baV-ykNTke7ieB-6uekKCTmpC4syt0ViMs1ZcEGvhYBOLDYzFSQPDUypSasSLzHLrVa7t8IkwfXPqvOGJ1neo6ZQAWt-GrDyBl2W-CjXadBQj4rORgiHD6v3JosD6aJWmSloB486Qqa1ZVFco8yFbVNq1mgBZ9sHfi1WGTCQ7iNgVlVUorWg599KnkmLbK_jhH0U8U63uu45g4ODMH36OsasuAobwpEcAcTI3Sp9O1vMH_nc00BV7nYsJEx2hRoApJFTsh0TEgYC5HOefKZDqwwO0bGkzZzYLxlQXGGjjftDnJIRSpRMxDGjhhliUynu32ORbbYD8GBBZ7UzbPmQPFsAzDQgBt8r0g3ptB_YqJOIJ4EYFqUjZ1Kjj5QqqqwfC7RBUcJMbE9HeIoDgcbdrYSyeeWqdN2LXaHvk6sCZXCQ78MidWhsZeTeBS_6iQ5L1AnhPdB6S-ZIMD02IxbskN8BXm3sH5qt4mT5D1MN_kcLJRgNEkYdQp8FP9OLIDmlIktwWnsZqVLWiWXXC1LAtpTY4EUnqk5dWNXeqRWjuOa2aZh35UKk9jM1ZR_dgWd7UqGwQogBHzYrUqFQRNV6jTOz9o9mOp6r7ZnKkB6aIi16iHtOR6jCKdU56e6dTGmcaAEiVViWyQNE-iW8lbOu9JhXmp3126AqQHDjeI52jNI-druAC8oN0wVqKMqVeGLVGdcm0dBWNghrX3wvtOVSnjLLmmrCYNll7uTjmYdzGX7CjLjhueAkykaVHuyvynb2Kc89xo0bdlH-Hre_sedXMN16rm94kOZaiWx0drWr9w1zH7BamtBeCp4gQnvXlmuOsPXVN_nU5e0QeNYZsi3M0oDZyMc9Ngdd9teuAsldghdmnb1W5t-HNpBsTXb4O4TtO6EadisVx26yTe6dce5-xSAkVMSE2NEhl2tbIhg0BWrkv0PAHUYukZlDzAu1pg50Wat-r5YbaIZbRNJDFVpNtHOql2alo4VvLkto4xvaK2G8f4lYNFrtvBsYJZGe2T9nfG8xFLOwAlF20HYg6IWQ94gVjR25JBNVnr1Id3SYMXvvNYtfzqqYK4Suc4EO-izoWZKsxU3ORK9OCD01r_02eBRy5RxF3rB7IpblvASt8hSKUEzTHewolws0FxAA5Ob8rzDs098HvZdmWhrrcFXPNm4_HlptdL5hqI4dJeHf5dhesF4ljEiJtpzP_F21GenuF-Y0q4Wpa80T5LSOK6aXRxR9bjEApGqllJ0o2kk4RyH5E-v_0dNj_tszKWpjSit9lNZJAb8oAIcZxfHdLnxMFm0pbkreFe-cr8O_-OC92gvynHj5DLFH8HvFM1DZFeghIeoj68pN9jxD-oH5Khw8UYlUR85ir3I0FaM-gueFXgqHf8NJcdNO69E1lz9oXX7Mep_j75G_Td70SbqH7w9fH305vDk8Ojk3fHJ0bvjH3vRNyd_8PpNeL07Pjg6OXh79OMf7ujdHA">You can see the architecture better here</a>
+<a href="https://mermaid.live/edit#pako:eNqNV21T2zgQ_isazzTTzkCPQqCQm7mZQBJIwZBiXubuuA-KrSQ6bCkjy7Rp0_9-u5JsyQnXOz6EJN73ffbZzfcolRmLetFc0eWC3A1-fRIE_vp_PkVjsaw0GVBNn6K_yO7ub-uJkikrS5aR6WpNTkHmmlVKihIEnOKpEbxfZlQzkmh4XZOzRtB-Q-zjTaUzWYBDRm4qDf_LNRmAXj_V_IVqDrqjSqTmzVtNxeKdVz8LfT4yPl-g9hC07Qfnj7y9YNMpp4JcMaoEF_PAxtDY6Gd_V6X2Nk7d04F5es4EU2goZoVUK_LAUi3VmozAk_sqpoLOWcGE9qbt65s3tVqyKjUr7LcjYzgBM84qZ-D2HAxecPCl0gVPae40vclzo3bLNMi_MDIullJBUXRg48IH5eRo7g1cGAMxU3PoEi94TlWgOw4SAhGo1KbmfcnITCoyUSzjpitr8gm06s8Q1JnMWoo21QFL6Yp04KkoZc4zanUvvcc6mXQbJ5fGxM1SQ8TfmjZg9aDoUDYQa4r9KNUz-K-FxkIzwDh6C8O5Y-iNhlYeYwROS9tH8BhbnJQlB5w0hYVytwWSaolZkL6thRscsOgx5SRPFc-wCQsU75ArKea7d0wVzrXNqgWj81xOARNQQc2-agc5Re5L-BfWqZ-iz1oODOEcvq4cIMsO01jM8ophD7a6As1qy0JyLzxjjU0tiaMFm2wT-C2b5cyOcDgDk7qkGK0dfvK5ojnXkP1tAkFvKzbx3iYNd1CYIfA9_LoEWeAoawqI4AFMDKFLlW2_n_kHm2sG48pnKzJUSqoSmgDJQk6Q6QgnYcRYNqXpMz7QTG0YGY1D5gB48xLjdB337XZykAoXrGEggB0yyhwyjTf7nLB8tuuCAxbYqptlzb6g-QqGAQGu4H1NugmG_hMTTQLJ2A2mhrKRU06hD5iqKDWdcuiCoYQE2R4fwqPEPViRswVLnwNTp2EtNkHfJOZDxfCgXwrFmtDI23EyTN61kpyWUCcI71LILznDgemQCdVoB_kK5M3C-qldHyfK2zFdFVNgoRSgicJQJ8dHye_IAtCcKtUVcBq5W8gKV8kVFfMKB23bmCOFV2qO3diUHoqF4TiPbQT7ppRDosdVTJ9NQSebkg5YbghhfMi9yJiCJorMaJyfhT2IZbNXQ0y5kR4oZK0GpB3DYxhhjHXe1m2KESeOEjisEh2QNJiAbglr5bwt7fDSuLs1AMYGDFaCFtCefkaXemPwnLJnKkcddalKW6Qm42Ehg5DJLrkePrYwNpvhAHjUulkAAolvkEFa-gGLxDd2mcqsyvE6aBJFjNpC4HgnG_I1AGCL4rZArIYnwIa0T3Oo7U1wy2gphWltPNyWlrBCAurfELhTfI5LwxQWe33LyiXUjJUeWo5aXd7gsSZCU5GwtE3nAGvEredg1X5q5VsLr8kVHgxMYajmSUuzqe9VeN1NqKIFMJUqPWHaPXpXhbSKENrxRLUm1-DrdfvXG_V1l-prK_vKNVpwjV3z1m_Mhau_wNUQsGMMHQLyaF-DN6259sC2-TQl9UQ34jnk25rSvrHhHnTIAzWHFDO3OqxnvEc39YMjauTagbH5RfvwGbQemPKLolM_NDhSMjgfHz47zikwibFSLIczSGgXQb8tVif7H9zUWn4N4XUaaIbD2pzi9ZKf4KLmiNJa00c7qc-UrEo90tcEM77Di8Uxxy-O5qxmQJUKzCK069E7r-DeyYFuy9CBOzH8hELesLNwPA1popVO8xAPYLBiz4ngB1Q8rBlUpHyZM_KhRwaSCEkWVBWQ6MUHJMbmmx7pv0ieEWpCL4leUE1SWsGBXgnBEMN43pYV0JvC0QDkZrRorbAtn_s9UybkwyWsApquTP600lLIYoVR7Ju77N9liJwRmucEqRBPiJ94O-iRUzjdVKUXs8pWmqZppcwamFwcYPUoh93MRSMlkC69JDiHh-hPLv9HTbs9MqJcNUaEFLsZL1MF_CDcOE4uusj6dkxmoTQ1BW_L1-6X7iey8x7twC9rnkU9iJvtRAUc9hQ_Rt8xsqdIL4AenqIevM3YjFY5MMWT-AFqSyr-kLKoNRWeH1FvRvMSPlWGDQecwk8aL8JwqM5kJXTUO9jfNzai3vfoa9Q76r7vnsDfx5Pjve7x0eHxTrSKeh8O9993uyf7x3snh93D7tHH7o-d6Jvxuvf--KPV2D_aOzjc2zvYibC1yUqk1uGPfwAWA1w3">You can see the architecture better here</a>
 
 ## Requirements:
 
@@ -648,6 +648,21 @@ typedef struct {
 
 - #### `freeMoralCompass(MoralCompass *compass)` : Frees the memory allocated for the moral compass. Releases the memory used by the moral compass.
 
+### Emotion system
+
+- #### `void freeEmotionalSystem(EmotionalSystem *system) `: Frees the memory allocated for the emotional system. Releases the memory used by the emotional system.
+
+- #### `void printEmotionalState(EmotionalSystem *system) `: Prints the current emotional state of the network. Displays the emotional state of the network, including love, hate, cognitive impact, and emotional regulation.
+
+- #### `void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons, float *target_outputs, int num_neurons, unsigned int timestamp) `: Detects emotional triggers in the network. Identifies and responds to emotional triggers, such as love, hate, cognitive impact, and emotional regulation.
+
+- #### `void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons, int num_neurons, float *input_tensor, float learning_rate, float plasticity) `: Applies emotional processing to the network. Adjusts the network's weights and biases based on emotional triggers and emotional state.
+
+- #### `float calculateEmotionalBias(EmotionalSystem *system, float *input, int input_size) `: Calculates the emotional bias based on the emotional state and input. Computes the emotional bias for the given input and emotional state.
+
+- #### `void updateEmotionalMemory(EmotionalSystem *system)` : Updates the emotional memory of the network. Adds new emotional memories to the memory system and updates the emotional memory index.
+
+- #### `void triggerEmotion(EmotionalSystem *system, int emotion_type, float trigger_strength, unsigned int timestamp)` : Triggers an emotional response in the network. Activates a specific emotional response in the network.
 ### Utility Functions
 
 - #### `getCurrentTime()` : Returns the current time. Provides the current date and time.
@@ -682,6 +697,7 @@ typedef struct {
 - #### `createWorkingMemorySystem(int capacity)` : Creates a working memory system. Sets up a working memory system with a specified capacity.
 - #### `initializeMoralCompass(int num_principles)` : Initializes the moral compass. Sets up the moral compass with a specified number of principles.
 
+- #### `EmotionalSystem *initializeEmotionalSystem() `: Initializes the emotional system. Sets up the emotional system with default values.
 ## Usage
 
 ### Initialization
