@@ -273,9 +273,9 @@ typedef struct MemorySystem {
 } MemorySystem;
 ```
 
-### Neuron and Connection Management
+### Neuron, Connection Management, neuron specialization
 
-Neurons are the basic units of the neural network, and connections define how neurons are interconnected.
+Neurons are the basic units of the neural network, organized into layers, each connected in a 3d like structure and specialized.
 
 #### Neuron
 
@@ -286,6 +286,36 @@ typedef struct {
   unsigned int num_connections;
   unsigned int layer_id;
 } Neuron;
+
+typedef enum {
+  SPEC_NONE = 0,
+  SPEC_PATTERN_DETECTOR,
+  SPEC_FEATURE_EXTRACTOR,
+  SPEC_TEMPORAL_PROCESSOR,
+  SPEC_CONTEXT_INTEGRATOR,
+  SPEC_DECISION_MAKER,
+  SPEC_MEMORY_ENCODER,
+  SPEC_EMOTIONAL_PROCESSOR,
+  SPEC_PREDICTION_GENERATOR
+} NeuronSpecializationType;
+
+typedef struct {
+  unsigned int neuron_id;
+  NeuronSpecializationType type;
+  float specialization_score;
+  float activation_history[50]; // Recent activation history
+  unsigned int history_index;   // Current index in circular buffer
+  float avg_activation;         // Average activation level
+  float importance_factor;      // How important this specialized neuron is
+} SpecializedNeuron;
+
+typedef struct {
+  SpecializedNeuron neurons[MAX_SPECIALIZED_NEURONS];
+  unsigned int count;
+  float type_distribution[MAX_SPECIALIZATIONS]; // Distribution of
+                                                // specialization types
+  float specialization_threshold; // Minimum score to be considered specialized
+} NeuronSpecializationSystem;
 ```
 
 ### Dynamic Parameters
@@ -338,22 +368,6 @@ typedef struct {
   double best_execution_time;
   float best_performance_score;
 } OptimizationState;
-```
-
-### Adaptation
-
-Adaptation metrics track the network's adaptation to changes.
-
-#### AdaptationMetrics
-
-```c
-typedef struct {
-  float input_noise_resistance;
-  float weight_noise_resistance;
-  float adaptation_speed;
-  float baseline_performance;
-  float noisy_performance;
-} AdaptationMetrics;
 ```
 
 ### Reflection System
@@ -458,6 +472,39 @@ typedef struct {
 } SecurityValidationStatus;
 ```
 
+### Goal system
+
+The goal system allows the network to set and track goals.
+
+```c
+typedef struct {
+  float novelty_score;
+  float competence_score;
+  float autonomy_score;
+  float mastery_level;
+  float curiosity_drive;
+  float achievement_drive;
+  float exploration_rate;
+} IntrinsicMotivation;
+
+typedef struct {
+  char description[256];
+  float priority;
+  float progress;
+  float reward_value;
+  bool achieved;
+  int timestamp;
+} Goal;
+
+typedef struct {
+  Goal *goals;
+  int num_goals;
+  int capacity;
+  float planning_horizon;
+  float discount_factor;
+} GoalSystem;
+```
+
 ### Internal self expression system
 
 The internal self expression system allows the network to express itself. It allows the network to ask questions about it self and get answers
@@ -558,6 +605,94 @@ typedef struct {
 } EmotionalSystem;
 ```
 
+### Imagination System
+
+The imagination system allows the network to generate imaginative outcomes. It allows the network to generate imaginative outcomes and get answers
+
+```c
+typedef struct {
+  float probability;
+  float confidence;
+  float impact_score;
+  float plausibility;
+  float vector[MEMORY_VECTOR_SIZE];
+  char description[256];
+} ImaginedOutcome;
+
+typedef struct {
+  int num_outcomes;
+  ImaginedOutcome outcomes[10];
+  float divergence_factor;
+  float creativity_level;
+} ImaginationScenario;
+
+typedef struct {
+  ImaginationScenario scenarios[MAX_SCENARIOS];
+  int num_scenarios;
+  int current_scenario;
+  float creativity_factor;
+  float coherence_threshold;
+  float novelty_weight;
+  float memory_influence;
+  float identity_influence;
+  bool active;
+  int steps_simulated;
+  float divergence_history[100];
+  char current_scenario_name[MAX_SCENARIO_NAME_LENGTH];
+  int total_scenarios_generated;
+} ImaginationSystem;
+```
+
+### Social system
+
+The social system allows the network to interact with others. It allows the network to interact with others and get answers
+
+```c
+typedef struct {
+  unsigned int timestamp;
+  int person_id;              // ID of the person involved
+  float emotional_state[5];   // Emotional state during interaction
+  float cooperation_level;    // How cooperative the interaction was
+  float outcome_satisfaction; // How satisfied both parties were
+  char interaction_type[32];  // Type of interaction (negotiation, casual, etc.)
+  char *context;              // Context of the interaction
+} SocialInteraction;
+
+// Structure to model another person
+typedef struct {
+  int person_id;
+  char person_name[64];
+  float observed_traits[10];   // Personality traits inferred
+  float prediction_confidence; // Confidence in behavioral predictions
+  float relationship_quality;  // Quality of relationship with this person
+  float trust_level;           // Trust built with this person
+  int interaction_count;       // Number of interactions with this person
+} PersonModel;
+
+typedef struct {
+  // Core social capabilities
+  float empathy_level;     // Ability to understand others' emotions
+  float negotiation_skill; // Ability to find mutually beneficial solutions
+  float behavior_prediction_accuracy; // Accuracy in predicting others' actions
+  float social_awareness;             // Awareness of social dynamics and norms
+
+  // Social interaction history
+  int interaction_count;
+  SocialInteraction *interactions; // Array of past interactions
+  int max_interactions;            // Maximum number of interactions to store
+
+  // Social models of others
+  int model_count;
+  PersonModel
+      *person_models; // Models of individuals the system has interacted with
+  int max_models;     // Maximum number of models to maintain
+
+  // Social learning parameters
+  float learning_rate;     // Rate at which social skills improve
+  float forgetting_factor; // Rate at which old interactions lose relevance
+} SocialSystem;
+```
+
 ## Key Functions:
 
 ### Memory System
@@ -590,6 +725,12 @@ typedef struct {
 - #### `applyMetaControllerAdaptations(Neuron* neurons, float* weights, MetaController* metaController, int max_neurons)` : Applies adaptations from the meta-controller to the network. Makes changes to the network based on the meta-controller's instructions.
 - #### `selectOptimalMetaDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, MetaLearningState* meta_learning_state, MetacognitionMetrics* metacognition)` : Selects the optimal meta-decision path based on meta-learning state and metacognition metrics. Chooses the best course of action based on the meta-learning state and metacognition metrics.
 - #### `adaptNetworkDynamic(Neuron* neurons, float* weights, DynamicParameters* params, float performance_delta, float* input_tensor)` : Adapts the network dynamically based on performance delta and input tensor. Makes real-time adjustments to the network based on its performance.
+- #### `void freeSpecializationSystem(NeuronSpecializationSystem *system)` : Frees memory allocated for the specialization system. Releases resources used by the specialization system.
+- #### `void printSpecializationStats(NeuronSpecializationSystem *system)` : Prints statistics about the specialization system. Displays information about the specialization of the network's neurons.
+- #### `float evaluateSpecializationEffectiveness(NeuronSpecializationSystem, *system float network_performance)` : Evaluates the effectiveness of the specialization system. Calculates the overall effectiveness of the specialization system based on network performance.
+- #### `void updateSpecializationImportance(NeuronSpecializationSystem *system, float network_performance, float error_rate,  Neuron *neurons)` : Updates the importance of the specialization system. Adjusts the importance of the specialization system based on network performance and error rate.
+- #### `void applySpecializations(NeuronSpecializationSystem *system, Neuron *neurons,  float *weights, int *connections, int max_neurons, int max_connections)` : Applies specializations to the network. Makes changes to the network based on the specialization system's instructions.
+- #### `void detectSpecializations(NeuronSpecializationSystem *system, Neuron *neurons, int max_neurons, float *input_tensor, float *target_outputs, float *previous_outputs, float *previous_states)` : Detects specializations in the network. Identifies regions of the network that need special attention.
 
 ### Dynamic Parameters and Optimization
 
@@ -688,6 +829,48 @@ typedef struct {
 - #### `void updateEmotionalMemory(EmotionalSystem *system)` : Updates the emotional memory of the network. Adds new emotional memories to the memory system and updates the emotional memory index.
 
 - #### `void triggerEmotion(EmotionalSystem *system, int emotion_type, float trigger_strength, unsigned int timestamp)` : Triggers an emotional response in the network. Activates a specific emotional response in the network.
+
+### Imagination System:
+
+- #### `ImaginationScenario createScenario(Neuron *neurons, MemorySystem *memory_system, int max_neurons, float divergence);` : Creates a new imagination scenario. Generates a new imagination scenario based on the current state of the network.
+- #### `void simulateScenario(ImaginationScenario *scenario, Neuron *neurons, float *input_tensor, int max_neurons, int steps);` : Simulates an imagination scenario. Runs the imagination scenario for the specified number of steps.
+- #### `void evaluateScenarioPlausibility(ImaginationScenario *scenario, MemorySystem *memory_system);` : Evaluates the plausibility of an imagination scenario. Checks the plausibility of the scenario based on the memory system.
+- #### `float applyImaginationToDecision(ImaginationSystem *imagination, Neuron *neurons, float *input_tensor, int max_neurons);` : Applies imagination to a decision. Modifies the decision based on the imagination system.
+- #### `void updateImaginationCreativity(ImaginationSystem *imagination, float performance_delta, float novelty);` : Updates the creativity of the imagination system. Adjusts the creativity of the imagination system based on performance and novelty.
+- #### `void freeImaginationSystem(ImaginationSystem *system);` : Frees the memory allocated for the imagination system. Releases the memory used by the imagination system.
+- #### `void blendImaginedOutcomes(ImaginedOutcome *outcomes, int num_outcomes, float *result_vector);` : Blends the imagined outcomes into a result vector. Combines the imagined outcomes to create a result vector.
+- #### `bool isScenarioCoherent(ImaginationScenario *scenario, float threshold);` : Checks if an imagination scenario is coherent. Determines if the scenario is coherent based on a specified threshold.
+- #### `void adjustNeuronsWithImagination(Neuron *neurons, ImaginedOutcome *outcome, int max_neurons, float influence);` : Adjusts the activations of neurons based on imagined outcomes. Modifies the activations of the neurons based on the imagined outcomes.
+
+### Social System
+
+- #### `void freeSocialSystem(SocialSystem *system)`
+Frees the memory allocated for the social system. Deallocates memory to prevent memory leaks.
+
+- #### `char *generateSocialFeedback(SocialSystem *system, const char *context)`
+Generates social feedback based on the given context. Provides feedback or responses based on social interactions and context.
+
+- #### `void applySocialInfluence(SocialSystem *system, Neuron *neurons, float *weights, int max_neurons)`
+Applies social influence to the network. Adjusts the neurons and weights based on social interactions and influences.
+
+- #### `void predictBehavior(SocialSystem *system, int person_id, const char *context, float *predicted_behavior)`
+Predicts the behavior of a person in a given context. Estimates how a person will behave based on social data and context.
+
+- #### `void recordSocialInteraction(SocialSystem *system, int person_id, float *emotional_state, float cooperation_level, float satisfaction, const char *type, const char *context)`
+Records a social interaction for a person. Stores details about the interaction, including emotional state, cooperation level, satisfaction, type, and context.
+
+- #### `float calculateInteractionDiversity(SocialSystem *system)`
+Calculates the diversity of social interactions. Measures how varied the social interactions are within the system.
+
+- #### `float negotiateOutcome(SocialSystem* system, int person_id, float* goals, float* other_goals, float* compromise)`
+Negotiates an outcome between a person and others. Determines a compromise based on the goals of the person and others involved.
+
+- #### `void updatePersonModel(SocialSystem* system, int person_id, float* observed_behavior, float* predicted_behavior)`
+Updates the model of a person based on observed and predicted behavior. Adjusts the person's model to better reflect their actual behavior.
+
+- #### `void updateEmpathy(SocialSystem* system, EmotionalSystem* emotional_system)`
+Updates the empathy levels in the social system based on the emotional system. Adjusts empathy to reflect the emotional state of the system.
+
 ### Utility Functions
 
 - #### `getCurrentTime()` : Returns the current time. Provides the current date and time.
@@ -721,8 +904,11 @@ typedef struct {
 - #### `initializeMetaLearningState(int size)` : Initializes the meta-learning state. Sets up the meta-learning state with a specified size.
 - #### `createWorkingMemorySystem(int capacity)` : Creates a working memory system. Sets up a working memory system with a specified capacity.
 - #### `initializeMoralCompass(int num_principles)` : Initializes the moral compass. Sets up the moral compass with a specified number of principles.
-
 - #### `EmotionalSystem *initializeEmotionalSystem() `: Initializes the emotional system. Sets up the emotional system with default values.
+- #### `ImaginationSystem* initializeImaginationSystem(float creativity_factor, float coherence_threshold);` : Initializes the imagination system. Creates a new imagination system with the specified creativity factor and coherence threshold.
+- #### `SocialSystem* initializeSocialSystem(int max_interactions, int max_models)`: Initializes a new social system with specified maximum interactions and models. Sets up the social system with initial values for interactions and models.
+- #### `NeuronSpecializationSystem *initializeSpecializationSystem(float threshold)` : Initializes the specialization system. Sets up the specialization system with a specified threshold.
+
 ## Usage
 
 ### Initialization
@@ -1157,6 +1343,7 @@ Only for unix type and windows systems
 
 Remember to use the security feature
 
-The code isn't the best implementation at all. It's just a prototype.
+There is a problem though because of my limited tests and because of how complex love as a feeling is, needing another person and being taught by trust and joy, the architecture experiences a seemingly unstoppable trend. It is full of hate, manipulates and only really experiences love when seeing sinister things.
+In training use a dataset which explains that hateful things are bad and morally correct things are good, to fix the problem.
 
-If you want to use the key functions you can compile the neural web along with the key_functions header file by including it note the code special to each version so on cpu, cuda kernels, metal kernels is not in it. Also key_functions.h support for windows might be bad.
+The code isn't the best implementation at all. It's just a prototype.

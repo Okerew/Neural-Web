@@ -51,7 +51,7 @@ graph TD;
     MS -->|Adjust Learning Rate| M["Dynamic Adaptation"];
     MS -->|Influence Output Decisions| P;
 
-    %% Emotion System - NEW
+    %% Emotion System
     B -->|Affect Processing Biases| EMO["Emotion System"];
     EMO -->|Modulate Attention & Priority| MS;
     EMO -->|Enhance or Suppress Memories| G;
@@ -84,3 +84,21 @@ graph TD;
     ME -->|Principle 2: Respect privacy and autonomy| PH2["Respect privacy and autonomy of all entities"];
     ME -->|Principle 3: Be truthful and accurate| PH3["Maintain truthfulness and accuracy in all operations"];
     ME -->|Principle 4: Fairness and non-discrimination| PH4["Ensure fairness and avoid discrimination in all processes"];
+
+    %% Social System
+    EMO -->|Enable Empathy| SS["Social System"];
+    SS -->|Coordinate Neurons with Social Goals| B;
+    SS -->|Support Cooperative Processing| GC;
+    SS -->|Enhance Ethical Feedback| ME;
+
+    %% Imagination System
+    B -->|Generate Hypotheticals| IM["Imagination System"];
+    IM -->|Activate Virtual Neurons| B;
+    IM -->|Store Imagined Events| G;
+    IM -->|Inspire Creative Processing| ISES;
+
+    %% Specialization System
+    B -->|Track Task Usage| SP["Specialization System"];
+    SP -->|Assign Specialized Roles| B;
+    SP -->|Adapt Over Time| M;
+    SP -->|Refine Neuron Functions| N;

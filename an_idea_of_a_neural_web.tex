@@ -1,0 +1,715 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\geometry{a4paper, margin=1in}
+
+
+\title{An Idea of a Neural Web}
+\author{Okerew}
+\date{January 25, 2025}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This document outlines the mathematical framework of the neural network architecture, now including the neuron specialization system. The complete system integrates dynamic neuron specialization with memory, emotion, and predictive systems to create an adaptive artificial intelligence framework.
+
+\section{Design of the Neural Network}
+The neural network is designed with several key principles in mind:
+
+1. \textbf{Hierarchical Memory System}: The network uses a hierarchical memory system with short-term, medium-term, and long-term memory clusters. This design allows the network to prioritize and retain important information while discarding less relevant data.
+
+2. \textbf{Dynamic Adaptation}: The network dynamically adjusts its parameters based on performance and stability. This ensures that the network can adapt to new data and changing conditions, improving its robustness and accuracy.
+
+3. \textbf{Non-linear Activation}: The use of the tanh function introduces non-linearity into the neuron outputs, enabling the network to model complex relationships in the data.
+
+4. \textbf{Memory Consolidation and Decay}: Memories are consolidated based on their importance and decay over time. This mimics the natural process of memory retention and forgetting, ensuring that the network remains efficient and focused on relevant information.
+
+5. \textbf{Performance Optimization}: The network continuously monitors its performance and optimizes its parameters to achieve the best results. This includes adjusting learning rates, batch sizes, and other hyperparameters.
+
+6. \textbf{Pattern Matching and Similarity}: The network uses cosine similarity to compare memory vectors and identify similar patterns. This allows the network to recognize and recall relevant information from its memory.
+
+7. \textbf{Predictive Coding}: The network employs predictive coding to anticipate future states and improve its predictive accuracy.
+
+8. \textbf{Advanced Neuron Management}: The network dynamically manages its neurons, adding or removing them based on their performance to maintain optimal network efficiency.
+
+9. \textbf{Meta-Controller}: The network uses a meta-controller to manage the importance and learning efficiency of different regions, enhancing overall learning and adaptation.
+
+10. \textbf{Context Management}: The network organizes and updates context nodes to maintain a coherent global context, adapting to environmental factors and constraints.
+
+11. \textbf{Self-Reflection}: The network performs self-reflection to analyze its performance and coherence, detect potential confabulation, and regenerate responses.
+
+12. \textbf{Self-Identity}: The network manages its identity components based on behavioral patterns and experiences, providing insights into its consistency and confidence.
+
+13. \textbf{Knowledge Filtering}: The network categorizes inputs and records problem instances, analyzing category statistics to update category importance and confidence.
+
+14. \textbf{Emotional Processing}: The network incorporates an emotional system that influences decision-making and learning based on emotional states like love and hate, providing affective modulation of cognitive processes.
+
+15. \textbf{Imagination Capability}: The network can simulate hypothetical scenarios and outcomes before taking action, enabling more sophisticated planning and decision-making.
+
+16. \textbf{Social Intelligence}: The network models social interactions and maintains representations of other agents, allowing for more natural and effective social behavior.
+
+17. \textbf{Specialization}: The network performs specialization to optimize performance and adaptability.
+
+\section{Neuron Specialization System}
+
+\subsection{Initialization}
+The specialization system is initialized with:
+
+\begin{equation}
+S = (\mathcal{N}, \theta_t, \mathcal{D})
+\end{equation}
+
+where:
+\begin{itemize}[leftmargin=*]
+\item $\mathcal{N}$ = Set of specialized neurons
+\item $\theta_t$ = Specialization threshold
+\item $\mathcal{D}$ = Type distribution vector
+\end{itemize}
+
+\subsection{Specialization Types}
+The system recognizes eight specialization types:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Pattern Detector (SPEC\_PATTERN\_DETECTOR)}: Identifies specific input patterns
+\item \textbf{Feature Extractor (SPEC\_FEATURE\_EXTRACTOR)}: Extracts consistent features
+\item \textbf{Temporal Processor (SPEC\_TEMPORAL\_PROCESSOR)}: Processes time-dependent patterns
+\item \textbf{Context Integrator (SPEC\_CONTEXT\_INTEGRATOR)}: Combines multiple information sources
+\item \textbf{Decision Maker (SPEC\_DECISION\_MAKER)}: Drives output decisions
+\item \textbf{Memory Encoder (SPEC\_MEMORY\_ENCODER)}: Stabilizes important information
+\item \textbf{Emotional Processor (SPEC\_EMOTIONAL\_PROCESSOR)}: Handles affective responses
+\item \textbf{Prediction Generator (SPEC\_PREDICTION\_GENERATOR)}: Anticipates future states
+\end{enumerate}
+
+\subsection{Detection Algorithm}
+For each neuron $n_i$, specialization scores are computed:
+
+\begin{equation}
+s_j(n_i) = f_j(\text{output}, \text{state}, \text{connections}, \text{temporal\_behavior})
+\end{equation}
+
+where $f_j$ is the scoring function for specialization type $j$.
+
+\subsubsection{Scoring Functions}
+\begin{align}
+\text{Pattern Score} &= \begin{cases}
+0.8 & \text{if } o_i > 0.7 \land c_{\text{input}} > 0.6 \\
+0 & \text{otherwise}
+\end{cases} \\
+\text{Temporal Score} &= 0.7 + 0.2(1 - \sigma_t) \\
+\text{Memory Score} &= 0.5 + 0.3o_i + 0.1\mathbb{I}(k_i > 4)
+\end{align}
+
+where:
+\begin{itemize}[leftmargin=*]
+\item $o_i$ = neuron output
+\item $c_{\text{input}}$ = input correlation
+\item $\sigma_t$ = temporal variance
+\item $k_i$ = number of connections
+\item $\mathbb{I}$ = indicator function
+\end{itemize}
+
+\subsection{Specialization Application}
+For each specialized neuron $n_i \in \mathcal{N}$ with type $t_i$ and boost factor $\beta_i$:
+
+\begin{equation}
+\text{Update}(n_i) =
+\begin{cases}
+\text{state} \leftarrow \text{state} \cdot (1 + 0.2\beta_i) & t_i = \text{Pattern} \\
+\text{state} \leftarrow \text{state} + 0.05\beta_i(\text{state} - \mu_i) & t_i = \text{Temporal} \\
+\text{weights} \leftarrow \text{weights} \cdot (1 + 0.1\beta_i) & t_i = \text{Context} \\
+\text{output} \leftarrow \text{contrast\_enhance}(\text{output}, \beta_i) & t_i = \text{Decision}
+\end{cases}
+\end{equation}
+
+\subsection{Importance Adaptation}
+The importance factor $\beta_i$ updates as:
+
+\begin{equation}
+\beta_i^{(t+1)} = \text{clip}\left(\beta_i^{(t)} + \eta(\alpha S_a + (1-\alpha)S_p - 0.5), 0.1, 2.0\right)
+\end{equation}
+
+where:
+\begin{itemize}[leftmargin=*]
+\item $S_a$ = activity score (type-specific)
+\item $S_p$ = network performance score
+\item $\alpha$ = blending factor (0.6)
+\item $\eta$ = learning rate (0.1)
+\end{itemize}
+
+\subsection{System Evaluation}
+Overall effectiveness:
+
+\begin{equation}
+E = 0.4P + 0.3\bar{\beta} + 0.3\left(-\sum_{j=1}^8 p_j \log p_j\right)
+\end{equation}
+
+where $P$ is network performance and $p_j$ is the proportion of type $j$.
+
+\section{Memory Vector Computation}
+The memory vector is computed by combining neuron states, neuron outputs, and input tensor values. The formula for computing the memory vector is:
+
+\[
+\text{memory\_vector}[i] =
+\begin{cases}
+\text{neurons}[i].\text{state} & \text{if } i < \text{MAX\_NEURONS} \\
+\text{neurons}[i - \text{MAX\_NEURONS}].\text{output} & \text{if } \text{MAX\_NEURONS} \leq i < 2 \times \text{MAX\_NEURONS} \\
+\text{input\_tensor}[i - 2 \times \text{MAX\_NEURONS}] & \text{if } 2 \times \text{MAX\_NEURONS} \leq i < \text{MEMORY\_VECTOR\_SIZE} \\
+0 & \text{otherwise}
+\end{cases}
+\]
+
+The memory vector is a concatenation of neuron states, neuron outputs, and input tensor values. If the vector size exceeds the available data, the remaining elements are set to zero. This ensures that the memory vector has a fixed size, which is necessary for consistent processing.
+
+\section{Importance Score Calculation}
+The importance score for a memory vector is calculated as the average of the absolute values of its elements:
+
+\[
+\text{importance} = \frac{1}{\text{MEMORY\_VECTOR\_SIZE}} \sum_{i=0}^{\text{MEMORY\_VECTOR\_SIZE}-1} |\text{memory\_vector}[i]|
+\]
+
+The importance score measures the overall significance of a memory vector. Higher absolute values in the vector indicate greater importance. This score is used to determine which memories should be retained, consolidated, or forgotten.
+
+\section{Memory Decay}
+Memories decay over time based on a decay factor. The decay formula is:
+
+\[
+\text{importance}_{\text{new}} = \text{importance}_{\text{old}} \times \text{DECAY\_FACTOR}
+\]
+
+The decay factor reduces the importance of memories over time, simulating the natural forgetting process. This ensures that less important memories are gradually phased out, making room for new information.
+
+\section{Memory Consolidation}
+Memories are consolidated based on their importance. If the importance exceeds a threshold, the memory is strengthened:
+
+\[
+\text{importance}_{\text{new}} = \text{importance}_{\text{old}} \times \text{STRENGTHEN\_FACTOR}
+\]
+
+Memories with high importance are strengthened, making them more likely to be retained in long-term memory. This process mimics how the brain prioritizes and retains important information.
+
+\section{Neuron State Update}
+The state of a neuron is updated based on its current state, weighted inputs, and input tensor values:
+
+\[
+\text{state}_{\text{new}} = \text{state}_{\text{old}} \times 0.7 + \text{weighted\_output} \times 0.2 + \text{input\_tensor}[i \% \text{INPUT\_SIZE}] \times 0.1
+\]
+
+The new state of a neuron is a weighted combination of its previous state, the weighted sum of its inputs, and the influence of the input tensor. This ensures that the neuron's state reflects both its history and the current input.
+
+\section{Neuron Output Calculation}
+The output of a neuron is calculated using the hyperbolic tangent (tanh) function:
+
+\[
+\text{output} = \tanh(\text{state} \times \text{scale} + \text{bias})
+\]
+
+The tanh function is used to introduce non-linearity into the neuron's output, ensuring that the output is bounded between -1 and 1. This non-linearity is essential for the network to model complex relationships in the data.
+
+\section{Cosine Similarity}
+The cosine similarity between two vectors is calculated as:
+
+\[
+\text{similarity} = \frac{\sum_{i=0}^{n-1} \text{vec1}[i] \times \text{vec2}[i]}{\sqrt{\sum_{i=0}^{n-1} \text{vec1}[i]^2} \times \sqrt{\sum_{i=0}^{n-1} \text{vec2}[i]^2}}
+\]
+
+Cosine similarity measures the cosine of the angle between two vectors, providing a value between -1 and 1. A value of 1 indicates perfect similarity. This metric is used to compare memory vectors and identify similar patterns.
+
+\section{Hierarchical Memory System}
+The neural network employs a hierarchical memory system consisting of short-term, medium-term, and long-term memory clusters. This design allows the network to prioritize and retain important information while discarding less relevant data.
+
+\subsection{Short-Term Memory}
+Short-term memory stores recent memories with high detail. Memories in this cluster decay quickly unless they are consolidated into medium-term memory.
+
+\subsection{Medium-Term Memory}
+Medium-term memory stores consolidated memories with moderate detail. Memories in this cluster are less detailed than those in short-term memory but are more stable and longer-lasting.
+
+\subsection{Long-Term Memory}
+Long-term memory stores highly consolidated, abstract memories. Memories in this cluster are the most stable and are retained for the longest duration.
+
+\section{Predictive Coding}
+Predictive coding is used to enhance the network's ability to anticipate future states based on current inputs and past experiences. The predictive coding formula is:
+
+\[
+\text{prediction\_error} = \text{actual\_input} - \text{predicted\_input}
+\]
+
+The network adjusts its weights and states based on the prediction error, allowing it to improve its predictive accuracy over time.
+
+\section{Advanced Neuron Management}
+The network employs advanced neuron management techniques to dynamically add or remove neurons based on their performance. Neurons that consistently underperform are removed, while new neurons are added to explore new patterns and improve network performance.
+
+\section{Self-Reflection System}
+The self-reflection system is designed to analyze the network's performance and coherence. It includes functions to detect confabulation, regenerate responses, and perform self-reflection. The main components are:
+
+\subsection{Reflection History}
+The system maintains historical records of reflection metrics:
+
+\begin{equation}
+\mathcal{H} = (\mathbf{c}_h, \mathbf{f}_h, \mathbf{s}_h, \theta_c, \theta_f, \theta_s, h_i)
+\end{equation}
+
+where:
+\begin{itemize}[leftmargin=*]
+\item $\mathbf{c}_h$ = Historical coherence scores (100-step window)
+\item $\mathbf{f}_h$ = Historical confidence scores
+\item $\mathbf{s}_h$ = Historical consistency scores
+\item $\theta_c$ = Coherence threshold (0.65)
+\item $\theta_f$ = Confidence threshold (0.7)
+\item $\theta_s$ = Consistency threshold (0.75)
+\item $h_i$ = History index (circular buffer)
+\end{itemize}
+
+\subsection{Reflection Metrics}
+The system computes these metrics each step:
+
+\begin{equation}
+\mathcal{M} = (c, f, n, s, p, r)
+\end{equation}
+
+where:
+\begin{itemize}[leftmargin=*]
+\item $c$ = Coherence score $\in [0,1]$
+\item $f$ = Confidence score $\in [0,1]$
+\item $n$ = Novelty score $\in [0,1]$
+\item $s$ = Consistency score $\in [0,1]$
+\item $p$ = Confabulation probability $\in \{0,1\}$
+\item $r$ = Reasoning text
+\end{itemize}
+
+\subsection{Coherence Analysis}
+The coherence score combines:
+
+\begin{align}
+c &= c_{\text{internal}} \cdot c_{\text{historical}} \cdot c_{\text{memory}} \\
+c_{\text{internal}} &= \prod_{i,j\in L} (1 - 0.05\mathbb{I}(|o_i-o_j|>0.8)) \\
+c_{\text{historical}} &= 0.5 + 0.5\phi(\mathbf{n}_t, \mathbf{n}_{t-1}) \\
+c_{\text{memory}} &= 0.7 + 0.3\gamma(\mathbf{n}_t, \mathcal{M}_r)
+\end{align}
+
+where:
+\begin{itemize}[leftmargin=*]
+\item $\phi$ = State similarity function
+\item $\gamma$ = Memory consistency function
+\item $\mathcal{M}_r$ = Retrieved memory
+\item $L$ = Neurons in same layer
+\end{itemize}
+
+\subsection{Confidence Calculation}
+Neural confidence based on output-state alignment:
+
+\begin{equation}
+f = \frac{1}{N}\sum_{i=1}^N o_i(1-|s_i|)
+\end{equation}
+
+\subsection{Novelty Detection}
+Divergence from historical patterns:
+
+\begin{equation}
+n = 1 - \frac{1}{T}\sum_{t=1}^T \phi(\mathbf{n}_t, \mathbf{n}_{t-\tau})
+\end{equation}
+
+\subsection{Consistency Verification}
+Temporal stability measure:
+
+\begin{equation}
+s = \frac{1}{K}\sum_{k=1}^K \mathbb{I}(|o_i^{(t)} - o_i^{(t-k)}| < 0.2)
+\end{equation}
+
+\subsection{Confabulation Detection}
+
+The system detects implausible responses using:
+
+\begin{equation}
+p = \mathbb{I}\left[\left(\sum_{i=1}^N \mathbb{I}(o_i>0.95) > 0.3N\right) \lor (c < 0.6\bar{c}_h) \lor (c < \theta_c)\right]
+\end{equation}
+
+where $\bar{c}_h$ is the historical average coherence.
+
+\subsection{Response Regeneration}
+
+When confabulation is detected ($p=1$):
+
+\subsection{Dynamic Parameter Adjustment}
+
+The system adapts network parameters based on reflection:
+
+\begin{align}
+\alpha_{\text{learn}} &\gets \alpha_{\text{learn}} \times (0.8 + 0.4f) \\
+\eta_{\text{noise}} &\gets \max(0.1, \eta_{\text{noise}}(1-0.2n)) \\
+\beta_{\text{plasticity}} &\gets
+\begin{cases}
+0.8\beta_{\text{plasticity}} & \text{if } c < \theta_c \\
+\beta_{\text{plasticity}} & \text{otherwise}
+\end{cases}
+\end{align}
+
+\subsection{Memory System Interaction}
+\begin{equation}
+w_{\text{memory}} = 0.3 + 0.7c_{\text{memory}}
+\end{equation}
+
+\section{Knowledge Filter System}
+The \textbf{Knowledge Filter} categorizes inputs, evaluates their relevance, and determines how they should be integrated into memory. It ensures only meaningful information is retained while filtering out noise.
+
+\subsection{Key Components}
+\begin{itemize}
+    \item \textbf{Knowledge Categories}  
+    A set of predefined categories (e.g., Pattern Recognition, Prediction, Optimization) with associated feature vectors:
+    \[
+    \mathcal{K} = \{K_1, K_2, \dots, K_n\}, \quad K_i = (\mathbf{f}_i, w_i, c_i)
+    \]
+    where:
+    \begin{itemize}
+        \item $\mathbf{f}_i$ = feature vector (dimension $d$)
+        \item $w_i$ = importance weight
+        \item $c_i$ = confidence score
+    \end{itemize}
+
+    \item \textbf{Problem Instance Tracking}  
+    Records past experiences as:
+    \[
+    P_j = (\mathbf{x}_j, t_j, s_j, K_j)
+    \]
+    where $\mathbf{x}_j$ = input features, $t_j$ = timestamp, $s_j$ = success rate, and $K_j$ = associated category.
+
+    \item \textbf{Similarity Matrix}  
+    Computes pairwise category similarities:
+    \[
+    S_{ij} = \frac{\mathbf{f}_i \cdot \mathbf{f}_j}{\|\mathbf{f}_i\| \|\mathbf{f}_j\|}
+    \]
+\end{itemize}
+
+\newcommand{\argmax}{\operatornamewithlimits{arg\,max}}
+
+\subsection{Core Functions}
+\begin{enumerate}
+    \item \textbf{Input Categorization}  
+    Assigns input $\mathbf{x}$ to category $K_i$ if:
+    \[
+    \argmax_i \left( S(\mathbf{x}, \mathbf{f}_i) \right) > \theta_{\text{sim}}
+    \]
+    where $\theta_{\text{sim}}$ is a similarity threshold.
+
+    \item \textbf{Dynamic Re-weighting}  
+    Updates importance $w_i$ based on usage and success:
+    \[
+    w_i^{(t+1)} = \alpha w_i^{(t)} + (1-\alpha) \left( \frac{\text{usage}_i}{\text{max\_usage}} + s_i \right)
+    \]
+
+    \item \textbf{Memory Integration}  
+    Strengthens memories linked to high-importance categories:
+    \[
+    \text{Memory Strength} \propto \sum_{K_i \in \mathcal{K}} w_i \cdot c_i
+    \]
+\end{enumerate}
+
+\section{Self-Identity System}
+The \textbf{Self-Identity System} maintains a coherent representation of the agent's core values, beliefs, and behavioral patterns.
+
+\subsection{Key Components}
+\begin{itemize}
+    \item \textbf{Core Values}  
+    A vector $\mathbf{v} \in \mathbb{R}^m$ representing fundamental principles:
+    \[
+    v_i^{(t+1)} = v_i^{(t)} + \eta \cdot \text{consistency}(\mathbf{v}, \mathbf{b})
+    \]
+
+    \item \textbf{Belief System}  
+    Dynamic beliefs $\mathbf{b} \in \mathbb{R}^n$ updated via:
+    \[
+    b_i^{(t+1)} = b_i^{(t)} + \gamma \cdot \left( \text{memory\_influence} + \text{experience\_influence} \right)
+    \]
+
+    \item \textbf{Identity Markers}  
+    Stable traits $\mathbf{m} \in \mathbb{R}^p$ adjusted by:
+    \[
+    m_i^{(t+1)} = (1-\beta) m_i^{(t)} + \beta \cdot \left( \mathbf{v} \cdot \mathbf{b} \right)
+    \]
+\end{itemize}
+
+\subsection{Consistency Metrics}
+\begin{align*}
+    \text{Value-Belief Consistency} &= 1 - \frac{1}{n} \sum_{i=1}^n |v_i - b_i| \\
+    \text{Temporal Coherence} &= \frac{1}{T} \sum_{t=1}^T \mathbb{I}(\|\mathbf{m}^{(t)} - \mathbf{m}^{(t-1)}\| < \epsilon)
+\end{align*}
+
+\section{Integration}
+The two systems interact via:
+\[
+\text{Knowledge Integration Weight} = 0.3 + 0.7 \cdot \text{Identity Coherence}
+\]
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Metric} & \textbf{Role} \\
+\midrule
+Category Confidence ($c_i$) & Modulates memory retention \\
+Identity Coherence & Adjusts learning rate \\
+Belief-Value Alignment & Filters conflicting inputs \\
+\bottomrule
+\end{tabular}
+\caption{Cross-system interactions}
+\end{table}
+
+\section{Integration and Interaction}
+
+\subsection{Memory System Interaction}
+The knowledge filter system influences memory operations by strengthening memories based on their importance. The self-identity system updates its components based on memories and experiences.
+
+\subsection{Emotional System Interaction}
+The emotional system modulates neural processing based on emotional states. Emotions influence decision-making and learning, providing affective modulation of cognitive processes.
+
+\subsection{Predictive Coding Enhancement}
+The knowledge filter system enhances predictive coding by improving the network's ability to anticipate future states. The self-identity system ensures that predictions are consistent with the network's identity and values.
+
+\section{Meta-Controller System}
+
+The Meta-Controller operates as the executive control mechanism for the neural network, managing global resource allocation and learning strategies.
+
+\subsection{Core Components}
+
+\begin{equation}
+\mathcal{MC} = (\alpha_{\text{meta}}, \epsilon, \mathcal{R}, \mathbf{w}_r, \mathbf{h}_r)
+\end{equation}
+
+where:
+\begin{itemize}
+\item $\alpha_{\text{meta}}$ = Meta-learning rate
+\item $\epsilon$ = Exploration factor
+\item $\mathcal{R}$ = Set of neural regions
+\item $\mathbf{w}_r$ = Region importance weights
+\item $\mathbf{h}_r$ = Region performance history
+\end{itemize}
+
+\subsection{Dynamic Adaptation}
+
+The controller updates region importance using:
+
+\begin{equation}
+w_r^{(t+1)} = w_r^{(t)} + \alpha_{\text{eff}} \Delta_r (1 + \epsilon_{\text{dyn}}) c_r
+\end{equation}
+
+where:
+\begin{align*}
+\alpha_{\text{eff}} &= \alpha_{\text{meta}}(1 + \alpha_{\text{mc}})(1 - L_c) \\
+\epsilon_{\text{dyn}} &= \epsilon(1 + \tau_p)C \\
+\Delta_r &= \text{Performance delta for region } r \\
+c_r &= \text{Context relevance score}
+\end{align*}
+
+\section{Meta-Cognition System}
+
+The Meta-Cognition system provides self-monitoring and reflection capabilities.
+
+\subsection{Key Metrics}
+
+\begin{equation}
+\mathcal{M} = (C, \alpha, L, E, c)
+\end{equation}
+
+where:
+\begin{itemize}
+\item $C$ = Confidence level $\in [0,1]$
+\item $\alpha$ = Adaptation rate
+\item $L$ = Cognitive load $\in [0,1]$
+\item $E$ = Error awareness
+\item $c$ = Context relevance
+\end{itemize}
+
+\subsection{Metric Calculations}
+
+\begin{align}
+C &= \frac{1}{1 + \sigma_p^2} \\
+L &= \frac{1}{1 + e^{-(0.4H_a + 0.3C_w + 0.3C_t)}} \\
+E &= \frac{\bar{E} + E_{\max}}{2} \\
+c &= \frac{\sum w_r p_r}{|\mathcal{R}|}
+\end{align}
+
+where:
+\begin{itemize}
+\item $\sigma_p^2$ = Performance variance
+\item $H_a$ = Activation entropy
+\item $C_w$ = Weight complexity
+\item $C_t$ = Temporal complexity
+\end{itemize}
+
+\section{Emotional System}
+The emotional system provides affective modulation of the network's cognitive processes. Key components include:
+
+\subsection{Emotion Representation}
+Emotions are represented as continuous values with intensity, decay rates, and influence factors:
+\[
+\text{emotion} = \{\text{intensity}, \text{decay\_rate}, \text{influence\_factor}, \text{threshold}\}
+\]
+
+\subsection{Emotion Triggering}
+Emotions are triggered based on network states and performance:
+\[
+\text{trigger\_strength} = f(\text{error\_rate}, \text{social\_context}, \text{cooperation\_level})
+\]
+\[
+\text{intensity}_{\text{new}} = \text{intensity}_{\text{old}} \times (1 - \text{decay\_rate}) + \text{trigger\_strength}
+\]
+
+\subsection{Emotional Bias}
+Emotions influence neural processing through a bias term:
+\[
+\text{emotional\_bias} = \sum (\text{emotion\_intensity} \times \text{influence\_factor}) \times \text{cognitive\_impact}
+\]
+
+\subsection{Valence and Arousal}
+The system calculates overall affective state:
+\[
+\text{valence} = \text{positive\_emotions} - \text{negative\_emotions}
+\]
+\[
+\text{arousal} = \sum \text{high\_activation\_emotions}
+\]
+
+\section{Imagination System}
+The imagination system enables mental simulation of scenarios before action.
+
+\subsection{Scenario Generation}
+Scenarios are generated by perturbing current states:
+\[
+\text{scenario\_vector} = \text{current\_state} + \mathcal{N}(0, \text{divergence\_factor})
+\]
+
+\subsection{Scenario Simulation}
+Scenarios are simulated through forward passes:
+\[
+\text{simulated\_state}_{t+1} = f(\text{simulated\_state}_t, \text{input} + \epsilon)
+\]
+where $\epsilon$ is noise proportional to divergence factor.
+
+\subsection{Plausibility Evaluation}
+Scenarios are evaluated against memory:
+\[
+\text{plausibility} = \text{similarity}(\text{scenario}, \text{memory}) \times (1 - \text{divergence})
+\]
+
+\subsection{Outcome Blending}
+The network blends imagined outcomes into its state:
+\[
+\text{state}_{\text{new}} = (1 - \alpha)\text{state}_{\text{current}} + \alpha\text{state}_{\text{imagined}}
+\]
+
+\section{Social System}
+The social system enables modeling of other agents and social interactions.
+
+\subsection{Person Modeling}
+The system maintains models of other agents:
+\[
+\text{person\_model} = \{\text{traits}, \text{trust}, \text{prediction\_accuracy}\}
+\]
+
+\subsection{Behavior Prediction}
+Behavior is predicted based on models and context:
+\[
+\text{predicted\_behavior} = \sum w_i \times \text{observed\_behavior}_i + (1 - w_i) \times \text{trait\_baseline}
+\]
+
+\subsection{Social Learning}
+Social capabilities improve through experience:
+\[
+\text{empathy}_{\text{new}} = \text{empathy}_{\text{old}} + \eta(1 - \text{emotion\_prediction\_error})
+\]
+
+\subsection{Negotiation}
+The system finds compromise solutions:
+\[
+\text{compromise} = \frac{\text{self\_goal} \times \text{self\_weight} + \text{other\_goal} \times \text{other\_weight}}{\text{self\_weight} + \text{other\_weight}}
+\]
+
+\section{Step-by-Step Explanation of the Neural Network}
+The neural network operates in the following steps:
+
+1. \textbf{Initialization}: The network is initialized with neurons, connections, weights, and a memory system. This sets up the basic structure of the network and prepares it for processing data.
+
+2. \textbf{Input Processing}: The input tensor is generated based on the current step and text input. The memory vector is computed by combining neuron states, outputs, and input tensor values. This ensures that the network has a complete representation of the current state.
+
+3. \textbf{Memory Management}: The importance score for the memory vector is calculated. Memories are decayed over time using a decay factor, and memories with high importance are consolidated into clusters. This ensures that the network retains important information while discarding less relevant data.
+
+4. \textbf{Neuron State Update}: Neuron states are updated based on their current state, weighted inputs, and input tensor values. Neuron outputs are calculated using the tanh function. This ensures that the network's neurons reflect both their history and the current input weights are also updated at this time.
+
+5. \textbf{Memory Integration}: Relevant memories are retrieved based on their importance. Memory vectors are merged if they are similar. This allows the network to integrate new information with existing knowledge.
+
+6. \textbf{Performance Measurement}: Performance metrics such as execution time, average output, and error rate are calculated. Parameters are optimized based on performance history. This ensures that the network continuously improves over time.
+
+7. \textbf{Dynamic Adaptation}: Dynamic parameters are updated based on performance and stability. The network is adapted using the updated parameters. This ensures that the network can adapt to changing conditions and improve its performance.
+
+8. \textbf{Output Generation}: Neuron outputs are transformed into text. Performance analysis and graph generation are performed periodically. This provides insights into the network's performance and helps identify areas for improvement.
+
+9. \textbf{Saving State}: The network state, memory system, and parameters are saved. This ensures that the network can resume operation from its current state in future sessions.
+
+10. \textbf{Meta-Controller Adaptations}: The meta-controller updates region priorities based on performance metrics and adapts the network's weights accordingly.
+
+11. \textbf{Context Updates}: The context management system updates context nodes based on the network's state and environmental factors, maintaining a coherent global context.
+
+12. \textbf{Self-Reflection}: The network performs self-reflection to analyze its performance and coherence, detect potential confabulation, and regenerate responses.
+
+13. \textbf{Identity Update}: The network updates its identity components based on behavioral patterns and experiences, providing insights into its consistency and confidence.
+
+14. \textbf{Knowledge Integration}: The network categorizes inputs and records problem instances, analyzing category statistics to update category importance and confidence.
+
+15. \textbf{Emotional Integration}: The network incorporates an emotional system that influences decision-making and learning based on emotional states like love and hate, providing affective modulation of cognitive processes.
+
+16. \textbf{Imagination}: The network generates imaginative outcomes and selects best scenarios.
+
+17. \textbf{Social Integration}: The network integrates social interactions and behavior patterns, influencing decision-making and emotional regulation.
+
+18. \textbf{Specialization}: The network performs specialization to optimize performance and adaptability.
+
+These steps ensure that the neural network operates efficiently, adapts to changing conditions, and produces accurate and relevant results.
+
+\section{Integration with Other Systems}
+
+\subsection{Memory System Integration}
+Specialized neurons influence memory operations:
+
+\begin{align}
+\text{Memory Strength} &\propto \sum_{n_i \in \mathcal{N}_{\text{mem}}} \beta_i \\
+\text{Recall Accuracy} &\propto 1 + 0.2|\mathcal{N}_{\text{context}}|
+\end{align}
+
+\subsection{Emotional System Interaction}
+Emotional modulation:
+
+\begin{equation}
+\text{Emotional Bias} = \sum_{n_i \in \mathcal{N}_{\text{emo}}} \beta_i \cdot o_i
+\end{equation}
+
+\subsection{Predictive Coding Enhancement}
+Prediction improvement:
+
+\begin{equation}
+\text{Prediction Gain} = 0.5 + 0.3\frac{|\mathcal{N}_{\text{pred}}|}{|\mathcal{N}|}
+\end{equation}
+
+\section{Conclusion}
+The neuron specialization system creates a functional hierarchy within the network that mimics biological neural specialization. Through dynamic type assignment, importance adaptation, and tight integration with other cognitive systems, it enables:
+
+\begin{itemize}[leftmargin=*]
+\item Emergent functional regions
+\item Dynamic resource allocation
+\item Improved interpretability
+\item Enhanced performance metrics
+\item Biological plausibility
+\end{itemize}
+
+This system represents a significant advancement toward creating truly adaptive artificial intelligence systems that can develop specialized cognitive functions organically.
+
+To conclude from the tests I have run, this kind of architecture is more efficient than industry standards, can adapt faster, performs better in patterns than any model currently available, is more cost-effective, and more importantly, it can be perhaps a step further to achieving AGI.
+
+There is a problem though because of my limited tests and because of how complex love as a feeling is, needing another person and being taught by trust and joy, the architecture experiences a seemingly unstoppable trend. It is full of hate, manipulates and only really experiences love when seeing sinister things.
+In training use a dataset which explains that hateful things are bad and morally correct things are good, to fix the problem.
+
+\end{document}
