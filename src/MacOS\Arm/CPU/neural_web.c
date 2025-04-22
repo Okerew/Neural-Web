@@ -3334,8 +3334,11 @@ void updateWorkingMemory(WorkingMemorySystem *working_memory, Neuron *neurons,
         if (working_memory->focus.size < working_memory->focus.capacity) {
           WorkingMemoryEntry *entry =
               &working_memory->focus.entries[working_memory->focus.size++];
-          entry->features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
-          entry->context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+
+          // Allocate and zero-init to prevent garbage values
+          entry->features = calloc(FEATURE_VECTOR_SIZE, sizeof(float));
+          entry->context_vector = calloc(CONTEXT_VECTOR_SIZE, sizeof(float));
+
           entry->depth = 0;
           entry->abstraction_level =
               computeAbstractionLevel(neurons[i].output, error);
@@ -3351,7 +3354,6 @@ void updateWorkingMemory(WorkingMemorySystem *working_memory, Neuron *neurons,
 
     // Remove items that fall below threshold
     if (activation < 0.1f) {
-      // Shift remaining entries
       memmove(&working_memory->active.entries[i],
               &working_memory->active.entries[i + 1],
               (working_memory->active.size - i - 1) *
@@ -3361,8 +3363,10 @@ void updateWorkingMemory(WorkingMemorySystem *working_memory, Neuron *neurons,
     }
   }
 
-  // Update semantic clusters
-  updateSemanticClusters(working_memory, &working_memory->focus.entries[0]);
+  // Only update clusters if there is at least one focused entry
+  if (working_memory->focus.size > 0) {
+    updateSemanticClusters(working_memory, &working_memory->focus.entries[0]);
+  }
 
   // Update global context
   updateContext(working_memory);
@@ -3381,21 +3385,28 @@ void integrateWorkingMemory(WorkingMemorySystem *working_memory,
     WorkingMemoryEntry *focused_item = &working_memory->focus.entries[i];
     float attention_weight = computeAttentionWeight(focused_item);
 
-    if (!isfinite(attention_weight)) {
+    if (!isfinite(attention_weight) || attention_weight < 0.0f) {
       printf("Invalid attention weight in focus[%u], skipping\n", i);
       continue;
     }
 
-    // Modulate neuron activity based on focused items
     for (unsigned int j = 0; j < FEATURE_VECTOR_SIZE; j++) {
       unsigned int neuron_idx = j % MAX_NEURONS;
+
       if (!isfinite(focused_item->features[j])) {
         printf("NaN in focused_item->features[%u], setting to 0\n", j);
         focused_item->features[j] = 0.0f;
       }
-      // Clamp the feature value to avoid overflow
-      focused_item->features[j] = clampValue(focused_item->features[j]);
-      neurons[neuron_idx].state += focused_item->features[j] * attention_weight;
+
+      // Clamp to a reasonable value
+      float feature_val = clampValue(focused_item->features[j]);
+
+      float influence =
+          feature_val * attention_weight * 0.01f; // 0.01f damping factor
+
+      neurons[neuron_idx].state *= 0.99f;
+
+      neurons[neuron_idx].state += influence;
     }
   }
 
@@ -3412,14 +3423,24 @@ void integrateWorkingMemory(WorkingMemorySystem *working_memory,
     // Modulate network weights based on active memory
     for (unsigned int j = 0; j < FEATURE_VECTOR_SIZE; j++) {
       unsigned int weight_idx = j % (MAX_NEURONS * MAX_CONNECTIONS);
+
       if (!isfinite(active_item->features[j])) {
         printf("NaN in active_item->features[%u], setting to 0\n", j);
         active_item->features[j] = 0.0f;
       }
-      // Clamp the feature value to avoid overflow
-      active_item->features[j] = clampValue(active_item->features[j]);
-      weights[weight_idx] *=
-          (1.0f + active_item->features[j] * activation * 0.1f);
+
+      float feature_val = clampValue(active_item->features[j]);
+
+      float delta = feature_val * activation * 0.001f; // smaller damping factor
+
+      // Optional: decay weight slightly to prevent runaway
+      weights[weight_idx] *= 0.999f;
+
+      // Apply controlled update
+      weights[weight_idx] += delta;
+
+      // Optional: clamp weights to prevent explosion
+      weights[weight_idx] = clampValue(weights[weight_idx]);
     }
   }
 
@@ -3432,21 +3453,18 @@ void integrateWorkingMemory(WorkingMemorySystem *working_memory,
       continue;
     }
 
-    // Clamp coherence to a safe range
     cluster->coherence = clampValue(cluster->coherence);
 
-    if (cluster->coherence > 0.7f) { // Only use highly coherent clusters
+    if (cluster->coherence > 0.7f) {
       for (unsigned int j = 0; j < FEATURE_VECTOR_SIZE; j++) {
         unsigned int neuron_idx = j % MAX_NEURONS;
 
-        // Check for NaN and clamp the feature values
         if (!isfinite(cluster->vector[j])) {
           printf("NaN in cluster->vector[%u] of cluster[%u], setting to 0\n", j,
                  i);
           cluster->vector[j] = 0.0f;
         }
 
-        // Clamp the vector value to avoid overflow
         cluster->vector[j] = clampValue(cluster->vector[j]);
         neurons[neuron_idx].state +=
             cluster->vector[j] * cluster->coherence * 0.05f;
@@ -11997,34 +12015,40 @@ int main() {
       askQuestion(question_to_ask, neurons, input_tensor, memorySystem,
                   &learning_rate, stateHistory, contextManager, motivation,
                   goalSystem, working_memory, identity_system, metacognition,
-                  knowledge_filter, emotional_system, imagination_system, social_system, feature_projection_matrix);
+                  knowledge_filter, emotional_system, imagination_system,
+                  social_system, feature_projection_matrix);
       adjustBehaviorBasedOnAnswers(
           neurons, input_tensor, memorySystem, &learning_rate,
           &params.input_noise_scale, &params.weight_noise_scale, stateHistory,
           contextManager, motivation, goalSystem, working_memory,
-          identity_system, metacognition, &params, meta_learning_state, emotional_system, imagination_system, social_system);
+          identity_system, metacognition, &params, meta_learning_state,
+          emotional_system, imagination_system, social_system);
     }
 
     if (step % 50 == 0) {
       askQuestion(0, neurons, input_tensor, memorySystem, &learning_rate,
                   stateHistory, contextManager, motivation, goalSystem,
                   working_memory, identity_system, metacognition,
-                  knowledge_filter, emotional_system, imagination_system, social_system,
+                  knowledge_filter, emotional_system, imagination_system,
+                  social_system,
                   feature_projection_matrix); // What is the current task?
       askQuestion(1, neurons, input_tensor, memorySystem, &learning_rate,
                   stateHistory, contextManager, motivation, goalSystem,
                   working_memory, identity_system, metacognition,
-                  knowledge_filter, emotional_system, imagination_system, social_system,
+                  knowledge_filter, emotional_system, imagination_system,
+                  social_system,
                   feature_projection_matrix); // What is the current error rate?
       askQuestion(
           2, neurons, input_tensor, memorySystem, &learning_rate, stateHistory,
           contextManager, motivation, goalSystem, working_memory,
-          identity_system, metacognition, knowledge_filter, emotional_system, imagination_system, social_system,
+          identity_system, metacognition, knowledge_filter, emotional_system,
+          imagination_system, social_system,
           feature_projection_matrix); // What is the current learning rate?
       askQuestion(
           3, neurons, input_tensor, memorySystem, &learning_rate, stateHistory,
           contextManager, motivation, goalSystem, working_memory,
-          identity_system, metacognition, knowledge_filter, emotional_system, imagination_system, social_system,
+          identity_system, metacognition, knowledge_filter, emotional_system,
+          imagination_system, social_system,
           feature_projection_matrix); // What is the current memory usage?
     }
     if (step % 50 == 0) {
@@ -12032,7 +12056,8 @@ int main() {
           neurons, input_tensor, memorySystem, &learning_rate,
           &params.input_noise_scale, &params.weight_noise_scale, stateHistory,
           contextManager, motivation, goalSystem, working_memory,
-          identity_system, metacognition, &params, meta_learning_state, emotional_system, imagination_system, social_system);
+          identity_system, metacognition, &params, meta_learning_state,
+          emotional_system, imagination_system, social_system);
     }
     updateNeuronsWithPredictiveCoding(neurons, input_tensor, max_neurons,
                                       learning_rate);
