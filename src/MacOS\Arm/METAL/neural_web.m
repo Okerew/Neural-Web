@@ -12402,6 +12402,55 @@ int main() {
                                stateHistory, step);
     }
 
+    if (step % 15 == 0) {
+      // Generate search query
+      char *query = generateSearchQuery(neurons, max_neurons);
+      if (query) {
+        printf("\nPerforming web search: \"%s\"\n", query);
+
+        // Perform web search
+        SearchResults *results = performWebSearch(query);
+
+        if (results && results->count > 0) {
+          printf("Found %d search results\n", results->count);
+
+          // Convert search results to neural network input
+          float *search_input_tensor =
+              (float *)malloc(max_neurons * sizeof(float));
+          convertSearchResultsToInput(results, search_input_tensor,
+                                      max_neurons);
+
+          // Store search results in memory system with metadata
+          storeSearchResultsWithMetadata(memorySystem, working_memory, results,
+                                         query, feature_projection_matrix);
+
+          // Use search results to influence decision making
+          float confidence_boost = enhanceDecisionMakingWithSearch(
+              neurons, results, feedback.context_weights, max_neurons);
+          printf("Decision confidence boost from search: %.2f\n",
+                 confidence_boost);
+
+          // Blend search input with current input
+          for (int i = 0; i < max_neurons; i++) {
+            input_tensor[i] =
+                input_tensor[i] * 0.7f + search_input_tensor[i] * 0.3f;
+          }
+
+          free(search_input_tensor);
+          freeSearchResults(results);
+        } else {
+          printf("No search results found\n");
+        }
+
+        free(query);
+      }
+    }
+
+    if (step % 15 == 0) {
+      integrateWebSearch(neurons, input_tensor, max_neurons, memorySystem,
+                         step);
+    }
+
     for (int i = 0; i < 5; i++) {
       recordDecisionOutcome(moralCompass, i, decision_vector[i] >= 0.7f);
     }
