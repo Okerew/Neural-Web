@@ -8368,22 +8368,24 @@ void adjustBehaviorBasedOnAnswers(
            dynamicParams->plasticity);
   }
 
-  if (memorySystem->size > memorySystem->capacity * 0.8) {
-    printf("Memory usage is high (%.2f%%). Consolidating memories.\n",
-           (float)memorySystem->size / memorySystem->capacity * 100.0f);
-    consolidateMemory(memorySystem); // Consolidate memories
+  float usage_ratio = (float)memorySystem->size / memorySystem->capacity;
 
-    // Also adjust consolidation threshold
+  if (usage_ratio >= 0.8f && usage_ratio < 0.95f) {
+    printf("Memory usage is high (%.2f%%). Consolidating memories.\n",
+           usage_ratio * 100.0f);
+    consolidateMemory(memorySystem);
+
     memorySystem->hierarchy.consolidation_threshold *= 0.9f;
     printf("Lowered consolidation threshold to %.2f to encourage memory "
            "transfer\n",
            memorySystem->hierarchy.consolidation_threshold);
-  } else if (memorySystem->size < memorySystem->capacity * 0.2) {
-    printf("Memory usage is low (%.2f%%). Expanding memory capacity.\n",
-           (float)memorySystem->size / memorySystem->capacity * 100.0f);
-    expandMemoryCapacity(memorySystem); // Expand memory capacity
 
-    // Reset consolidation threshold
+  } else if (usage_ratio >= 0.95f) {
+    printf(
+        "Memory usage is **critical** (%.2f%%). Expanding memory capacity.\n",
+        usage_ratio * 100.0f);
+    expandMemoryCapacity(memorySystem);
+
     memorySystem->hierarchy.consolidation_threshold = 0.5f;
     printf("Reset consolidation threshold to %.2f\n",
            memorySystem->hierarchy.consolidation_threshold);
