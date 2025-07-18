@@ -1350,4 +1350,6 @@ In training use a dataset which explains that hateful things are bad and morally
 
 If you want you can also try to integrate the quantum functionality in cases using pybindings.
 
-The code isn't the best implementation at all. It's just a prototype.
+Only unix systems.
+
+The code isn't the best implementation at all. It's just a prototype. Also because i programm on macOS the native metal version is better.
