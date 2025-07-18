@@ -11198,6 +11198,423 @@ void freeSpecializationSystem(NeuronSpecializationSystem *system) {
   }
 }
 
+// Save and Load functions for MetaController
+void saveMetaController(MetaController *controller, const char *filename) {
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    printf("Error opening MetaController file for writing\n");
+    return;
+  }
+
+  fwrite(&controller->meta_learning_rate, sizeof(float), 1, fp);
+  fwrite(&controller->exploration_factor, sizeof(float), 1, fp);
+  fwrite(&controller->num_regions, sizeof(int), 1, fp);
+
+  fwrite(controller->region_importance_scores, sizeof(float),
+         controller->num_regions, fp);
+  fwrite(controller->learning_efficiency_history, sizeof(float),
+         controller->num_regions, fp);
+
+  fclose(fp);
+}
+
+MetaController *loadMetaController(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Error opening MetaController file for reading\n");
+    return NULL;
+  }
+
+  float meta_learning_rate, exploration_factor;
+  int num_regions;
+
+  fread(&meta_learning_rate, sizeof(float), 1, fp);
+  fread(&exploration_factor, sizeof(float), 1, fp);
+  fread(&num_regions, sizeof(int), 1, fp);
+
+  MetaController *controller = initializeMetaController(num_regions);
+  if (controller == NULL) {
+    fclose(fp);
+    return NULL;
+  }
+
+  controller->meta_learning_rate = meta_learning_rate;
+  controller->exploration_factor = exploration_factor;
+
+  fread(controller->region_importance_scores, sizeof(float), num_regions, fp);
+  fread(controller->learning_efficiency_history, sizeof(float), num_regions,
+        fp);
+
+  fclose(fp);
+  return controller;
+}
+
+// Save and Load functions for IntrinsicMotivation
+void saveIntrinsicMotivation(IntrinsicMotivation *motivation,
+                             const char *filename) {
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    printf("Error opening IntrinsicMotivation file for writing\n");
+    return;
+  }
+
+  fwrite(motivation, sizeof(IntrinsicMotivation), 1, fp);
+
+  fclose(fp);
+}
+
+IntrinsicMotivation *loadIntrinsicMotivation(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Error opening IntrinsicMotivation file for reading\n");
+    return NULL;
+  }
+
+  IntrinsicMotivation *motivation = initializeMotivationSystem();
+  if (motivation == NULL) {
+    fclose(fp);
+    return NULL;
+  }
+
+  fread(motivation, sizeof(IntrinsicMotivation), 1, fp);
+
+  fclose(fp);
+  return motivation;
+}
+
+// Save and Load functions for NetworkPerformanceMetrics
+void saveNetworkPerformanceMetrics(NetworkPerformanceMetrics *metrics,
+                                   const char *filename) {
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    printf("Error opening NetworkPerformanceMetrics file for writing\n");
+    return;
+  }
+
+  fwrite(&metrics->num_regions, sizeof(int), 1, fp);
+  fwrite(metrics->region_performance_scores, sizeof(float),
+         metrics->num_regions, fp);
+  fwrite(metrics->region_error_rates, sizeof(float), metrics->num_regions, fp);
+  fwrite(metrics->region_output_variance, sizeof(float), metrics->num_regions,
+         fp);
+
+  fclose(fp);
+}
+
+NetworkPerformanceMetrics *loadNetworkPerformanceMetrics(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Error opening NetworkPerformanceMetrics file for reading\n");
+    return NULL;
+  }
+
+  int num_regions;
+  fread(&num_regions, sizeof(int), 1, fp);
+
+  NetworkPerformanceMetrics *metrics =
+      initializePerformanceMetrics(num_regions);
+  if (metrics == NULL) {
+    fclose(fp);
+    return NULL;
+  }
+
+  fread(metrics->region_performance_scores, sizeof(float), num_regions, fp);
+  fread(metrics->region_error_rates, sizeof(float), num_regions, fp);
+  fread(metrics->region_output_variance, sizeof(float), num_regions, fp);
+
+  fclose(fp);
+  return metrics;
+}
+
+// Save and Load functions for ReflectionParameters
+void saveReflectionParameters(ReflectionParameters *params,
+                              const char *filename) {
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    printf("Error opening ReflectionParameters file for writing\n");
+    return;
+  }
+
+  fwrite(params, sizeof(ReflectionParameters), 1, fp);
+
+  fclose(fp);
+}
+
+ReflectionParameters *loadReflectionParameters(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Error opening ReflectionParameters file for reading\n");
+    return NULL;
+  }
+
+  ReflectionParameters *params = initializeReflectionParameters();
+  if (params == NULL) {
+    fclose(fp);
+    return NULL;
+  }
+
+  fread(params, sizeof(ReflectionParameters), 1, fp);
+
+  fclose(fp);
+  return params;
+}
+
+// Save and Load functions for SelfIdentitySystem
+void saveSelfIdentitySystem(SelfIdentitySystem *identity,
+                            const char *filename) {
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    printf("Error opening SelfIdentitySystem file for writing\n");
+    return;
+  }
+
+  // Write scalar values
+  fwrite(&identity->num_core_values, sizeof(uint32_t), 1, fp);
+  fwrite(&identity->num_beliefs, sizeof(uint32_t), 1, fp);
+  fwrite(&identity->num_markers, sizeof(uint32_t), 1, fp);
+  fwrite(&identity->history_size, sizeof(uint32_t), 1, fp);
+  fwrite(&identity->pattern_size, sizeof(uint32_t), 1, fp);
+  fwrite(&identity->consistency_score, sizeof(float), 1, fp);
+  fwrite(&identity->adaptation_rate, sizeof(float), 1, fp);
+  fwrite(&identity->confidence_level, sizeof(float), 1, fp);
+  fwrite(&identity->coherence_window, sizeof(uint32_t), 1, fp);
+
+  // Write verification structure
+  fwrite(&identity->verification.threshold, sizeof(float), 1, fp);
+  fwrite(&identity->verification.state_size, sizeof(uint32_t), 1, fp);
+
+  // Write arrays
+  fwrite(identity->core_values, sizeof(float), identity->num_core_values, fp);
+  fwrite(identity->belief_system, sizeof(float), identity->num_beliefs, fp);
+  fwrite(identity->identity_markers, sizeof(float), identity->num_markers, fp);
+  fwrite(identity->experience_history, sizeof(float), identity->history_size,
+         fp);
+  fwrite(identity->behavioral_patterns, sizeof(float), identity->pattern_size,
+         fp);
+  fwrite(identity->temporal_coherence, sizeof(float),
+         identity->coherence_window, fp);
+  fwrite(identity->verification.reference_state, sizeof(float),
+         identity->verification.state_size, fp);
+
+  fclose(fp);
+}
+
+SelfIdentitySystem *loadSelfIdentitySystem(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Error opening SelfIdentitySystem file for reading\n");
+    return NULL;
+  }
+
+  uint32_t num_core_values, num_beliefs, num_markers, history_size,
+      pattern_size;
+
+  fread(&num_core_values, sizeof(uint32_t), 1, fp);
+  fread(&num_beliefs, sizeof(uint32_t), 1, fp);
+  fread(&num_markers, sizeof(uint32_t), 1, fp);
+  fread(&history_size, sizeof(uint32_t), 1, fp);
+  fread(&pattern_size, sizeof(uint32_t), 1, fp);
+
+  SelfIdentitySystem *identity = initializeSelfIdentity(
+      num_core_values, num_beliefs, num_markers, history_size, pattern_size);
+  if (identity == NULL) {
+    fclose(fp);
+    return NULL;
+  }
+
+  // Read scalar values
+  fread(&identity->consistency_score, sizeof(float), 1, fp);
+  fread(&identity->adaptation_rate, sizeof(float), 1, fp);
+  fread(&identity->confidence_level, sizeof(float), 1, fp);
+  fread(&identity->coherence_window, sizeof(uint32_t), 1, fp);
+
+  // Read verification structure
+  fread(&identity->verification.threshold, sizeof(float), 1, fp);
+  fread(&identity->verification.state_size, sizeof(uint32_t), 1, fp);
+
+  // Read arrays
+  fread(identity->core_values, sizeof(float), identity->num_core_values, fp);
+  fread(identity->belief_system, sizeof(float), identity->num_beliefs, fp);
+  fread(identity->identity_markers, sizeof(float), identity->num_markers, fp);
+  fread(identity->experience_history, sizeof(float), identity->history_size,
+        fp);
+  fread(identity->behavioral_patterns, sizeof(float), identity->pattern_size,
+        fp);
+  fread(identity->temporal_coherence, sizeof(float), identity->coherence_window,
+        fp);
+  fread(identity->verification.reference_state, sizeof(float),
+        identity->verification.state_size, fp);
+
+  fclose(fp);
+  return identity;
+}
+
+// Save and Load functions for KnowledgeFilter
+void saveKnowledgeFilter(KnowledgeFilter *filter, const char *filename) {
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    printf("Error opening KnowledgeFilter file for writing\n");
+    return;
+  }
+
+  fwrite(&filter->num_categories, sizeof(uint32_t), 1, fp);
+  fwrite(&filter->capacity, sizeof(uint32_t), 1, fp);
+  fwrite(&filter->num_problems, sizeof(uint32_t), 1, fp);
+  fwrite(&filter->problem_capacity, sizeof(uint32_t), 1, fp);
+
+  // Write categories (note: this assumes KnowledgeCategory has a fixed size)
+  fwrite(filter->categories, sizeof(KnowledgeCategory), filter->num_categories,
+         fp);
+
+  // Write problem history
+  fwrite(filter->problem_history, sizeof(ProblemInstance), filter->num_problems,
+         fp);
+
+  // Write similarity matrix
+  fwrite(filter->category_similarity_matrix, sizeof(float),
+         filter->num_categories * filter->num_categories, fp);
+
+  fclose(fp);
+}
+
+KnowledgeFilter *loadKnowledgeFilter(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Error opening KnowledgeFilter file for reading\n");
+    return NULL;
+  }
+
+  uint32_t capacity;
+  fread(&capacity, sizeof(uint32_t), 1, fp);
+
+  // Skip num_categories, we'll read it after initialization
+  fseek(fp, 0, SEEK_SET);
+
+  KnowledgeFilter *filter = initializeKnowledgeFilter(capacity);
+  if (filter == NULL) {
+    fclose(fp);
+    return NULL;
+  }
+
+  fread(&filter->num_categories, sizeof(uint32_t), 1, fp);
+  fread(&filter->capacity, sizeof(uint32_t), 1, fp);
+  fread(&filter->num_problems, sizeof(uint32_t), 1, fp);
+  fread(&filter->problem_capacity, sizeof(uint32_t), 1, fp);
+
+  // Read categories
+  fread(filter->categories, sizeof(KnowledgeCategory), filter->num_categories,
+        fp);
+
+  // Read problem history
+  fread(filter->problem_history, sizeof(ProblemInstance), filter->num_problems,
+        fp);
+
+  // Read similarity matrix
+  fread(filter->category_similarity_matrix, sizeof(float),
+        filter->num_categories * filter->num_categories, fp);
+
+  fclose(fp);
+  return filter;
+}
+
+// Save and Load functions for MetacognitionMetrics
+void saveMetacognitionMetrics(MetacognitionMetrics *metrics,
+                              const char *filename) {
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    printf("Error opening MetacognitionMetrics file for writing\n");
+    return;
+  }
+
+  fwrite(metrics, sizeof(MetacognitionMetrics), 1, fp);
+
+  fclose(fp);
+}
+
+MetacognitionMetrics *loadMetacognitionMetrics(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Error opening MetacognitionMetrics file for reading\n");
+    return NULL;
+  }
+
+  MetacognitionMetrics *metrics = initializeMetacognitionMetrics();
+  if (metrics == NULL) {
+    fclose(fp);
+    return NULL;
+  }
+
+  fread(metrics, sizeof(MetacognitionMetrics), 1, fp);
+
+  fclose(fp);
+  return metrics;
+}
+
+// Save and Load functions for MetaLearningState
+void saveMetaLearningState(MetaLearningState *state, const char *filename) {
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    printf("Error opening MetaLearningState file for writing\n");
+    return;
+  }
+
+  fwrite(&state->learning_efficiency, sizeof(float), 1, fp);
+  fwrite(&state->exploration_rate, sizeof(float), 1, fp);
+  fwrite(&state->stability_index, sizeof(float), 1, fp);
+  fwrite(&state->current_phase, sizeof(uint32_t), 1, fp);
+
+  // Note: The size of priority_weights array is not specified in the struct,
+  // assuming it's related to the parameter passed to
+  // initializeMetaLearningState You may need to adjust this based on the actual
+  // implementation
+  fwrite(state->priority_weights, sizeof(float), 4, fp);
+
+  fclose(fp);
+}
+
+MetaLearningState *loadMetaLearningState(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Error opening MetaLearningState file for reading\n");
+    return NULL;
+  }
+
+  MetaLearningState *state = initializeMetaLearningState(4);
+  if (state == NULL) {
+    fclose(fp);
+    return NULL;
+  }
+
+  fread(&state->learning_efficiency, sizeof(float), 1, fp);
+  fread(&state->exploration_rate, sizeof(float), 1, fp);
+  fread(&state->stability_index, sizeof(float), 1, fp);
+  fread(&state->current_phase, sizeof(uint32_t), 1, fp);
+
+  fread(state->priority_weights, sizeof(float), 4, fp);
+
+  fclose(fp);
+  return state;
+}
+
+void saveAllSystems(MetaController *metaController,
+                    IntrinsicMotivation *motivation,
+                    NetworkPerformanceMetrics *performanceMetrics,
+                    ReflectionParameters *reflection_params,
+                    SelfIdentitySystem *identity_system,
+                    KnowledgeFilter *knowledge_filter,
+                    MetacognitionMetrics *metacognition,
+                    MetaLearningState *meta_learning_state,
+                    SocialSystem *social_system) {
+  saveMetaController(metaController, "metacontroller.dat");
+  saveIntrinsicMotivation(motivation, "motivation.dat");
+  saveNetworkPerformanceMetrics(performanceMetrics, "performance_metrics.dat");
+  saveReflectionParameters(reflection_params, "reflection_params.dat");
+  saveSelfIdentitySystem(identity_system, "identity_system.dat");
+  saveKnowledgeFilter(knowledge_filter, "knowledge_filter.dat");
+  saveMetacognitionMetrics(metacognition, "metacognition.dat");
+  saveMetaLearningState(meta_learning_state, "meta_learning.dat");
+}
+
 int main() {
   loadVocabularyFromFile("vocabulary.txt");
   // Try to load existing memory system
@@ -11328,38 +11745,72 @@ int main() {
   initializeEmbeddings("custom_embeddings.txt");
 
   int network_regions = 2; // Assuming 2 layers
-  MetaController *metaController = initializeMetaController(network_regions);
-  IntrinsicMotivation *motivation = initializeMotivationSystem();
-  GoalSystem *goalSystem = initializeGoalSystem(10);
+  MetaController *metaController = loadMetaController("metacontroller.dat");
+  if (metaController == NULL) {
+    metaController = initializeMetaController(2); // 2 regions
+    printf("Initialized new MetaController\n");
+  }
 
+  IntrinsicMotivation *motivation = loadIntrinsicMotivation("motivation.dat");
+  if (motivation == NULL) {
+    motivation = initializeMotivationSystem();
+    printf("Initialized new IntrinsicMotivation system\n");
+  }
+
+  NetworkPerformanceMetrics *performanceMetrics =
+      loadNetworkPerformanceMetrics("performance_metrics.dat");
+  if (performanceMetrics == NULL) {
+    performanceMetrics = initializePerformanceMetrics(2); // 2 regions
+    printf("Initialized new NetworkPerformanceMetrics\n");
+  }
+
+  ReflectionParameters *reflection_params =
+      loadReflectionParameters("reflection_params.dat");
+  if (reflection_params == NULL) {
+    reflection_params = initializeReflectionParameters();
+    printf("Initialized new ReflectionParameters\n");
+  }
+
+  SelfIdentitySystem *identity_system =
+      loadSelfIdentitySystem("identity_system.dat");
+  if (identity_system == NULL) {
+    identity_system = initializeSelfIdentity(100, 200, 50, 1000, 100);
+    printf("Initialized new SelfIdentitySystem\n");
+  }
+
+  KnowledgeFilter *knowledge_filter =
+      loadKnowledgeFilter("knowledge_filter.dat");
+  if (knowledge_filter == NULL) {
+    knowledge_filter = initializeKnowledgeFilter(100);
+    printf("Initialized new KnowledgeFilter\n");
+  }
+
+  MetacognitionMetrics *metacognition =
+      loadMetacognitionMetrics("metacognition.dat");
+  if (metacognition == NULL) {
+    metacognition = initializeMetacognitionMetrics();
+    printf("Initialized new MetacognitionMetrics\n");
+  }
+
+  MetaLearningState *meta_learning_state =
+      loadMetaLearningState("meta_learning.dat");
+  if (meta_learning_state == NULL) {
+    meta_learning_state = initializeMetaLearningState(4);
+    printf("Initialized new MetaLearningState\n");
+  }
+
+  // Initialize remaining systems
+  SocialSystem *social_system = social_system = initializeSocialSystem(100, 50);
+  GoalSystem *goalSystem = initializeGoalSystem(10);
   GlobalContextManager *contextManager =
       initializeGlobalContextManager(MAX_NEURONS);
-  NetworkPerformanceMetrics *performanceMetrics =
-      initializePerformanceMetrics(network_regions);
-
-  ReflectionParameters *reflection_params = initializeReflectionParameters();
-  SelfIdentitySystem *identity_system =
-      initializeSelfIdentity(100,  // num_values
-                             200,  // num_beliefs
-                             50,   // num_markers
-                             1000, // history_size
-                             100   // pattern_size
-      );
-
-  KnowledgeFilter *knowledge_filter = initializeKnowledgeFilter(100);
-  MetacognitionMetrics *metacognition = initializeMetacognitionMetrics();
-  initializeKnowledgeMetrics(knowledge_filter);
-  MetaLearningState *meta_learning_state = initializeMetaLearningState(4);
   EmotionalSystem *emotional_system = initializeEmotionalSystem();
-  SocialSystem *social_system = initializeSocialSystem(100, 50);
   ImaginationSystem *imagination_system =
       initializeImaginationSystem(0.6f, 0.7f);
-  printf("Imagination system initialized with creativity factor: %.2f\n",
-         imagination_system->creativity_factor);
   NeuronSpecializationSystem *specialization_system =
       initializeSpecializationSystem(0.6f);
-  printf("Neuron specialization system initialized with threshold: %.2f\n",
-         specialization_system->specialization_threshold);
+  MoralCompass *moralCompass = initializeMoralCompass(5);
+  initializeKnowledgeMetrics(knowledge_filter);
   addSymbol(0, "What is the current task?");
   addSymbol(1, "What is the current error rate?");
   addSymbol(2, "What is the current learning rate?");
@@ -11375,7 +11826,6 @@ int main() {
   addGoal(goalSystem, "Develop stable representations", 0.8f);
   addGoal(goalSystem, "Maximize information gain", 0.7f);
 
-  MoralCompass *moralCompass = initializeMoralCompass(5);
   printf("Ethical framework initialized with %d principles\n",
          moralCompass->num_principles);
   printf("Initial ethical alignment: %.2f\n", moralCompass->overall_alignment);
