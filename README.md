@@ -42,6 +42,8 @@ for metal macos version metal api
 
 for cuda version cuda
 
+If on windows use wsl i have removed the windows version as I don't think it was ever correctly working either way.
+
 Optional:
 
 docker
