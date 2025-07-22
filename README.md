@@ -695,221 +695,249 @@ typedef struct {
 } SocialSystem;
 ```
 
-## Key Functions:
+### Validation system
 
-### Memory System
+The validation system allows for the neural web to fallback if encountering an error.
 
-- #### `createMemorySystem(int capacity)` : Initializes a new memory system with a specified capacity. Sets up a data structure to hold a certain number of memory entries.
-- #### `loadMemorySystem(const char* filename)` : Loads a memory system from a file. Reads a file to populate the memory system with previously saved data.
-- #### `saveMemorySystem(MemorySystem memorySystem, const char* filename)` : Saves the current memory system to a file. Writes the current state of the memory system to a file for later use.
-- #### `freeMemorySystem(MemorySystem memorySystem)` : Frees the memory allocated for the memory system. Deallocates memory to prevent memory leaks.
-- #### `loadHierarchicalMemory(MemorySystem memorySystem, const char* filename)` : Loads hierarchical memory from a file. Involves loading memory data that has a hierarchical structure, such as categories and subcategories.
-- #### `saveHierarchicalMemory(MemorySystem memorySystem, const char* filename)` : Saves hierarchical memory to a file. Saves the hierarchical structure of the memory system to a file.
-- #### `decayMemorySystem(MemorySystem memorySystem)` : Applies decay to the memory system to simulate forgetting. Reduces the strength or importance of older memories.
-- #### `mergeSimilarMemories(MemorySystem memorySystem)` : Merges similar memories to optimize storage. Combines memories that are very similar to save space.
-- #### `addMemory(MemorySystem memorySystem, WorkingMemorySystem working_memory, Neuron* neurons, float* input_tensor, int timestamp, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` : Adds a new memory entry to the system. Takes input data and stores it as a new memory.
-- #### `retrieveMemory(MemorySystem memorySystem)` : Retrieves the most relevant memory entry. Searches the memory system for the memory that best matches a certain criterion.
-- #### `consolidateMemory(MemorySystem memorySystem)` : Consolidates memories to reinforce learning. Strengthens important memories or transfers them to long-term storage.
-- #### `consolidateToLongTermMemory(WorkingMemorySystem working_memory, MemorySystem memorySystem, int step)` : Consolidates working memory to long-term memory. Moves short-term memories to long-term storage.
+```c
+typedef struct {
+  time_t start_time;
+  unsigned long total_checks;
+  unsigned long successful_checks;
+  unsigned long failed_checks;
+  unsigned long segfaults_recovered;
+  unsigned long fpe_recovered;
+  float average_check_time;
+  float min_check_time;
+  float max_check_time;
+  float total_check_time;
+  unsigned long component_failures;
+  unsigned long memory_issues;
+  unsigned long instability_events;
+  unsigned long critical_failures;
+  unsigned long neuron_corrections;
+  unsigned long connection_corrections;
+  unsigned long weight_corrections;
+  unsigned long memory_reinitializations;
+  unsigned long memory_cluster_errors;
+} SystemHealthMetrics;
+```
 
-### Neural Network
+# Key Functions:
 
-- #### `initializeNeurons(Neuron* neurons, int connections, float* weights, float* input_tensor)` : Initializes the neurons with default or loaded values. Sets up the neurons in the network with initial values for weights and connections.
-- #### `initializeWeights(float* weights, int max_neurons, int max_connections, float* input_tensor)` : Initializes the weights for the neural network. Sets the initial weights for the connections between neurons.
-- #### `updateNeuronsWithPredictiveCoding(Neuron* neurons, float* input_tensor, int max_neurons, float learning_rate)` : Updates neurons using predictive coding. Adjusts the neurons based on the difference between predicted and actual inputs.
-- #### `updateWeights(float* weights, Neuron* neurons, int* connections, float learning_rate)` : Updates the weights based on learning rate. Adjusts the weights of the connections between neurons to improve the network's performance.
-- #### `updateBidirectionalWeights(float* weights, float* reverse_weights, Neuron* neurons, int* connections, int* reverse_connections, float learning_rate)` : Updates bidirectional weights for reverse processing. Adjusts weights for connections that go in both directions between neurons.
-- #### `computePredictionErrors(Neuron* neurons, float* input_tensor, int max_neurons)` : Computes prediction errors for the neurons. Calculates the difference between the predicted and actual outputs of the neurons.
-- #### `generatePredictiveInputs(float* predictive_inputs, NetworkStateSnapshot* previous_state, int max_neurons)` : Generates predictive inputs based on previous states. Creates inputs for the network based on its previous state.
-- #### `selectOptimalDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, float* previous_outputs, NetworkStateSnapshot* stateHistory, int step, MemoryEntry* relevantMemory, DynamicParameters* params)` : Selects the optimal decision path based on current states and parameters. Chooses the best course of action based on the network's current state and relevant memories.
-- #### `computeRegionPerformanceMetrics(NetworkPerformanceMetrics* performanceMetrics, Neuron* neurons, float* target_outputs, int max_neurons)` : Computes performance metrics for different regions of the network. Evaluates how well different parts of the network are performing.
-- #### `updateMetaControllerPriorities(MetaController* metaController, NetworkPerformanceMetrics* performanceMetrics, MetacognitionMetrics* metacognition)` : Updates meta-controller priorities based on performance metrics. Adjusts the priorities of the meta-controller based on the network's performance.
-- #### `applyMetaControllerAdaptations(Neuron* neurons, float* weights, MetaController* metaController, int max_neurons)` : Applies adaptations from the meta-controller to the network. Makes changes to the network based on the meta-controller's instructions.
-- #### `selectOptimalMetaDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, MetaLearningState* meta_learning_state, MetacognitionMetrics* metacognition)` : Selects the optimal meta-decision path based on meta-learning state and metacognition metrics. Chooses the best course of action based on the meta-learning state and metacognition metrics.
-- #### `adaptNetworkDynamic(Neuron* neurons, float* weights, DynamicParameters* params, float performance_delta, float* input_tensor)` : Adapts the network dynamically based on performance delta and input tensor. Makes real-time adjustments to the network based on its performance.
-- #### `void freeSpecializationSystem(NeuronSpecializationSystem *system)` : Frees memory allocated for the specialization system. Releases resources used by the specialization system.
-- #### `void printSpecializationStats(NeuronSpecializationSystem *system)` : Prints statistics about the specialization system. Displays information about the specialization of the network's neurons.
-- #### `float evaluateSpecializationEffectiveness(NeuronSpecializationSystem, *system float network_performance)` : Evaluates the effectiveness of the specialization system. Calculates the overall effectiveness of the specialization system based on network performance.
-- #### `void updateSpecializationImportance(NeuronSpecializationSystem *system, float network_performance, float error_rate,  Neuron *neurons)` : Updates the importance of the specialization system. Adjusts the importance of the specialization system based on network performance and error rate.
-- #### `void applySpecializations(NeuronSpecializationSystem *system, Neuron *neurons,  float *weights, int *connections, int max_neurons, int max_connections)` : Applies specializations to the network. Makes changes to the network based on the specialization system's instructions.
-- #### `void detectSpecializations(NeuronSpecializationSystem *system, Neuron *neurons, int max_neurons, float *input_tensor, float *target_outputs, float *previous_outputs, float *previous_states)` : Detects specializations in the network. Identifies regions of the network that need special attention.
+## Memory System
 
-### Dynamic Parameters and Optimization
+- #### `createMemorySystem(int capacity)` Initializes a new memory system with a specified capacity. Sets up a data structure to hold a certain number of memory entries.
+- #### `loadMemorySystem(const char* filename)` Loads a memory system from a file. Reads a file to populate the memory system with previously saved data.
+- #### `saveMemorySystem(MemorySystem memorySystem, const char* filename)` Saves the current memory system to a file. Writes the current state of the memory system to a file for later use.
+- #### `freeMemorySystem(MemorySystem memorySystem)` Frees the memory allocated for the memory system. Deallocates memory to prevent memory leaks.
+- #### `loadHierarchicalMemory(MemorySystem memorySystem, const char* filename)` Loads hierarchical memory from a file. Involves loading memory data that has a hierarchical structure, such as categories and subcategories.
+- #### `saveHierarchicalMemory(MemorySystem memorySystem, const char* filename)` Saves hierarchical memory to a file. Saves the hierarchical structure of the memory system to a file.
+- #### `decayMemorySystem(MemorySystem memorySystem)` Applies decay to the memory system to simulate forgetting. Reduces the strength or importance of older memories.
+- #### `mergeSimilarMemories(MemorySystem memorySystem)` Merges similar memories to optimize storage. Combines memories that are very similar to save space.
+- #### `addMemory(MemorySystem memorySystem, WorkingMemorySystem working_memory, Neuron* neurons, float* input_tensor, int timestamp, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` Adds a new memory entry to the system. Takes input data and stores it as a new memory.
+- #### `retrieveMemory(MemorySystem memorySystem)` Retrieves the most relevant memory entry. Searches the memory system for the memory that best matches a certain criterion.
+- #### `consolidateMemory(MemorySystem memorySystem)` Consolidates memories to reinforce learning. Strengthens important memories or transfers them to long-term storage.
+- #### `consolidateToLongTermMemory(WorkingMemorySystem working_memory, MemorySystem memorySystem, int step)` Consolidates working memory to long-term memory. Moves short-term memories to long-term storage.
 
-- #### `initDynamicParameters()` : Initializes dynamic parameters for the system. Sets up parameters that can change over time.
-- #### `updateDynamicParameters(DynamicParameters* params, float performance_delta, float stability, float error_rate)` : Updates dynamic parameters based on performance delta, stability, and error rate. Adjusts the parameters based on the network's performance and stability.
-- #### `optimizeParameters(OptimizationState* opt_state, PerformanceMetrics* performance_history, int step)` : Optimizes parameters based on performance history. Finds the best values for the parameters based on past performance.
-- #### `analyzeNetworkPerformance(PerformanceMetrics* performance_history, int step)` : Analyzes network performance and generates insights. Evaluates the network's performance over time and provides insights.
-- #### `generatePerformanceGraph(PerformanceMetrics* performance_history, int step)` : Generates a performance graph based on performance history. Creates a visual representation of the network's performance over time.
+## Neural Network
 
-### Context and Reflection
+- #### `initializeNeurons(Neuron* neurons, int connections, float* weights, float* input_tensor)` Initializes the neurons with default or loaded values. Sets up the neurons in the network with initial values for weights and connections.
+- #### `initializeWeights(float* weights, int max_neurons, int max_connections, float* input_tensor)` Initializes the weights for the neural network. Sets the initial weights for the connections between neurons.
+- #### `updateNeuronsWithPredictiveCoding(Neuron* neurons, float* input_tensor, int max_neurons, float learning_rate)` Updates neurons using predictive coding. Adjusts the neurons based on the difference between predicted and actual inputs.
+- #### `updateWeights(float* weights, Neuron* neurons, int* connections, float learning_rate)` Updates the weights based on learning rate. Adjusts the weights of the connections between neurons to improve the network's performance.
+- #### `updateBidirectionalWeights(float* weights, float* reverse_weights, Neuron* neurons, int* connections, int* reverse_connections, float learning_rate)` Updates bidirectional weights for reverse processing. Adjusts weights for connections that go in both directions between neurons.
+- #### `computePredictionErrors(Neuron* neurons, float* input_tensor, int max_neurons)` Computes prediction errors for the neurons. Calculates the difference between the predicted and actual outputs of the neurons.
+- #### `generatePredictiveInputs(float* predictive_inputs, NetworkStateSnapshot* previous_state, int max_neurons)` Generates predictive inputs based on previous states. Creates inputs for the network based on its previous state.
+- #### `selectOptimalDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, float* previous_outputs, NetworkStateSnapshot* stateHistory, int step, MemoryEntry* relevantMemory, DynamicParameters* params)` Selects the optimal decision path based on current states and parameters. Chooses the best course of action based on the network's current state and relevant memories.
+- #### `computeRegionPerformanceMetrics(NetworkPerformanceMetrics* performanceMetrics, Neuron* neurons, float* target_outputs, int max_neurons)` Computes performance metrics for different regions of the network. Evaluates how well different parts of the network are performing.
+- #### `updateMetaControllerPriorities(MetaController* metaController, NetworkPerformanceMetrics* performanceMetrics, MetacognitionMetrics* metacognition)` Updates meta-controller priorities based on performance metrics. Adjusts the priorities of the meta-controller based on the network's performance.
+- #### `applyMetaControllerAdaptations(Neuron* neurons, float* weights, MetaController* metaController, int max_neurons)` Applies adaptations from the meta-controller to the network. Makes changes to the network based on the meta-controller's instructions.
+- #### `selectOptimalMetaDecisionPath(Neuron* neurons, float* weights, int* connections, float* input_tensor, int max_neurons, MetaLearningState* meta_learning_state, MetacognitionMetrics* metacognition)` Selects the optimal meta-decision path based on meta-learning state and metacognition metrics. Chooses the best course of action based on the meta-learning state and metacognition metrics.
+- #### `adaptNetworkDynamic(Neuron* neurons, float* weights, DynamicParameters* params, float performance_delta, float* input_tensor)` Adapts the network dynamically based on performance delta and input tensor. Makes real-time adjustments to the network based on its performance.
+- #### `void freeSpecializationSystem(NeuronSpecializationSystem *system)` Frees memory allocated for the specialization system. Releases resources used by the specialization system.
+- #### `void printSpecializationStats(NeuronSpecializationSystem *system)` Prints statistics about the specialization system. Displays information about the specialization of the network's neurons.
+- #### `float evaluateSpecializationEffectiveness(NeuronSpecializationSystem, *system float network_performance)` Evaluates the effectiveness of the specialization system. Calculates the overall effectiveness of the specialization system based on network performance.
+- #### `void updateSpecializationImportance(NeuronSpecializationSystem *system, float network_performance, float error_rate, Neuron *neurons)` Updates the importance of the specialization system. Adjusts the importance of the specialization system based on network performance and error rate.
+- #### `void applySpecializations(NeuronSpecializationSystem *system, Neuron *neurons, float *weights, int *connections, int max_neurons, int max_connections)` Applies specializations to the network. Makes changes to the network based on the specialization system's instructions.
+- #### `void detectSpecializations(NeuronSpecializationSystem *system, Neuron *neurons, int max_neurons, float *input_tensor, float *target_outputs, float *previous_outputs, float *previous_states)` Detects specializations in the network. Identifies regions of the network that need special attention.
 
-- #### `updateGlobalContext(GlobalContextManager* contextManager, Neuron* neurons, int max_neurons, float* input_tensor)` : Updates the global context based on current network state. Adjusts the global context to reflect the current state of the network.
-- #### `integrateGlobalContext(GlobalContextManager* contextManager, Neuron* neurons, int max_neurons, float* weights, int max_connections)` : Integrates global context into network processing. Uses the global context to influence the network's processing.
-- #### `integrateReflectionSystem(Neuron* neurons, MemorySystem* memorySystem, NetworkStateSnapshot* stateHistory, int step, float* weights, int* connections, ReflectionParameters* reflection_params)` : Integrates the reflection system into the network processing. Uses the reflection system to influence the network's processing.
-- #### `updateIdentity(SelfIdentitySystem* identity_system, Neuron* neurons, int max_neurons, MemorySystem* memorySystem, float* input_tensor)` : Updates the identity system based on current states. Adjusts the identity system to reflect the current state of the network and memories.
-- #### `verifyIdentity(SelfIdentitySystem* identity_system)` : Verifies the consistency of the identity system. Checks the identity system for errors or inconsistencies.
-- #### `analyzeIdentitySystem(SelfIdentitySystem* identity_system)` : Analyzes the identity system for potential issues. Evaluates the identity system for problems or areas of improvement.
-- #### `createIdentityBackup(SelfIdentitySystem* identity_system)` : Creates a backup of the identity system. Saves the current state of the identity system for later restoration.
-- #### `restoreIdentityFromBackup(SelfIdentitySystem* identity_system, SelfIdentityBackup* backup)` : Restores the identity system from a backup. Loads a previously saved state of the identity system.
-- #### `freeIdentityBackup(SelfIdentityBackup* backup)` : Frees the memory allocated for the identity backup. Deallocates memory to prevent memory leaks.
-- #### `generateIdentityReflection(SelfIdentitySystem* identity_system)` : Generates a reflection based on the identity system. Creates a summary or evaluation of the identity system.
+## Dynamic Parameters and Optimization
 
-### Motivation and Goals
+- #### `initDynamicParameters()` Initializes dynamic parameters for the system. Sets up parameters that can change over time.
+- #### `updateDynamicParameters(DynamicParameters* params, float performance_delta, float stability, float error_rate)` Updates dynamic parameters based on performance delta, stability, and error rate. Adjusts the parameters based on the network's performance and stability.
+- #### `optimizeParameters(OptimizationState* opt_state, PerformanceMetrics* performance_history, int step)` Optimizes parameters based on performance history. Finds the best values for the parameters based on past performance.
+- #### `analyzeNetworkPerformance(PerformanceMetrics* performance_history, int step)` Analyzes network performance and generates insights. Evaluates the network's performance over time and provides insights.
+- #### `generatePerformanceGraph(PerformanceMetrics* performance_history, int step)` Generates a performance graph based on performance history. Creates a visual representation of the network's performance over time.
 
-- #### `updateMotivationSystem(IntrinsicMotivation* motivation, float performance_delta, float novelty, float task_difficulty)` : Updates the motivation system based on performance delta, novelty, and task difficulty. Adjusts the motivation system based on the network's performance and the difficulty of the task.
-- #### `addGoal(GoalSystem* goalSystem, const char* description, float priority)` : Adds a new goal to the goal system. Creates a new goal with a given description and priority.
-- #### `evaluateGoalProgress(Goal* goal, Neuron* neurons, float* target_outputs)` : Evaluates the progress of a goal. Checks how close the network is to achieving the goal.
+## Context and Reflection
 
-### Security and Validation
+- #### `updateGlobalContext(GlobalContextManager* contextManager, Neuron* neurons, int max_neurons, float* input_tensor)` Updates the global context based on current network state. Adjusts the global context to reflect the current state of the network.
+- #### `integrateGlobalContext(GlobalContextManager* contextManager, Neuron* neurons, int max_neurons, float* weights, int max_connections)` Integrates global context into network processing. Uses the global context to influence the network's processing.
+- #### `integrateReflectionSystem(Neuron* neurons, MemorySystem* memorySystem, NetworkStateSnapshot* stateHistory, int step, float* weights, int* connections, ReflectionParameters* reflection_params)` Integrates the reflection system into the network processing. Uses the reflection system to influence the network's processing.
+- #### `updateIdentity(SelfIdentitySystem* identity_system, Neuron* neurons, int max_neurons, MemorySystem* memorySystem, float* input_tensor)` Updates the identity system based on current states. Adjusts the identity system to reflect the current state of the network and memories.
+- #### `verifyIdentity(SelfIdentitySystem* identity_system)` Verifies the consistency of the identity system. Checks the identity system for errors or inconsistencies.
+- #### `analyzeIdentitySystem(SelfIdentitySystem* identity_system)` Analyzes the identity system for potential issues. Evaluates the identity system for problems or areas of improvement.
+- #### `createIdentityBackup(SelfIdentitySystem* identity_system)` Creates a backup of the identity system. Saves the current state of the identity system for later restoration.
+- #### `restoreIdentityFromBackup(SelfIdentitySystem* identity_system, SelfIdentityBackup* backup)` Restores the identity system from a backup. Loads a previously saved state of the identity system.
+- #### `freeIdentityBackup(SelfIdentityBackup* backup)` Frees the memory allocated for the identity backup. Deallocates memory to prevent memory leaks.
+- #### `generateIdentityReflection(SelfIdentitySystem* identity_system)` Generates a reflection based on the identity system. Creates a summary or evaluation of the identity system.
 
-- #### `validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections, MemorySystem* memorySystem)` : Validates critical security aspects of the system. Checks the system for security vulnerabilities or issues.
-- #### `criticalSecurityShutdown(Neuron* neurons, float* weights, int* connections, MemorySystem* memorySystem, SecurityValidationStatus* secStatus)` : Performs a critical security shutdown if necessary. Shuts down the system if a security issue is detected.
+## Motivation and Goals
 
-### Knowledge and Insights
+- #### `updateMotivationSystem(IntrinsicMotivation* motivation, float performance_delta, float novelty, float task_difficulty)` Updates the motivation system based on performance delta, novelty, and task difficulty. Adjusts the motivation system based on the network's performance and the difficulty of the task.
+- #### `addGoal(GoalSystem* goalSystem, const char* description, float priority)` Adds a new goal to the goal system. Creates a new goal with a given description and priority.
+- #### `evaluateGoalProgress(Goal* goal, Neuron* neurons, float* target_outputs)` Evaluates the progress of a goal. Checks how close the network is to achieving the goal.
 
-- #### `integrateKnowledgeFilter(KnowledgeFilter* knowledge_filter, MemorySystem* memorySystem, Neuron* neurons, float* input_tensor)` : Integrates a knowledge filter into the system. Uses the knowledge filter to influence the network's processing.
-- #### `updateKnowledgeSystem(Neuron* neurons, float* input_tensor, MemorySystem* memory_system, KnowledgeFilter* filter, float current_performance)` : Updates the knowledge system based on current performance. Adjusts the knowledge system to reflect the network's current performance.
-- #### `printCategoryInsights(KnowledgeFilter* knowledge_filter)` : Prints insights from the knowledge filter. Provides information or insights generated by the knowledge filter.
+## Security and Validation
 
-### Internal Self-Expression System
+- #### `validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections, MemorySystem* memorySystem)` Validates critical security aspects of the system. Checks the system for security vulnerabilities or issues.
+- #### `criticalSecurityShutdown(Neuron* neurons, float* weights, int* connections, MemorySystem* memorySystem, SecurityValidationStatus* secStatus)` Performs a critical security shutdown if necessary. Shuts down the system if a security issue is detected.
 
-- #### `addSymbol(int symbol_id, const char* description);` : Adds a symbol to the internal self-expression system. Creates a new symbol with a given ID and description.
-- #### `addQuestion(int question_id, int symbol_ids[], int num_symbols)` : Adds a question to the internal self-expression system. Creates a new question using the provided symbols.
-- #### `askQuestion(int question_id, Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float* learning_rate)` : Asks a question to the internal self-expression system. Processes the question and generates a response.
-- #### `expandMemoryCapacity(MemorySystem *memorySystem)` : Expands the memory capacity of the memory system. Increases the amount of memory available in the system.
-- #### `adjustBehaviorBasedOnAnswers(Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float *learning_rate, float *input_noise_scale, float *weight_noise_scale);` : Adjusts the behavior based on answers from the internal self-expression system. Makes changes to the network based on the responses to questions.
+## Knowledge and Insights
 
-### Search world wide web
+- #### `integrateKnowledgeFilter(KnowledgeFilter* knowledge_filter, MemorySystem* memorySystem, Neuron* neurons, float* input_tensor)` Integrates a knowledge filter into the system. Uses the knowledge filter to influence the network's processing.
+- #### `updateKnowledgeSystem(Neuron* neurons, float* input_tensor, MemorySystem* memory_system, KnowledgeFilter* filter, float current_performance)` Updates the knowledge system based on current performance. Adjusts the knowledge system to reflect the network's current performance.
+- #### `printCategoryInsights(KnowledgeFilter* knowledge_filter)` Prints insights from the knowledge filter. Provides information or insights generated by the knowledge filter.
 
-- #### `enhanceDecisionMakingWithSearch(const Neuron *neurons, const SearchResults *results, float *decision_weights, int max_neurons)` : Enhances decision making with search results. Adjusts the decision weights based on the search results.
+## Internal Self-Expression System
 
-- #### `storeSearchResultsWithMetadata(MemorySystem *memorySystem, WorkingMemorySystem *working_memory, const SearchResults *results, const char *original_query, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` : Stores search results with metadata in the memory system and working memory. Adds the search results to the memory system and working memory.
+- #### `addSymbol(int symbol_id, const char* description)` Adds a symbol to the internal self-expression system. Creates a new symbol with a given ID and description.
+- #### `addQuestion(int question_id, int symbol_ids[], int num_symbols)` Adds a question to the internal self-expression system. Creates a new question using the provided symbols.
+- #### `askQuestion(int question_id, Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float* learning_rate)` Asks a question to the internal self-expression system. Processes the question and generates a response.
+- #### `expandMemoryCapacity(MemorySystem *memorySystem)` Expands the memory capacity of the memory system. Increases the amount of memory available in the system.
+- #### `adjustBehaviorBasedOnAnswers(Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float *learning_rate, float *input_noise_scale, float *weight_noise_scale)` Adjusts the behavior based on answers from the internal self-expression system. Makes changes to the network based on the responses to questions.
 
-- #### `addToWorkingMemory(WorkingMemorySystem *working_memory, const MemoryEntry *entry, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])`: Adds a memory entry to the working memory. Adds the memory entry to the working memory for future reference.
+## Search World Wide Web
 
-- #### `integrateWebSearch(Neuron *neurons, float *input_tensor, int max_neurons, MemorySystem *memorySystem, int step)`: Integrates web search into the decision making process.
+- #### `enhanceDecisionMakingWithSearch(const Neuron *neurons, const SearchResults *results, float *decision_weights, int max_neurons)` Enhances decision making with search results. Adjusts the decision weights based on the search results.
+- #### `storeSearchResultsWithMetadata(MemorySystem *memorySystem, WorkingMemorySystem *working_memory, const SearchResults *results, const char *original_query, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` Stores search results with metadata in the memory system and working memory. Adds the search results to the memory system and working memory.
+- #### `addToWorkingMemory(WorkingMemorySystem *working_memory, const MemoryEntry *entry, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` Adds a memory entry to the working memory. Adds the memory entry to the working memory for future reference.
+- #### `integrateWebSearch(Neuron *neurons, float *input_tensor, int max_neurons, MemorySystem *memorySystem, int step)` Integrates web search into the decision making process.
+- #### `generateSearchQuery(const Neuron *neurons, int max_neurons)` Generates a search query based on the current state of the network. Creates a query for web search based on the network's current state.
+- #### `storeSearchResultsInMemory(MemorySystem *memorySystem, const SearchResults *results)` Stores search results in the memory system. Adds the search results to the memory system for future reference.
+- #### `addToDirectMemory(MemorySystem *memorySystem, const MemoryEntry *entry)` Adds a memory entry directly to the memory system. Adds the memory entry to the memory system without any integration with the working memory.
+- #### `convertSearchResultsToInput(const SearchResults *results, float *input_tensor, int max_neurons)` Converts search results to input for the network. Converts the search results into a format that can be processed by the network.
+- #### `performWebSearch(const char *query)` Performs a web search based on the given query. Fetches search results from the web with duckduckgo.
+- #### `parseSearchResults(const char *json_data)` Parses search results from a JSON response. Extracts the search results from the JSON data.
 
-- #### `generateSearchQuery(const Neuron *neurons, int max_neurons)` : Generates a search query based on the current state of the network. Creates a query for web search based on the network's current state.
+## Moral Compass
 
-- #### `storeSearchResultsInMemory(MemorySystem *memorySystem, const SearchResults *results)` : Stores search results in the memory system. Adds the search results to the memory system for future reference.
+- #### `recordDecisionOutcome(MoralCompass *compass, int principle_index, bool was_ethical)` Records the outcome of a decision based on ethical principles. Updates the moral compass based on the decision outcome.
+- #### `resolveEthicalDilemma(MoralCompass *compass, float *decision_options, int num_options, int vector_size)` Resolves ethical dilemmas based on the moral compass. Makes a decision based on ethical principles.
+- #### `applyEthicalConstraints(MoralCompass *compass, Neuron *neurons, int max_neurons, float *weights, int max_connections)` Applies ethical constraints to the network. Adjusts the network's weights to align with ethical principles.
+- #### `generateEthicalReflection(MoralCompass *compass)` Generates an ethical reflection report based on the current state of the moral compass.
+- #### `adaptEthicalFramework(MoralCompass *compass, float learning_rate)` Adapts the ethical framework based on the current state of the network. Adjusts the importance of principles based on their violations and activations.
+- #### `freeMoralCompass(MoralCompass *compass)` Frees the memory allocated for the moral compass. Releases the memory used by the moral compass.
 
-- #### `addToDirectMemory(MemorySystem *memorySystem, const MemoryEntry *entry)` : Adds a memory entry directly to the memory system. Adds the memory entry to the memory system without any integration with the working memory.
+## Emotion System
 
-- #### `convertSearchResultsToInput(const SearchResults *results, float *input_tensor, int max_neurons)` : Converts search results to input for the network. Converts the search results into a format that can be processed by the network.
+- #### `void freeEmotionalSystem(EmotionalSystem *system)` Frees the memory allocated for the emotional system. Releases the memory used by the emotional system.
+- #### `void printEmotionalState(EmotionalSystem *system)` Prints the current emotional state of the network. Displays the emotional state of the network, including love, hate, cognitive impact, and emotional regulation.
+- #### `void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons, float *target_outputs, int num_neurons, unsigned int timestamp)` Detects emotional triggers in the network. Identifies and responds to emotional triggers, such as love, hate, cognitive impact, and emotional regulation.
+- #### `void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons, int num_neurons, float *input_tensor, float learning_rate, float plasticity)` Applies emotional processing to the network. Adjusts the network's weights and biases based on emotional triggers and emotional state.
+- #### `float calculateEmotionalBias(EmotionalSystem *system, float *input, int input_size)` Calculates the emotional bias based on the emotional state and input. Computes the emotional bias for the given input and emotional state.
+- #### `void updateEmotionalMemory(EmotionalSystem *system)` Updates the emotional memory of the network. Adds new emotional memories to the memory system and updates the emotional memory index.
+- #### `void triggerEmotion(EmotionalSystem *system, int emotion_type, float trigger_strength, unsigned int timestamp)` Triggers an emotional response in the network. Activates a specific emotional response in the network.
 
-- #### `performWebSearch(const char *query)` : Performs a web search based on the given query. Fetches search results from the web with duckduckgo.
+## Imagination System
 
-- #### `parseSearchResults(const char *json_data)` : Parses search results from a JSON response. Extracts the search results from the JSON data.
+- #### `ImaginationScenario createScenario(Neuron *neurons, MemorySystem *memory_system, int max_neurons, float divergence)` Creates a new imagination scenario. Generates a new imagination scenario based on the current state of the network.
+- #### `void simulateScenario(ImaginationScenario *scenario, Neuron *neurons, float *input_tensor, int max_neurons, int steps)` Simulates an imagination scenario. Runs the imagination scenario for the specified number of steps.
+- #### `void evaluateScenarioPlausibility(ImaginationScenario *scenario, MemorySystem *memory_system)` Evaluates the plausibility of an imagination scenario. Checks the plausibility of the scenario based on the memory system.
+- #### `float applyImaginationToDecision(ImaginationSystem *imagination, Neuron *neurons, float *input_tensor, int max_neurons)` Applies imagination to a decision. Modifies the decision based on the imagination system.
+- #### `void updateImaginationCreativity(ImaginationSystem *imagination, float performance_delta, float novelty)` Updates the creativity of the imagination system. Adjusts the creativity of the imagination system based on performance and novelty.
+- #### `void freeImaginationSystem(ImaginationSystem *system)` Frees the memory allocated for the imagination system. Releases the memory used by the imagination system.
+- #### `void blendImaginedOutcomes(ImaginedOutcome *outcomes, int num_outcomes, float *result_vector)` Blends the imagined outcomes into a result vector. Combines the imagined outcomes to create a result vector.
+- #### `bool isScenarioCoherent(ImaginationScenario *scenario, float threshold)` Checks if an imagination scenario is coherent. Determines if the scenario is coherent based on a specified threshold.
+- #### `void adjustNeuronsWithImagination(Neuron *neurons, ImaginedOutcome *outcome, int max_neurons, float influence)` Adjusts the activations of neurons based on imagined outcomes. Modifies the activations of the neurons based on the imagined outcomes.
 
-### Moral Compass
+## Social System
 
-- #### `recordDecisionOutcome(MoralCompass *compass, int principle_index, bool was_ethical)` : Records the outcome of a decision based on ethical principles. Updates the moral compass based on the decision outcome.
+- #### `void freeSocialSystem(SocialSystem *system)` Frees the memory allocated for the social system. Deallocates memory to prevent memory leaks.
+- #### `char *generateSocialFeedback(SocialSystem *system, const char *context)` Generates social feedback based on the given context. Provides feedback or responses based on social interactions and context.
+- #### `void applySocialInfluence(SocialSystem *system, Neuron *neurons, float *weights, int max_neurons)` Applies social influence to the network. Adjusts the neurons and weights based on social interactions and influences.
+- #### `void predictBehavior(SocialSystem *system, int person_id, const char *context, float *predicted_behavior)` Predicts the behavior of a person in a given context. Estimates how a person will behave based on social data and context.
+- #### `void recordSocialInteraction(SocialSystem *system, int person_id, float *emotional_state, float cooperation_level, float satisfaction, const char *type, const char *context)` Records a social interaction for a person. Stores details about the interaction, including emotional state, cooperation level, satisfaction, type, and context.
+- #### `float calculateInteractionDiversity(SocialSystem *system)` Calculates the diversity of social interactions. Measures how varied the social interactions are within the system.
+- #### `float negotiateOutcome(SocialSystem* system, int person_id, float* goals, float* other_goals, float* compromise)` Negotiates an outcome between a person and others. Determines a compromise based on the goals of the person and others involved.
+- #### `void updatePersonModel(SocialSystem* system, int person_id, float* observed_behavior, float* predicted_behavior)` Updates the model of a person based on observed and predicted behavior. Adjusts the person's model to better reflect their actual behavior.
+- #### `void updateEmpathy(SocialSystem* system, EmotionalSystem* emotional_system)` Updates the empathy levels in the social system based on the emotional system. Adjusts empathy to reflect the emotional state of the system.
 
-- #### `resolveEthicalDilemma(MoralCompass *compass, float *decision_options, int num_options, int vector_size)` : Resolves ethical dilemmas based on the moral compass. Makes a decision based on ethical principles.
+## Utility Functions
 
-- #### `applyEthicalConstraints(MoralCompass *compass, Neuron *neurons, int max_neurons, float *weights, int max_connections)`: Applies ethical constraints to the network. Adjusts the network's weights to align with ethical principles.
- 
-- #### `generateEthicalReflection(MoralCompass *compass)` generate an ethical reflection report based on the current state of the moral compass.
-
-- #### `adaptEthicalFramework(MoralCompass *compass, float learning_rate)` : Adapts the ethical framework based on the current state of the network. Adjusts the importance of principles based on their violations and activations.
-
-- #### `freeMoralCompass(MoralCompass *compass)` : Frees the memory allocated for the moral compass. Releases the memory used by the moral compass.
-
-### Emotion system
-
-- #### `void freeEmotionalSystem(EmotionalSystem *system) `: Frees the memory allocated for the emotional system. Releases the memory used by the emotional system.
-
-- #### `void printEmotionalState(EmotionalSystem *system) `: Prints the current emotional state of the network. Displays the emotional state of the network, including love, hate, cognitive impact, and emotional regulation.
-
-- #### `void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons, float *target_outputs, int num_neurons, unsigned int timestamp) `: Detects emotional triggers in the network. Identifies and responds to emotional triggers, such as love, hate, cognitive impact, and emotional regulation.
-
-- #### `void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons, int num_neurons, float *input_tensor, float learning_rate, float plasticity) `: Applies emotional processing to the network. Adjusts the network's weights and biases based on emotional triggers and emotional state.
-
-- #### `float calculateEmotionalBias(EmotionalSystem *system, float *input, int input_size) `: Calculates the emotional bias based on the emotional state and input. Computes the emotional bias for the given input and emotional state.
-
-- #### `void updateEmotionalMemory(EmotionalSystem *system)` : Updates the emotional memory of the network. Adds new emotional memories to the memory system and updates the emotional memory index.
-
-- #### `void triggerEmotion(EmotionalSystem *system, int emotion_type, float trigger_strength, unsigned int timestamp)` : Triggers an emotional response in the network. Activates a specific emotional response in the network.
-
-### Imagination System:
-
-- #### `ImaginationScenario createScenario(Neuron *neurons, MemorySystem *memory_system, int max_neurons, float divergence);` : Creates a new imagination scenario. Generates a new imagination scenario based on the current state of the network.
-- #### `void simulateScenario(ImaginationScenario *scenario, Neuron *neurons, float *input_tensor, int max_neurons, int steps);` : Simulates an imagination scenario. Runs the imagination scenario for the specified number of steps.
-- #### `void evaluateScenarioPlausibility(ImaginationScenario *scenario, MemorySystem *memory_system);` : Evaluates the plausibility of an imagination scenario. Checks the plausibility of the scenario based on the memory system.
-- #### `float applyImaginationToDecision(ImaginationSystem *imagination, Neuron *neurons, float *input_tensor, int max_neurons);` : Applies imagination to a decision. Modifies the decision based on the imagination system.
-- #### `void updateImaginationCreativity(ImaginationSystem *imagination, float performance_delta, float novelty);` : Updates the creativity of the imagination system. Adjusts the creativity of the imagination system based on performance and novelty.
-- #### `void freeImaginationSystem(ImaginationSystem *system);` : Frees the memory allocated for the imagination system. Releases the memory used by the imagination system.
-- #### `void blendImaginedOutcomes(ImaginedOutcome *outcomes, int num_outcomes, float *result_vector);` : Blends the imagined outcomes into a result vector. Combines the imagined outcomes to create a result vector.
-- #### `bool isScenarioCoherent(ImaginationScenario *scenario, float threshold);` : Checks if an imagination scenario is coherent. Determines if the scenario is coherent based on a specified threshold.
-- #### `void adjustNeuronsWithImagination(Neuron *neurons, ImaginedOutcome *outcome, int max_neurons, float influence);` : Adjusts the activations of neurons based on imagined outcomes. Modifies the activations of the neurons based on the imagined outcomes.
-
-### Social System
-
-- #### `void freeSocialSystem(SocialSystem *system)`
-Frees the memory allocated for the social system. Deallocates memory to prevent memory leaks.
-
-- #### `char *generateSocialFeedback(SocialSystem *system, const char *context)`
-Generates social feedback based on the given context. Provides feedback or responses based on social interactions and context.
-
-- #### `void applySocialInfluence(SocialSystem *system, Neuron *neurons, float *weights, int max_neurons)`
-Applies social influence to the network. Adjusts the neurons and weights based on social interactions and influences.
-
-- #### `void predictBehavior(SocialSystem *system, int person_id, const char *context, float *predicted_behavior)`
-Predicts the behavior of a person in a given context. Estimates how a person will behave based on social data and context.
-
-- #### `void recordSocialInteraction(SocialSystem *system, int person_id, float *emotional_state, float cooperation_level, float satisfaction, const char *type, const char *context)`
-Records a social interaction for a person. Stores details about the interaction, including emotional state, cooperation level, satisfaction, type, and context.
-
-- #### `float calculateInteractionDiversity(SocialSystem *system)`
-Calculates the diversity of social interactions. Measures how varied the social interactions are within the system.
-
-- #### `float negotiateOutcome(SocialSystem* system, int person_id, float* goals, float* other_goals, float* compromise)`
-Negotiates an outcome between a person and others. Determines a compromise based on the goals of the person and others involved.
-
-- #### `void updatePersonModel(SocialSystem* system, int person_id, float* observed_behavior, float* predicted_behavior)`
-Updates the model of a person based on observed and predicted behavior. Adjusts the person's model to better reflect their actual behavior.
-
-- #### `void updateEmpathy(SocialSystem* system, EmotionalSystem* emotional_system)`
-Updates the empathy levels in the social system based on the emotional system. Adjusts empathy to reflect the emotional state of the system.
-
-### Utility Functions
-
-- #### `getCurrentTime()` : Returns the current time. Provides the current date and time.
-- #### `computeMSELoss(Neuron* neurons, float* target_outputs, int max_neurons)` : Computes the mean squared error loss. Calculates the difference between the network's outputs and the target outputs.
-- #### `verifyNetworkState(Neuron* neurons, TaskPrompt* current_prompt)` : Verifies the current state of the network. Checks the network's state for errors or inconsistencies.
-- #### `transformOutputsToText(float* previous_outputs, int max_neurons, char* outputText, size_t size)` : Transforms numerical outputs to text. Converts the network's outputs into a readable format.
-- #### `findSimilarMemoriesInCluster(MemorySystem* memorySystem, float* vector, float similarity_threshold, int* num_matches)` : Finds similar memories in a cluster. Searches for memories that are similar to a given vector.
-- #### `captureNetworkState(Neuron* neurons, float* input_tensor, NetworkStateSnapshot* stateHistory, float* weights, int step)` : Captures the current state of the network. Saves the network's state for later use.
-- #### `printNetworkStates(Neuron* neurons, float* input_tensor, int step)` : Prints the current state of the network. Provides information about the network's current state.
-- #### `saveNetworkStates(NetworkStateSnapshot* stateHistory, int steps)` : Saves the network states to a file. Writes the network's state history to a file for later use.
-- #### `printReplayStatistics(MemorySystem* memorySystem)` : Prints statistics related to memory replay. Provides information about how often memories are replayed.
-- #### `addEmbedding(const char* text, float* embedding)` : Adds an embedding for a given text. Converts text into a numerical format that the network can use.
-- #### `initializeEmbeddings()` : Initializes embeddings for text inputs. Sets up the embeddings for use with the network.
-- #### `updateEmbeddings(float* embeddings, float* input_tensor, int max_embeddings, int max_neurons)` : Updates embeddings based on input tensor. Adjusts the embeddings to better represent the input data.
-- #### `isWordMeaningful(const char* word)` : Checks if a word is meaningful. Determines whether a word is relevant or important.
-- #### `importPretrainedEmbeddings(const char* embedding_file)` : Import pretrained embeddings. Loads pre-trained embeddings from a file for use with the network.
-
-- #### `write_callback(void *contents, size_t size, size_t nmemb, void *userp)` : Callback function for curl_easy_perform. Handles the response from the server.
+- #### `getCurrentTime()` Returns the current time. Provides the current date and time.
+- #### `computeMSELoss(Neuron* neurons, float* target_outputs, int max_neurons)` Computes the mean squared error loss. Calculates the difference between the network's outputs and the target outputs.
+- #### `verifyNetworkState(Neuron* neurons, TaskPrompt* current_prompt)` Verifies the current state of the network. Checks the network's state for errors or inconsistencies.
+- #### `transformOutputsToText(float* previous_outputs, int max_neurons, char* outputText, size_t size)` Transforms numerical outputs to text. Converts the network's outputs into a readable format.
+- #### `findSimilarMemoriesInCluster(MemorySystem* memorySystem, float* vector, float similarity_threshold, int* num_matches)` Finds similar memories in a cluster. Searches for memories that are similar to a given vector.
+- #### `captureNetworkState(Neuron* neurons, float* input_tensor, NetworkStateSnapshot* stateHistory, float* weights, int step)` Captures the current state of the network. Saves the network's state for later use.
+- #### `printNetworkStates(Neuron* neurons, float* input_tensor, int step)` Prints the current state of the network. Provides information about the network's current state.
+- #### `saveNetworkStates(NetworkStateSnapshot* stateHistory, int steps)` Saves the network states to a file. Writes the network's state history to a file for later use.
+- #### `printReplayStatistics(MemorySystem* memorySystem)` Prints statistics related to memory replay. Provides information about how often memories are replayed.
+- #### `addEmbedding(const char* text, float* embedding)` Adds an embedding for a given text. Converts text into a numerical format that the network can use.
+- #### `initializeEmbeddings()` Initializes embeddings for text inputs. Sets up the embeddings for use with the network.
+- #### `updateEmbeddings(float* embeddings, float* input_tensor, int max_embeddings, int max_neurons)` Updates embeddings based on input tensor. Adjusts the embeddings to better represent the input data.
+- #### `isWordMeaningful(const char* word)` Checks if a word is meaningful. Determines whether a word is relevant or important.
+- #### `importPretrainedEmbeddings(const char* embedding_file)` Import pretrained embeddings. Loads pre-trained embeddings from a file for use with the network.
+- #### `write_callback(void *contents, size_t size, size_t nmemb, void *userp)` Callback function for curl_easy_perform. Handles the response from the server.
 
 ## Initialization Functions
 
-- #### `initializeMetaController(int network_regions)` : Initializes the meta-controller. Sets up the meta-controller with initial values for each network region.
-- #### `initializeMotivationSystem()` : Initializes the motivation system. Sets up the motivation system with default values.
-- #### `initializeGoalSystem(int num_goals)` : Initializes the goal system. Sets up the goal system with a specified number of goals.
-- #### `initializeGlobalContextManager(int max_neurons)` : Initializes the global context manager. Sets up the global context manager with initial values for each neuron.
-- #### `initializePerformanceMetrics(int network_regions)` : Initializes performance metrics. Sets up performance metrics for each network region.
-- #### `initializeReflectionParameters()` : Initializes reflection parameters. Sets up the reflection parameters with default values.
-- #### `initializeSelfIdentity(int num_values, int num_beliefs, int num_markers, int history_size, int pattern_size)` : Initializes the self-identity system. Sets up the self-identity system with initial values for values, beliefs, markers, history, and patterns.
-- #### `initializeKnowledgeFilter(int size)` : Initializes the knowledge filter. Sets up the knowledge filter with a specified size.
-- #### `initializeMetacognitionMetrics()` : Initializes metacognition metrics. Sets up the metacognition metrics with default values.
-- #### `initializeMetaLearningState(int size)` : Initializes the meta-learning state. Sets up the meta-learning state with a specified size.
-- #### `createWorkingMemorySystem(int capacity)` : Creates a working memory system. Sets up a working memory system with a specified capacity.
-- #### `initializeMoralCompass(int num_principles)` : Initializes the moral compass. Sets up the moral compass with a specified number of principles.
-- #### `EmotionalSystem *initializeEmotionalSystem() `: Initializes the emotional system. Sets up the emotional system with default values.
-- #### `ImaginationSystem* initializeImaginationSystem(float creativity_factor, float coherence_threshold);` : Initializes the imagination system. Creates a new imagination system with the specified creativity factor and coherence threshold.
-- #### `SocialSystem* initializeSocialSystem(int max_interactions, int max_models)`: Initializes a new social system with specified maximum interactions and models. Sets up the social system with initial values for interactions and models.
-- #### `NeuronSpecializationSystem *initializeSpecializationSystem(float threshold)` : Initializes the specialization system. Sets up the specialization system with a specified threshold.
+- #### `initializeMetaController(int network_regions)` Initializes the meta-controller. Sets up the meta-controller with initial values for each network region.
+- #### `initializeMotivationSystem()` Initializes the motivation system. Sets up the motivation system with default values.
+- #### `initializeGoalSystem(int num_goals)` Initializes the goal system. Sets up the goal system with a specified number of goals.
+- #### `initializeGlobalContextManager(int max_neurons)` Initializes the global context manager. Sets up the global context manager with initial values for each neuron.
+- #### `initializePerformanceMetrics(int network_regions)` Initializes performance metrics. Sets up performance metrics for each network region.
+- #### `initializeReflectionParameters()` Initializes reflection parameters. Sets up the reflection parameters with default values.
+- #### `initializeSelfIdentity(int num_values, int num_beliefs, int num_markers, int history_size, int pattern_size)` Initializes the self-identity system. Sets up the self-identity system with initial values for values, beliefs, markers, history, and patterns.
+- #### `initializeKnowledgeFilter(int size)` Initializes the knowledge filter. Sets up the knowledge filter with a specified size.
+- #### `initializeMetacognitionMetrics()` Initializes metacognition metrics. Sets up the metacognition metrics with default values.
+- #### `initializeMetaLearningState(int size)` Initializes the meta-learning state. Sets up the meta-learning state with a specified size.
+- #### `createWorkingMemorySystem(int capacity)` Creates a working memory system. Sets up a working memory system with a specified capacity.
+- #### `initializeMoralCompass(int num_principles)` Initializes the moral compass. Sets up the moral compass with a specified number of principles.
+- #### `EmotionalSystem *initializeEmotionalSystem()` Initializes the emotional system. Sets up the emotional system with default values.
+- #### `ImaginationSystem* initializeImaginationSystem(float creativity_factor, float coherence_threshold)` Initializes the imagination system. Creates a new imagination system with the specified creativity factor and coherence threshold.
+- #### `SocialSystem* initializeSocialSystem(int max_interactions, int max_models)` Initializes a new social system with specified maximum interactions and models. Sets up the social system with initial values for interactions and models.
+- #### `NeuronSpecializationSystem *initializeSpecializationSystem(float threshold)` Initializes the specialization system. Sets up the specialization system with a specified threshold.
+
+## Validation System
+
+- #### `isValidMemoryRegion(void *ptr, size_t size)` Validates a memory block to ensure it is accessible and correctly allocated.
+- #### `validateMemoryBlock(void *ptr, size_t expected_size, const char *component_name)` Validates a memory block with additional checks and detailed error reporting.
+- #### `segfault_handler(int sig, siginfo_t *si, void *unused)` Handles segmentation faults by capturing fault details and attempting recovery.
+- #### `initializeSegfaultProtection()` Initializes protection against segmentation faults by setting up signal handlers.
+- #### `validateWorkingMemory(WorkingMemorySystem *wm)` Validates the working memory system to ensure it is correctly allocated and within expected bounds.
+- #### `validateMetaController(MetaController *mc)` Validates the meta-controller to ensure its parameters and memory regions are correct.
+- #### `validatePerformanceMetrics(NetworkPerformanceMetrics *npm)` Validates the network performance metrics to ensure they are correctly allocated and contain valid data.
+- #### `validateMotivationSystem(IntrinsicMotivation *im)` Validates the intrinsic motivation system to ensure its parameters are within valid ranges.
+- #### `validateReflectionParameters(ReflectionParameters *rp)` Validates the reflection parameters to ensure they are correctly set and within valid ranges.
+- #### `validateIdentitySystem(SelfIdentitySystem *sis)` Validates the self-identity system to ensure its components and memory regions are correct.
+- #### `validateKnowledgeFilter(KnowledgeFilter *kf)` Validates the knowledge filter to ensure its components and memory regions are correctly allocated.
+- #### `validateMetacognition(MetacognitionMetrics *mm)` Validates the metacognition metrics to ensure they are correctly allocated and contain valid data.
+- #### `validateMetaLearning(MetaLearningState *mls)` Validates the meta-learning state to ensure its components and memory regions are correct.
+- #### `validateSocialSystem(SocialSystem *ss)` Validates the social system to ensure its components and memory regions are correctly allocated.
+- #### `validateGoalSystem(GoalSystem *gs)` Validates the goal system to ensure its components and memory regions are correctly allocated.
+- #### `validateContextManager(GlobalContextManager *gcm)` Validates the global context manager to ensure its components and memory regions are correctly allocated.
+- #### `validateEmotionalSystem(EmotionalSystem *es)` Validates the emotional system to ensure its components and memory regions are correctly allocated.
+- #### `validateImaginationSystem(ImaginationSystem *is)` Validates the imagination system to ensure its components and memory regions are correctly allocated.
+- #### `validateSpecializationSystem(NeuronSpecializationSystem *nss)` Validates the neuron specialization system to ensure its components and memory regions are correctly allocated.
+- #### `validateMoralCompass(MoralCompass *mc)` Validates the moral compass to ensure its components and memory regions are correctly allocated.
+- #### `checkMemoryCluster(MemoryCluster *cluster, const char *name)` Checks a memory cluster for validity and consistency, with recovery mechanisms for corrupted entries.
+- #### `checkSystemComponent(void *component, const char *name, size_t expected_size)` Comprehensive system component checker that validates various system components based on their expected size and type.
+- #### `checkMemoryUsage()` Checks the current memory usage and reports any issues or high usage.
+- #### `logSystemState()` Logs the current system state for debugging purposes, including memory usage and timestamp.
+- #### `saveEmergencyBackup()` Saves an emergency backup of the system state to a file for recovery purposes.
+- #### `stabilizeSystem()` Attempts to stabilize the system after a critical failure or high instability.
+- #### `attemptSystemRecovery(const char *failure_description)` Attempts to recover the system from a critical failure by logging the state, saving a backup, and stabilizing the system.
+- #### `validateMemoryRegionDetailed(void *ptr, size_t size, const char *region_name)` Enhanced memory region validator with detailed analysis and reporting.
+- #### `fpe_handler(int sig, siginfo_t *si, void *unused)` Handles floating-point exceptions by capturing exception details and attempting recovery.
+- #### `setupEnhancedSignalHandlers()` Sets up enhanced signal handlers for segmentation faults and floating-point exceptions with detailed error reporting.
+- #### `initializeSystemHealthMonitor()` Initializes the system health monitor to track various health metrics and set up signal handlers.
+- #### `updateHealthMetrics(bool check_passed, double check_duration)` Updates the health metrics based on the outcome and duration of system checks.
+- #### `printSystemHealthReport()` Prints a comprehensive report of the system's health, including uptime, check statistics, and critical events.
+- #### `systemFallbackCheck(...)` Performs a comprehensive fallback check of the system, validating various components and handling any critical errors or inconsistencies.
+
 
 ## Usage
 
