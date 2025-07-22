@@ -17,8 +17,8 @@
 #include <unistd.h>
 
 #define MAX_NEURONS 8
-#define MAX_CONNECTIONS 2
-#define STEPS 100
+#define MAX_CONNECTIONS 6
+#define STEPS 120
 #define INPUT_SIZE 6            // Size of the input tensor
 #define MEMORY_BUFFER_SIZE 1000 // Size of circular memory buffer
 #define MEMORY_VECTOR_SIZE (2 * MAX_NEURONS + INPUT_SIZE)
@@ -32,15 +32,7 @@
 #define EMBEDDING_SIZE 16         // Size of word embeddings
 #define WEIGHT_DECAY 0.95f        // Weight decay factor
 #define MAX_SIMULATIONS 10        // Number of simulation runs
-#define MIN_WEIGHT -1.0f
-#define MAX_WEIGHT 1.0f
-#define DECAY_RATE 0.8f
-#define CONNECTION_WEIGHT 0.2f
-#define INPUT_WEIGHT 0.1f
-#define ACTIVATION_SCALE 1.5f
-#define ACTIVATION_BIAS 0.1f
-#define MIN_ACTIVATION -1.0f
-#define MAX_ACTIVATION 1.0f
+#define NUM_TIME_STEPS 20
 #define FEATURE_VECTOR_SIZE 128
 #define CONTEXT_VECTOR_SIZE 256
 #define CLAMP_MIN -1e6f // Min value for feature or coherence
@@ -62,6 +54,12 @@
 #define MAX_EMOTION_TYPES 8
 #define EMOTION_LOVE 0
 #define EMOTION_HATE 1
+#define MAX_SCENARIOS 10
+#define MAX_SCENARIO_STEPS 20
+#define MAX_SCENARIO_NAME_LENGTH 100
+#define MAX_SPECIALIZATIONS 8
+#define MAX_SPECIALIZED_NEURONS 64
+#define MAX_OUTCOMES_PER_SCENARIO 10
 
 typedef struct {
   float state;
@@ -69,6 +67,36 @@ typedef struct {
   unsigned int num_connections;
   unsigned int layer_id;
 } Neuron;
+
+typedef enum {
+  SPEC_NONE = 0,
+  SPEC_PATTERN_DETECTOR,
+  SPEC_FEATURE_EXTRACTOR,
+  SPEC_TEMPORAL_PROCESSOR,
+  SPEC_CONTEXT_INTEGRATOR,
+  SPEC_DECISION_MAKER,
+  SPEC_MEMORY_ENCODER,
+  SPEC_EMOTIONAL_PROCESSOR,
+  SPEC_PREDICTION_GENERATOR
+} NeuronSpecializationType;
+
+typedef struct {
+  unsigned int neuron_id;
+  NeuronSpecializationType type;
+  float specialization_score;
+  float activation_history[50]; // Recent activation history
+  unsigned int history_index;   // Current index in circular buffer
+  float avg_activation;         // Average activation level
+  float importance_factor;      // How important this specialized neuron is
+} SpecializedNeuron;
+
+typedef struct {
+  SpecializedNeuron neurons[MAX_SPECIALIZED_NEURONS];
+  unsigned int count;
+  float type_distribution[MAX_SPECIALIZATIONS]; // Distribution of
+                                                // specialization types
+  float specialization_threshold; // Minimum score to be considered specialized
+} NeuronSpecializationSystem;
 
 typedef struct {
   float vector[MEMORY_VECTOR_SIZE];
@@ -122,14 +150,6 @@ typedef struct {
   double best_execution_time;
   float best_performance_score;
 } OptimizationState;
-
-typedef struct {
-  float input_noise_resistance;
-  float weight_noise_resistance;
-  float adaptation_speed;     // Speed of recovery from perturbations
-  float baseline_performance; // Performance without noise
-  float noisy_performance;    // Performance with noise
-} AdaptationMetrics;
 
 typedef struct {
   float input_noise_scale;
@@ -218,30 +238,28 @@ typedef struct {
   float adaptation_rate;
 } PredictiveCodingParams;
 
-PredictiveCodingParams predictive_params[MAX_NEURONS];
-
 typedef struct ContextNode {
   char *name;
   float importance;
   float *state_vector;
-  int vector_size;
+  uint32_t vector_size;
   struct ContextNode **children;
-  int num_children;
-  int max_children;
+  uint32_t num_children;
+  uint32_t max_children;
   struct ContextNode *parent;
   float temporal_relevance;
-  int last_updated;
+  uint64_t last_updated;
 } ContextNode;
 
 typedef struct GlobalContextManager {
   ContextNode *root;
-  int total_nodes;
+  uint32_t total_nodes;
   float *global_context_vector;
-  int vector_size;
+  uint32_t vector_size;
   float decay_rate;
   float update_threshold;
-  int max_depth;
-  int max_children_per_node;
+  uint32_t max_depth;
+  uint32_t max_children_per_node;
 } GlobalContextManager;
 
 typedef struct {
@@ -263,7 +281,6 @@ typedef struct {
   float minimum_context_weight;
 } ContextAdaptation;
 
-// Add these new structures after the existing includes
 typedef struct {
   float novelty_score;
   float competence_score;
@@ -275,23 +292,28 @@ typedef struct {
 } IntrinsicMotivation;
 
 typedef struct {
-  char description[256];
-  float priority;
-  float progress;
-  float reward_value;
-  bool achieved;
-  int timestamp;
+  char description[256];   // Goal description
+  float priority;          // Priority level (0.1 to 1.0)
+  float progress;          // Current progress towards goal (0.0 to 1.0)
+  float previous_progress; // Previous progress value for delta calculation
+  float reward_value;      // Reward value when goal is achieved
+  bool achieved;           // Whether the goal has been achieved
+  time_t timestamp;        // When the goal was created/updated
+  int stability_counter;   // Counter for tracking stability instead of just
+                           // improvements
 } Goal;
 
 typedef struct {
-  Goal *goals;
-  int num_goals;
-  int capacity;
-  float planning_horizon;
-  float discount_factor;
+  Goal *goals;              // Array of goals
+  int num_goals;            // Number of active goals
+  int capacity;             // Maximum number of goals
+  float planning_horizon;   // Time horizon for planning
+  float discount_factor;    // Discount factor for future rewards
+  float min_learning_rate;  // Minimum bound for learning rate
+  float max_learning_rate;  // Maximum bound for learning rate
+  float base_learning_rate; // Base learning rate to return to
 } GoalSystem;
 
-// Enhanced memory structures with semantic clustering
 typedef struct {
   float *vector;     // Semantic vector representing the cluster center
   unsigned int size; // Number of memories in cluster
@@ -367,11 +389,11 @@ typedef struct {
   float *experience_history;  // Compressed history of experiences
   float *behavioral_patterns; // Consistent behavior patterns
 
-  int num_core_values;
-  int num_beliefs;
-  int num_markers;
-  int history_size;
-  int pattern_size;
+  uint32_t num_core_values;
+  uint32_t num_beliefs;
+  uint32_t num_markers;
+  uint32_t history_size;
+  uint32_t pattern_size;
 
   float consistency_score; // Measure of identity stability
   float adaptation_rate;   // Rate of identity evolution
@@ -379,13 +401,13 @@ typedef struct {
 
   // Temporal consistency tracking
   float *temporal_coherence; // Track consistency over time
-  int coherence_window;      // Time window for coherence analysis
+  uint32_t coherence_window; // Time window for coherence analysis
 
   // Identity verification system
   struct {
     float threshold;        // Minimum consistency threshold
     float *reference_state; // Reference identity state
-    int state_size;         // Size of reference state
+    uint32_t state_size;    // Size of reference state
   } verification;
 
 } SelfIdentitySystem;
@@ -396,7 +418,7 @@ typedef struct {
   float *feature_vector;
   float importance;
   float confidence;
-  int usage_count;
+  uint32_t usage_count;
   time_t last_accessed;
 } KnowledgeCategory;
 
@@ -411,20 +433,27 @@ typedef struct {
 
 typedef struct {
   KnowledgeCategory *categories;
-  int num_categories;
-  int capacity;
+  uint32_t num_categories;
+  uint32_t capacity;
   ProblemInstance *problem_history;
-  int num_problems;
-  int problem_capacity;
+  uint32_t num_problems;
+  uint32_t problem_capacity;
   float *category_similarity_matrix;
 } KnowledgeFilter;
 
+typedef struct {
+  float avg_success_rate;
+  float avg_difficulty;
+  uint32_t total_instances;
+  time_t last_encounter;
+} CategoryStatistics;
+
 typedef struct DecisionPath {
-  float *states;    // Predicted neuron states
-  float *weights;   // Weight adjustments
-  int *connections; // Connection changes
-  float score;      // Path evaluation score
-  int num_steps;    // Number of prediction steps
+  float *states;         // Predicted neuron states
+  float *weights;        // Weight adjustments
+  uint32_t *connections; // Connection changes
+  float score;           // Path evaluation score
+  int num_steps;         // Number of prediction steps
 } DecisionPath;
 
 typedef struct MetacognitionMetrics {
@@ -441,15 +470,8 @@ typedef struct MetaLearningState {
   float exploration_rate;    // Balance between exploration/exploitation
   float stability_index;     // System stability measure
   float *priority_weights;   // Attention allocation weights
-  int current_phase;         // Current learning phase
+  uint32_t current_phase;    // Current learning phase
 } MetaLearningState;
-
-typedef struct {
-  float avg_success_rate;
-  float avg_difficulty;
-  int total_instances;
-  time_t last_encounter;
-} CategoryStatistics;
 
 typedef struct {
   bool critical_violation;
@@ -564,6 +586,80 @@ typedef struct {
   int memory_index;           // Current index in circular memory buffer
 } EmotionalSystem;
 
+typedef struct {
+  float probability;
+  float confidence;
+  float impact_score;
+  float plausibility;
+  float vector[MEMORY_VECTOR_SIZE];
+  char description[256];
+} ImaginedOutcome;
+
+typedef struct {
+  int num_outcomes;
+  ImaginedOutcome outcomes[10];
+  float divergence_factor;
+  float creativity_level;
+} ImaginationScenario;
+
+typedef struct {
+  ImaginationScenario scenarios[MAX_SCENARIOS];
+  int num_scenarios;
+  int current_scenario;
+  float creativity_factor;
+  float coherence_threshold;
+  float novelty_weight;
+  float memory_influence;
+  float identity_influence;
+  bool active;
+  int steps_simulated;
+  float divergence_history[100];
+  char current_scenario_name[MAX_SCENARIO_NAME_LENGTH];
+  int total_scenarios_generated;
+} ImaginationSystem;
+
+typedef struct {
+  unsigned int timestamp;
+  int person_id;              // ID of the person involved
+  float emotional_state[5];   // Emotional state during interaction
+  float cooperation_level;    // How cooperative the interaction was
+  float outcome_satisfaction; // How satisfied both parties were
+  char interaction_type[32];  // Type of interaction (negotiation, casual, etc.)
+  char *context;              // Context of the interaction
+} SocialInteraction;
+
+typedef struct {
+  int person_id;
+  char person_name[64];
+  float observed_traits[10];   // Personality traits inferred
+  float prediction_confidence; // Confidence in behavioral predictions
+  float relationship_quality;  // Quality of relationship with this person
+  float trust_level;           // Trust built with this person
+  int interaction_count;       // Number of interactions with this person
+} PersonModel;
+
+typedef struct {
+  // Core social capabilities
+  float empathy_level;     // Ability to understand others' emotions
+  float negotiation_skill; // Ability to find mutually beneficial solutions
+  float behavior_prediction_accuracy; // Accuracy in predicting others' actions
+  float social_awareness;             // Awareness of social dynamics and norms
+
+  // Social interaction history
+  int interaction_count;
+  SocialInteraction *interactions; // Array of past interactions
+  int max_interactions;            // Maximum number of interactions to store
+
+  // Social models of others
+  int model_count;
+  PersonModel
+      *person_models; // Models of individuals the system has interacted with
+  int max_models;     // Maximum number of models to maintain
+
+  // Social learning parameters
+  float learning_rate;     // Rate at which social skills improve
+  float forgetting_factor; // Rate at which old interactions lose relevance
+} SocialSystem;
 
 MemorySystem* createMemorySystem(int capacity);
 void loadMemorySystem(const char* filename, MemorySystem* memorySystem);
@@ -677,5 +773,167 @@ void initializeMetaLearningState(int size);
 void createWorkingMemorySystem(int capacity);
 void initializeMoralCompass(int num_principles);
 EmotionalSystem* initializeEmotionalSystem();
+ImaginationSystem *initializeImaginationSystem(float creativity_factor, float coherence_threshold);
+ImaginationScenario createScenario(Neuron *neurons, MemorySystem *memory_system, int max_neurons, float divergence);
+void simulateScenario(ImaginationScenario *scenario, Neuron *neurons, float *input_tensor, int max_neurons, int steps);
+void evaluateScenarioPlausibility(ImaginationScenario *scenario, MemorySystem *memory_system);
+float applyImaginationToDecision(ImaginationSystem *imagination, Neuron *neurons, float *input_tensor, int max_neurons);
+void updateImaginationCreativity(ImaginationSystem *imagination, float performance_delta, float novelty);
+void freeImaginationSystem(ImaginationSystem *system);
+void blendImaginedOutcomes(ImaginedOutcome *outcomes, int num_outcomes, float *result_vector);
+bool isScenarioCoherent(ImaginationScenario *scenario, float threshold);
+void adjustNeuronsWithImagination(Neuron *neurons, ImaginedOutcome *outcome, int max_neurons, float influence);
+SocialSystem *initializeSocialSystem(int max_interactions, int max_models);
+void updateEmpathy(SocialSystem *system, EmotionalSystem *emotional_system);
+void updatePersonModel(SocialSystem *system, int person_id, float *observed_behavior, float *predicted_behavior);
+float negotiateOutcome(SocialSystem *system, int person_id, float *goals, float *other_goals, float *compromise);
+float calculateInteractionDiversity(SocialSystem *system);
+void recordSocialInteraction(SocialSystem *system, int person_id, float *emotional_state, float cooperation_level, float satisfaction, const char *type, const char *context);
+void predictBehavior(SocialSystem *system, int person_id, const char *context, float *predicted_behavior);
+void applySocialInfluence(SocialSystem *system, Neuron *neurons, float *weights, int max_neurons);
+char *generateSocialFeedback(SocialSystem *system, const char *context);
+void freeSocialSystem(SocialSystem *system);
+NeuronSpecializationSystem *initializeSpecializationSystem(float threshold);
+void detectSpecializations(NeuronSpecializationSystem *system, Neuron *neurons, int max_neurons, float *input_tensor, float *target_outputs, float *previous_outputs, float *previous_states);
+void applySpecializations(NeuronSpecializationSystem *system, Neuron *neurons, float *weights, int *connections, int max_neurons, int max_connections);
+void updateSpecializationImportance(NeuronSpecializationSystem *system, float network_performance, float error_rate, Neuron *neurons);
+float evaluateSpecializationEffectiveness(NeuronSpecializationSystem *system, float network_performance);
+void printSpecializationStats(NeuronSpecializationSystem *system);
+
+// Save and Load functions for MetaController
+void saveMetaController(MetaController *controller, const char *filename);
+MetaController *loadMetaController(const char *filename);
+
+// Save and Load functions for IntrinsicMotivation
+void saveIntrinsicMotivation(IntrinsicMotivation *motivation, const char *filename);
+IntrinsicMotivation *loadIntrinsicMotivation(const char *filename);
+
+// Save and Load functions for NetworkPerformanceMetrics
+void saveNetworkPerformanceMetrics(NetworkPerformanceMetrics *metrics, const char *filename);
+NetworkPerformanceMetrics *loadNetworkPerformanceMetrics(const char *filename);
+
+// Save and Load functions for ReflectionParameters
+void saveReflectionParameters(ReflectionParameters *params, const char *filename);
+ReflectionParameters *loadReflectionParameters(const char *filename);
+
+// Save and Load functions for SelfIdentitySystem
+void saveSelfIdentitySystem(SelfIdentitySystem *identity, const char *filename);
+SelfIdentitySystem *loadSelfIdentitySystem(const char *filename);
+
+// Save and Load functions for KnowledgeFilter
+void saveKnowledgeFilter(KnowledgeFilter *filter, const char *filename);
+KnowledgeFilter *loadKnowledgeFilter(const char *filename);
+
+// Save and Load functions for MetacognitionMetrics
+void saveMetacognitionMetrics(MetacognitionMetrics *metrics, const char *filename);
+MetacognitionMetrics *loadMetacognitionMetrics(const char *filename);
+
+// Save and Load functions for MetaLearningState
+void saveMetaLearningState(MetaLearningState *state, const char *filename);
+MetaLearningState *loadMetaLearningState(const char *filename);
+
+// Function to save all systems
+void saveAllSystems(MetaController *metaController, IntrinsicMotivation *motivation, NetworkPerformanceMetrics *performanceMetrics, ReflectionParameters *reflection_params, SelfIdentitySystem *identity_system, KnowledgeFilter *knowledge_filter, MetacognitionMetrics *metacognition, MetaLearningState *meta_learning_state, SocialSystem *social_system);
+
+// Global jump buffer for segmentation fault recovery
+extern jmp_buf segfault_recovery;
+extern volatile bool segfault_occurred;
+extern volatile void *fault_address;
+extern char fault_description[256];
+
+// Function to validate memory block
+bool isValidMemoryRegion(void *ptr, size_t size);
+
+// Function to validate memory block with additional checks
+bool validateMemoryBlock(void *ptr, size_t expected_size, const char *component_name);
+
+// Segmentation fault handler
+void segfault_handler(int sig, siginfo_t *si, void *unused);
+
+// Initialize segmentation fault protection
+void initializeSegfaultProtection();
+
+// Individual validation functions for each system component
+bool validateWorkingMemory(WorkingMemorySystem *wm);
+bool validateMetaController(MetaController *mc);
+bool validatePerformanceMetrics(NetworkPerformanceMetrics *npm);
+bool validateMotivationSystem(IntrinsicMotivation *im);
+bool validateReflectionParameters(ReflectionParameters *rp);
+bool validateIdentitySystem(SelfIdentitySystem *sis);
+bool validateKnowledgeFilter(KnowledgeFilter *kf);
+bool validateMetacognition(MetacognitionMetrics *mm);
+bool validateMetaLearning(MetaLearningState *mls);
+bool validateSocialSystem(SocialSystem *ss);
+bool validateGoalSystem(GoalSystem *gs);
+bool validateContextManager(GlobalContextManager *gcm);
+bool validateEmotionalSystem(EmotionalSystem *es);
+bool validateImaginationSystem(ImaginationSystem *is);
+bool validateSpecializationSystem(NeuronSpecializationSystem *nss);
+bool validateMoralCompass(MoralCompass *mc);
+
+// Enhanced memory cluster checker with recovery
+bool checkMemoryCluster(MemoryCluster *cluster, const char *name);
+
+// Comprehensive system component checker
+bool checkSystemComponent(void *component, const char *name, size_t expected_size);
+
+// Enhanced memory usage checker with detailed reporting
+bool checkMemoryUsage();
+
+// Log current system state for debugging
+void logSystemState();
+
+// Emergency backup function
+void saveEmergencyBackup();
+
+// System stabilization function
+void stabilizeSystem();
+
+// System recovery function for critical failures
+void attemptSystemRecovery(const char *failure_description);
+
+// Enhanced memory region validator with detailed analysis
+bool validateMemoryRegionDetailed(void *ptr, size_t size, const char *region_name);
+
+// Floating point exception handler
+void fpe_handler(int sig, siginfo_t *si, void *unused);
+
+// Signal handler setup with enhanced error reporting
+void setupEnhancedSignalHandlers();
+
+// System health metrics structure
+typedef struct {
+    time_t start_time;
+    unsigned long total_checks;
+    unsigned long successful_checks;
+    unsigned long failed_checks;
+    unsigned long segfaults_recovered;
+    unsigned long fpe_recovered;
+    float average_check_time;
+    float min_check_time;
+    float max_check_time;
+    float total_check_time;
+    unsigned long component_failures;
+    unsigned long memory_issues;
+    unsigned long instability_events;
+    unsigned long critical_failures;
+    unsigned long neuron_corrections;
+    unsigned long connection_corrections;
+    unsigned long weight_corrections;
+    unsigned long memory_reinitializations;
+    unsigned long memory_cluster_errors;
+} SystemHealthMetrics;
+
+// Initialize system health monitor
+void initializeSystemHealthMonitor();
+
+// Update health metrics
+void updateHealthMetrics(bool check_passed, double check_duration);
+
+// Print system health report
+void printSystemHealthReport();
+
+// System fallback check
+void systemFallbackCheck(Neuron *neurons, int *connections, float *weights, int *reverse_connections, float *reverse_weights, MemorySystem *memorySystem, NetworkStateSnapshot *stateHistory, PerformanceMetrics *performance_history, float *input_tensor, float *target_outputs, float *previous_outputs, SystemParameters *system_params, WorkingMemorySystem *working_memory, MetaController *metaController, NetworkPerformanceMetrics *performanceMetrics, IntrinsicMotivation *motivation, ReflectionParameters *reflection_params, SelfIdentitySystem *identity_system, KnowledgeFilter *knowledge_filter, MetacognitionMetrics *metacognition, MetaLearningState *meta_learning_state, SocialSystem *social_system, GoalSystem *goalSystem, GlobalContextManager *contextManager, EmotionalSystem *emotional_system, ImaginationSystem *imagination_system, NeuronSpecializationSystem *specialization_system, MoralCompass *moralCompass, int step, int max_neurons, int max_connections, int input_size);
 
 #endif // KEY_FUNCTIONS_H
