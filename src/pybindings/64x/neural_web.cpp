@@ -13,6 +13,8 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
+#include <pybind11/stl.h>
 
 #define MAX_NEURONS 8
 #define MAX_CONNECTIONS 2
@@ -11483,6 +11485,1123 @@ void saveAllSystems(MetaController *metaController,
   saveMetaLearningState(meta_learning_state, "meta_learning.dat");
 }
 
+// Global jump buffer for segmentation fault recovery
+static jmp_buf segfault_recovery;
+static volatile bool segfault_occurred = false;
+static volatile void *fault_address = NULL;
+static char fault_description[256] = {0};
+
+// Function to validate memory block
+bool isValidMemoryRegion(void *ptr, size_t size) {
+  if (ptr == NULL)
+    return false;
+
+  volatile char test;
+  char *start = (char *)ptr;
+  char *end = start + size - 1;
+
+  if (setjmp(segfault_recovery) == 0) {
+    test = *start;
+    test = *end;
+    return true;
+  } else {
+    return false;
+  }
+}
+
+// Function to validate memory block with additional checks
+bool validateMemoryBlock(void *ptr, size_t expected_size,
+                         const char *component_name) {
+  if (ptr == NULL) {
+    fprintf(stderr, "ERROR: %s - NULL pointer detected\n", component_name);
+    return false;
+  }
+
+  if (!isValidMemoryRegion(ptr, expected_size)) {
+    fprintf(stderr, "ERROR: %s - Invalid memory region at %p (size: %zu)\n",
+            component_name, ptr, expected_size);
+    return false;
+  }
+
+  return true;
+}
+
+// Segmentation fault handler
+void segfault_handler(int sig, siginfo_t *si, void *unused) {
+  segfault_occurred = true;
+  fault_address = si->si_addr;
+
+  snprintf(fault_description, sizeof(fault_description),
+           "Segmentation fault at address %p (signal %d)", si->si_addr, sig);
+
+  fprintf(stderr, "CRITICAL SEGFAULT CAUGHT: %s\n", fault_description);
+
+  longjmp(segfault_recovery, 1);
+}
+
+// Initialize segmentation fault protection
+void initializeSegfaultProtection() {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+
+  sa.sa_sigaction = segfault_handler;
+  sa.sa_flags = SA_SIGINFO;
+  sigemptyset(&sa.sa_mask);
+
+  if (sigaction(SIGSEGV, &sa, NULL) == -1) {
+    fprintf(stderr, "WARNING: Failed to install segfault handler\n");
+  }
+}
+
+// Individual validation functions for each system component
+bool validateWorkingMemory(WorkingMemorySystem *wm) {
+  if (!validateMemoryBlock(wm, sizeof(WorkingMemorySystem), "WorkingMemory")) {
+    return false;
+  }
+
+  if (wm->focus.entries != NULL && wm->focus.capacity > 0) {
+    if (!validateMemoryBlock(wm->focus.entries,
+                             wm->focus.capacity * sizeof(WorkingMemoryEntry),
+                             "WorkingMemory->focus.entries")) {
+      wm->focus.entries = NULL;
+      wm->focus.size = 0;
+      fprintf(stderr, "WARNING: Corrupted focus entries, reset to NULL\n");
+    }
+  }
+
+  if (wm->active.entries != NULL && wm->active.capacity > 0) {
+    if (!validateMemoryBlock(wm->active.entries,
+                             wm->active.capacity * sizeof(WorkingMemoryEntry),
+                             "WorkingMemory->active.entries")) {
+      wm->active.entries = NULL;
+      wm->active.size = 0;
+      fprintf(stderr, "WARNING: Corrupted active entries, reset to NULL\n");
+    }
+  }
+
+  if (wm->focus.size > wm->focus.capacity) {
+    fprintf(stderr, "WARNING: Focus size exceeds capacity, correcting\n");
+    wm->focus.size = wm->focus.capacity;
+  }
+
+  if (wm->active.size > wm->active.capacity) {
+    fprintf(stderr, "WARNING: Active size exceeds capacity, correcting\n");
+    wm->active.size = wm->active.capacity;
+  }
+
+  return true;
+}
+
+bool validateMetaController(MetaController *mc) {
+  if (!validateMemoryBlock(mc, sizeof(MetaController), "MetaController")) {
+    return false;
+  }
+
+  if (isnan(mc->meta_learning_rate) || isinf(mc->meta_learning_rate) ||
+      mc->meta_learning_rate < 0.0f || mc->meta_learning_rate > 1.0f) {
+    fprintf(stderr, "WARNING: Invalid meta learning rate, resetting to 0.01\n");
+    mc->meta_learning_rate = 0.01f;
+  }
+
+  if (isnan(mc->exploration_factor) || isinf(mc->exploration_factor) ||
+      mc->exploration_factor < 0.0f || mc->exploration_factor > 1.0f) {
+    fprintf(stderr, "WARNING: Invalid exploration factor, resetting to 0.1\n");
+    mc->exploration_factor = 0.1f;
+  }
+
+  if (mc->region_importance_scores != NULL && mc->num_regions > 0) {
+    if (!validateMemoryBlock(mc->region_importance_scores,
+                             mc->num_regions * sizeof(float),
+                             "MetaController->region_importance_scores")) {
+      mc->region_importance_scores = NULL;
+      fprintf(stderr, "WARNING: Corrupted region importance scores\n");
+    }
+  }
+
+  return true;
+}
+
+bool validatePerformanceMetrics(NetworkPerformanceMetrics *npm) {
+  if (!validateMemoryBlock(npm, sizeof(NetworkPerformanceMetrics),
+                           "NetworkPerformanceMetrics")) {
+    return false;
+  }
+
+  if (npm->region_performance_scores != NULL && npm->num_regions > 0) {
+    if (!validateMemoryBlock(npm->region_performance_scores,
+                             npm->num_regions * sizeof(float),
+                             "NetworkPerformanceMetrics->performance_scores")) {
+      npm->region_performance_scores = NULL;
+      fprintf(stderr, "WARNING: Corrupted performance scores\n");
+    }
+  }
+
+  if (npm->region_error_rates != NULL && npm->num_regions > 0) {
+    if (!validateMemoryBlock(npm->region_error_rates,
+                             npm->num_regions * sizeof(float),
+                             "NetworkPerformanceMetrics->error_rates")) {
+      npm->region_error_rates = NULL;
+      fprintf(stderr, "WARNING: Corrupted error rates\n");
+    }
+  }
+
+  return true;
+}
+
+bool validateMotivationSystem(IntrinsicMotivation *im) {
+  if (!validateMemoryBlock(im, sizeof(IntrinsicMotivation),
+                           "IntrinsicMotivation")) {
+    return false;
+  }
+
+  float *scores[] = {&im->novelty_score,   &im->competence_score,
+                     &im->autonomy_score,  &im->mastery_level,
+                     &im->curiosity_drive, &im->achievement_drive,
+                     &im->exploration_rate};
+  const char *names[] = {"novelty",   "competence",  "autonomy",   "mastery",
+                         "curiosity", "achievement", "exploration"};
+
+  for (int i = 0; i < 7; i++) {
+    if (isnan(*scores[i]) || isinf(*scores[i]) || *scores[i] < 0.0f ||
+        *scores[i] > 1.0f) {
+      fprintf(stderr, "WARNING: Invalid %s score, resetting to 0.5\n",
+              names[i]);
+      *scores[i] = 0.5f;
+    }
+  }
+
+  return true;
+}
+
+bool validateReflectionParameters(ReflectionParameters *rp) {
+  if (!validateMemoryBlock(rp, sizeof(ReflectionParameters),
+                           "ReflectionParameters")) {
+    return false;
+  }
+
+  if (isnan(rp->current_adaptation_rate) ||
+      isinf(rp->current_adaptation_rate) ||
+      rp->current_adaptation_rate < 0.0f ||
+      rp->current_adaptation_rate > 1.0f) {
+    fprintf(stderr, "WARNING: Invalid adaptation rate, resetting to 0.01\n");
+    rp->current_adaptation_rate = 0.01f;
+  }
+
+  if (isnan(rp->learning_rate) || isinf(rp->learning_rate) ||
+      rp->learning_rate <= 0.0f || rp->learning_rate > 1.0f) {
+    fprintf(stderr, "WARNING: Invalid learning rate, resetting to 0.01\n");
+    rp->learning_rate = 0.01f;
+  }
+
+  return true;
+}
+
+bool validateIdentitySystem(SelfIdentitySystem *sis) {
+  if (!validateMemoryBlock(sis, sizeof(SelfIdentitySystem),
+                           "SelfIdentitySystem")) {
+    return false;
+  }
+
+  if (sis->core_values != NULL && sis->num_core_values > 0) {
+    if (!validateMemoryBlock(sis->core_values,
+                             sis->num_core_values * sizeof(float),
+                             "SelfIdentitySystem->core_values")) {
+      sis->core_values = NULL;
+      sis->num_core_values = 0;
+      fprintf(stderr, "WARNING: Corrupted core values\n");
+    }
+  }
+
+  if (isnan(sis->consistency_score) || isinf(sis->consistency_score)) {
+    fprintf(stderr, "WARNING: Invalid consistency score, resetting to 0.5\n");
+    sis->consistency_score = 0.5f;
+  }
+
+  return true;
+}
+
+bool validateKnowledgeFilter(KnowledgeFilter *kf) {
+  if (!validateMemoryBlock(kf, sizeof(KnowledgeFilter), "KnowledgeFilter")) {
+    return false;
+  }
+
+  if (kf->categories != NULL && kf->capacity > 0) {
+    if (!validateMemoryBlock(kf->categories,
+                             kf->capacity * sizeof(KnowledgeCategory),
+                             "KnowledgeFilter->categories")) {
+      kf->categories = NULL;
+      kf->num_categories = 0;
+      fprintf(stderr, "WARNING: Corrupted knowledge categories\n");
+    }
+  }
+
+  if (kf->num_categories > kf->capacity) {
+    fprintf(stderr, "WARNING: Category count exceeds capacity, correcting\n");
+    kf->num_categories = kf->capacity;
+  }
+
+  return true;
+}
+
+bool validateMetacognition(MetacognitionMetrics *mm) {
+  if (!validateMemoryBlock(mm, sizeof(MetacognitionMetrics),
+                           "MetacognitionMetrics")) {
+    return false;
+  }
+
+  float *metrics[] = {&mm->confidence_level, &mm->adaptation_rate,
+                      &mm->cognitive_load, &mm->error_awareness,
+                      &mm->context_relevance};
+  const char *names[] = {"confidence", "adaptation", "cognitive_load",
+                         "error_awareness", "context"};
+
+  for (int i = 0; i < 5; i++) {
+    if (isnan(*metrics[i]) || isinf(*metrics[i])) {
+      fprintf(stderr, "WARNING: Invalid %s metric, resetting to 0.5\n",
+              names[i]);
+      *metrics[i] = 0.5f;
+    }
+  }
+
+  return true;
+}
+
+bool validateMetaLearning(MetaLearningState *mls) {
+  if (!validateMemoryBlock(mls, sizeof(MetaLearningState),
+                           "MetaLearningState")) {
+    return false;
+  }
+
+  if (mls->priority_weights != NULL) {
+    if (!isValidMemoryRegion(mls->priority_weights, sizeof(float))) {
+      mls->priority_weights = NULL;
+      fprintf(stderr, "WARNING: Corrupted priority weights\n");
+    }
+  }
+
+  return true;
+}
+
+bool validateSocialSystem(SocialSystem *ss) {
+  if (!validateMemoryBlock(ss, sizeof(SocialSystem), "SocialSystem")) {
+    return false;
+  }
+
+  if (ss->interactions != NULL && ss->max_interactions > 0) {
+    if (!validateMemoryBlock(ss->interactions,
+                             ss->max_interactions * sizeof(SocialInteraction),
+                             "SocialSystem->interactions")) {
+      ss->interactions = NULL;
+      ss->interaction_count = 0;
+      fprintf(stderr, "WARNING: Corrupted social interactions\n");
+    }
+  }
+
+  if (ss->person_models != NULL && ss->max_models > 0) {
+    if (!validateMemoryBlock(ss->person_models,
+                             ss->max_models * sizeof(PersonModel),
+                             "SocialSystem->person_models")) {
+      ss->person_models = NULL;
+      ss->model_count = 0;
+      fprintf(stderr, "WARNING: Corrupted person models\n");
+    }
+  }
+
+  return true;
+}
+
+bool validateGoalSystem(GoalSystem *gs) {
+  if (!validateMemoryBlock(gs, sizeof(GoalSystem), "GoalSystem")) {
+    return false;
+  }
+
+  if (gs->goals != NULL && gs->capacity > 0) {
+    if (!validateMemoryBlock(gs->goals, gs->capacity * sizeof(Goal),
+                             "GoalSystem->goals")) {
+      gs->goals = NULL;
+      gs->num_goals = 0;
+      fprintf(stderr, "WARNING: Corrupted goals\n");
+    }
+  }
+
+  if (gs->num_goals > gs->capacity) {
+    fprintf(stderr, "WARNING: Goal count exceeds capacity, correcting\n");
+    gs->num_goals = gs->capacity;
+  }
+
+  return true;
+}
+
+bool validateContextManager(GlobalContextManager *gcm) {
+  if (!validateMemoryBlock(gcm, sizeof(GlobalContextManager),
+                           "GlobalContextManager")) {
+    return false;
+  }
+
+  if (gcm->global_context_vector != NULL && gcm->vector_size > 0) {
+    if (!validateMemoryBlock(gcm->global_context_vector,
+                             gcm->vector_size * sizeof(float),
+                             "GlobalContextManager->global_context_vector")) {
+      gcm->global_context_vector = NULL;
+      fprintf(stderr, "WARNING: Corrupted global context vector\n");
+    }
+  }
+
+  return true;
+}
+
+bool validateEmotionalSystem(EmotionalSystem *es) {
+  if (!validateMemoryBlock(es, sizeof(EmotionalSystem), "EmotionalSystem")) {
+    return false;
+  }
+
+  for (int i = 0; i < MAX_EMOTION_TYPES; i++) {
+    EmotionState *emotion = &es->emotions[i];
+    if (isnan(emotion->intensity) || isinf(emotion->intensity) ||
+        emotion->intensity < 0.0f || emotion->intensity > 1.0f) {
+      fprintf(stderr, "WARNING: Invalid emotion %d intensity, resetting\n", i);
+      emotion->intensity = 0.0f;
+    }
+  }
+
+  return true;
+}
+
+bool validateImaginationSystem(ImaginationSystem *is) {
+  if (!validateMemoryBlock(is, sizeof(ImaginationSystem),
+                           "ImaginationSystem")) {
+    return false;
+  }
+
+  if (is->num_scenarios > MAX_SCENARIOS) {
+    fprintf(stderr, "WARNING: Scenario count exceeds maximum, correcting\n");
+    is->num_scenarios = MAX_SCENARIOS;
+  }
+
+  if (is->current_scenario >= is->num_scenarios && is->num_scenarios > 0) {
+    fprintf(stderr, "WARNING: Current scenario index invalid, correcting\n");
+    is->current_scenario = 0;
+  }
+
+  return true;
+}
+
+bool validateSpecializationSystem(NeuronSpecializationSystem *nss) {
+  if (!validateMemoryBlock(nss, sizeof(NeuronSpecializationSystem),
+                           "NeuronSpecializationSystem")) {
+    return false;
+  }
+
+  if (nss->count > MAX_SPECIALIZED_NEURONS) {
+    fprintf(stderr,
+            "WARNING: Specialized neuron count exceeds maximum, correcting\n");
+    nss->count = MAX_SPECIALIZED_NEURONS;
+  }
+
+  return true;
+}
+
+bool validateMoralCompass(MoralCompass *mc) {
+  if (!validateMemoryBlock(mc, sizeof(MoralCompass), "MoralCompass")) {
+    return false;
+  }
+
+  if (mc->principles != NULL && mc->num_principles > 0) {
+    if (!validateMemoryBlock(mc->principles,
+                             mc->num_principles * sizeof(EthicalPrinciple),
+                             "MoralCompass->principles")) {
+      mc->principles = NULL;
+      mc->num_principles = 0;
+      fprintf(stderr, "WARNING: Corrupted ethical principles\n");
+    }
+  }
+
+  if (isnan(mc->overall_alignment) || isinf(mc->overall_alignment) ||
+      mc->overall_alignment < 0.0f || mc->overall_alignment > 1.0f) {
+    fprintf(stderr, "WARNING: Invalid overall alignment, resetting to 0.5\n");
+    mc->overall_alignment = 0.5f;
+  }
+
+  return true;
+}
+
+// Enhanced memory cluster checker with recovery
+bool checkMemoryCluster(MemoryCluster *cluster, const char *name) {
+  if (cluster == NULL) {
+    fprintf(stderr, "WARNING: %s memory cluster is NULL\n", name);
+    return false;
+  }
+
+  if (!validateMemoryBlock(cluster, sizeof(MemoryCluster), name)) {
+    fprintf(stderr, "CRITICAL: %s memory cluster structure corrupted\n", name);
+    return false;
+  }
+
+  if (cluster->entries == NULL && cluster->capacity > 0) {
+    fprintf(
+        stderr,
+        "WARNING: %s memory entries is NULL but capacity > 0, reallocating\n",
+        name);
+    cluster->entries =
+        (MemoryEntry *)calloc(cluster->capacity, sizeof(MemoryEntry));
+    cluster->size = 0;
+  }
+
+  if (cluster->entries != NULL && cluster->capacity > 0) {
+    if (!validateMemoryBlock(cluster->entries,
+                             cluster->capacity * sizeof(MemoryEntry), name)) {
+      fprintf(stderr, "WARNING: %s memory entries corrupted, reallocating\n",
+              name);
+      free(cluster->entries);
+      cluster->entries =
+          (MemoryEntry *)calloc(cluster->capacity, sizeof(MemoryEntry));
+      cluster->size = 0;
+    }
+  }
+
+  if (cluster->size > cluster->capacity) {
+    fprintf(stderr,
+            "WARNING: %s memory size exceeds capacity (%u > %u), correcting\n",
+            name, cluster->size, cluster->capacity);
+    cluster->size = cluster->capacity;
+  }
+
+  if (isnan(cluster->importance_threshold) ||
+      isinf(cluster->importance_threshold) ||
+      cluster->importance_threshold < 0.0f ||
+      cluster->importance_threshold > 1.0f) {
+    fprintf(stderr,
+            "WARNING: %s importance threshold invalid, resetting to 0.5\n",
+            name);
+    cluster->importance_threshold = 0.5f;
+  }
+
+  if (cluster->entries != NULL && cluster->size > 0) {
+    for (unsigned int i = 0; i < cluster->size && i < cluster->capacity; i++) {
+      MemoryEntry *entry = &cluster->entries[i];
+
+      if (isnan(entry->importance) || isinf(entry->importance)) {
+        fprintf(stderr,
+                "WARNING: %s entry %u has invalid importance, resetting\n",
+                name, i);
+        entry->importance = 0.0f;
+      }
+
+      for (int j = 0; j < MEMORY_VECTOR_SIZE; j++) {
+        if (isnan(entry->vector[j]) || isinf(entry->vector[j])) {
+          fprintf(stderr,
+                  "WARNING: %s entry %u vector[%d] invalid, resetting\n", name,
+                  i, j);
+          entry->vector[j] = 0.0f;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+// Comprehensive system component checker
+bool checkSystemComponent(void *component, const char *name,
+                          size_t expected_size) {
+  if (component == NULL) {
+    fprintf(stderr, "WARNING: %s system is NULL, attempting recovery\n", name);
+    return false;
+  }
+
+  if (!validateMemoryBlock(component, expected_size, name)) {
+    fprintf(stderr,
+            "CRITICAL: %s system has corrupted memory, attempting recovery\n",
+            name);
+    return false;
+  }
+
+  if (strcmp(name, "Working Memory") == 0) {
+    return validateWorkingMemory((WorkingMemorySystem *)component);
+  } else if (strcmp(name, "Meta Controller") == 0) {
+    return validateMetaController((MetaController *)component);
+  } else if (strcmp(name, "Performance Metrics") == 0) {
+    return validatePerformanceMetrics((NetworkPerformanceMetrics *)component);
+  } else if (strcmp(name, "Motivation System") == 0) {
+    return validateMotivationSystem((IntrinsicMotivation *)component);
+  } else if (strcmp(name, "Reflection Parameters") == 0) {
+    return validateReflectionParameters((ReflectionParameters *)component);
+  } else if (strcmp(name, "Identity System") == 0) {
+    return validateIdentitySystem((SelfIdentitySystem *)component);
+  } else if (strcmp(name, "Knowledge Filter") == 0) {
+    return validateKnowledgeFilter((KnowledgeFilter *)component);
+  } else if (strcmp(name, "Metacognition") == 0) {
+    return validateMetacognition((MetacognitionMetrics *)component);
+  } else if (strcmp(name, "Meta Learning") == 0) {
+    return validateMetaLearning((MetaLearningState *)component);
+  } else if (strcmp(name, "Social System") == 0) {
+    return validateSocialSystem((SocialSystem *)component);
+  } else if (strcmp(name, "Goal System") == 0) {
+    return validateGoalSystem((GoalSystem *)component);
+  } else if (strcmp(name, "Context Manager") == 0) {
+    return validateContextManager((GlobalContextManager *)component);
+  } else if (strcmp(name, "Emotional System") == 0) {
+    return validateEmotionalSystem((EmotionalSystem *)component);
+  } else if (strcmp(name, "Imagination System") == 0) {
+    return validateImaginationSystem((ImaginationSystem *)component);
+  } else if (strcmp(name, "Specialization System") == 0) {
+    return validateSpecializationSystem(
+        (NeuronSpecializationSystem *)component);
+  } else if (strcmp(name, "Moral Compass") == 0) {
+    return validateMoralCompass((MoralCompass *)component);
+  }
+
+  return true;
+}
+
+// Enhanced memory usage checker with detailed reporting
+bool checkMemoryUsage() {
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) != 0) {
+    fprintf(stderr, "WARNING: Failed to get memory usage statistics\n");
+    return false;
+  }
+
+  long memory_mb = usage.ru_maxrss / 1024;
+
+  if (memory_mb > 1000) {
+    fprintf(stderr, "CRITICAL: Very high memory usage detected (%ld MB)\n",
+            memory_mb);
+  } else if (memory_mb > 500) {
+    fprintf(stderr, "WARNING: High memory usage detected (%ld MB)\n",
+            memory_mb);
+  } else if (memory_mb > 200) {
+    fprintf(stderr, "INFO: Moderate memory usage (%ld MB)\n", memory_mb);
+  }
+
+  static long previous_page_faults = 0;
+  long current_page_faults = usage.ru_majflt + usage.ru_minflt;
+
+  if (previous_page_faults > 0) {
+    long fault_increase = current_page_faults - previous_page_faults;
+    if (fault_increase > 1000) {
+      fprintf(stderr,
+              "WARNING: Excessive page faults detected (%ld new faults)\n",
+              fault_increase);
+    }
+  }
+
+  previous_page_faults = current_page_faults;
+  return true;
+}
+
+// Log current system state for debugging
+void logSystemState() {
+  fprintf(stderr, "Logging current system state...\n");
+
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) == 0) {
+    fprintf(stderr, "Memory usage: %ld KB\n", usage.ru_maxrss);
+    fprintf(stderr, "Page faults: %ld major, %ld minor\n", usage.ru_majflt,
+            usage.ru_minflt);
+  }
+
+  time_t current_time = time(NULL);
+  fprintf(stderr, "Timestamp: %s", ctime(&current_time));
+}
+
+// Emergency backup function
+void saveEmergencyBackup() {
+  fprintf(stderr, "Saving emergency backup...\n");
+
+  time_t now = time(NULL);
+  char backup_filename[256];
+  snprintf(backup_filename, sizeof(backup_filename), "emergency_backup_%ld.dat",
+           now);
+
+  FILE *backup_file = fopen(backup_filename, "wb");
+  if (backup_file != NULL) {
+    fwrite(&now, sizeof(time_t), 1, backup_file);
+    fclose(backup_file);
+    fprintf(stderr, "Emergency backup saved to %s\n", backup_filename);
+  } else {
+    fprintf(stderr, "Failed to create emergency backup file\n");
+  }
+}
+
+// System stabilization function
+void stabilizeSystem() {
+  fprintf(stderr, "Attempting system stabilization...\n");
+
+  segfault_occurred = false;
+  fault_address = NULL;
+  memset(fault_description, 0, sizeof(fault_description));
+
+  sync();
+
+  usleep(100000);
+
+  fprintf(stderr, "System stabilization completed\n");
+}
+
+// System recovery function for critical failures
+void attemptSystemRecovery(const char *failure_description) {
+  fprintf(stderr, "\n=== SYSTEM RECOVERY INITIATED ===\n");
+  fprintf(stderr, "Failure: %s\n", failure_description);
+
+  logSystemState();
+
+  saveEmergencyBackup();
+
+  stabilizeSystem();
+
+  fprintf(stderr, "=== RECOVERY ATTEMPT COMPLETED ===\n");
+}
+
+// Enhanced memory region validator with detailed analysis
+bool validateMemoryRegionDetailed(void *ptr, size_t size,
+                                  const char *region_name) {
+  if (ptr == NULL) {
+    fprintf(stderr, "ERROR: %s - NULL pointer\n", region_name);
+    return false;
+  }
+
+  if (size == 0) {
+    fprintf(stderr, "WARNING: %s - Zero size region\n", region_name);
+    return false;
+  }
+
+  uintptr_t addr = (uintptr_t)ptr;
+  if (addr < 4096) {
+    fprintf(stderr, "ERROR: %s - Suspicious low address %p\n", region_name,
+            ptr);
+    return false;
+  }
+
+  volatile bool test_passed = false;
+  if (setjmp(segfault_recovery) == 0) {
+    volatile char test = *((volatile char *)ptr);
+    test = *((volatile char *)ptr + size - 1);
+    if (size > 2) {
+      test = *((volatile char *)ptr + size / 2);
+    }
+    test_passed = true;
+    (void)test;
+  } else {
+    fprintf(stderr, "ERROR: %s - Memory access violation at %p (size: %zu)\n",
+            region_name, ptr, size);
+    return false;
+  }
+
+  return test_passed;
+}
+
+// Floating point exception handler
+void fpe_handler(int sig, siginfo_t *si, void *unused) {
+  fprintf(stderr, "FLOATING POINT EXCEPTION: Signal %d at address %p\n", sig,
+          si->si_addr);
+
+  switch (si->si_code) {
+  case FPE_INTDIV:
+    fprintf(stderr, "Integer divide by zero\n");
+    break;
+  case FPE_INTOVF:
+    fprintf(stderr, "Integer overflow\n");
+    break;
+  case FPE_FLTDIV:
+    fprintf(stderr, "Floating point divide by zero\n");
+    break;
+  case FPE_FLTOVF:
+    fprintf(stderr, "Floating point overflow\n");
+    break;
+  case FPE_FLTUND:
+    fprintf(stderr, "Floating point underflow\n");
+    break;
+  case FPE_FLTRES:
+    fprintf(stderr, "Floating point inexact result\n");
+    break;
+  case FPE_FLTINV:
+    fprintf(stderr, "Floating point invalid operation\n");
+    break;
+  default:
+    fprintf(stderr, "Unknown floating point exception\n");
+    break;
+  }
+
+  longjmp(segfault_recovery, 2);
+}
+
+// Signal handler setup with enhanced error reporting
+void setupEnhancedSignalHandlers() {
+  struct sigaction sa_segv;
+  memset(&sa_segv, 0, sizeof(sa_segv));
+  sa_segv.sa_sigaction = segfault_handler;
+  sa_segv.sa_flags = SA_SIGINFO | SA_RESTART;
+  sigemptyset(&sa_segv.sa_mask);
+
+  if (sigaction(SIGSEGV, &sa_segv, NULL) == -1) {
+    fprintf(stderr, "WARNING: Failed to install SIGSEGV handler: %s\n",
+            strerror(errno));
+  }
+
+  if (sigaction(SIGBUS, &sa_segv, NULL) == -1) {
+    fprintf(stderr, "WARNING: Failed to install SIGBUS handler: %s\n",
+            strerror(errno));
+  }
+
+  struct sigaction sa_fpe;
+  memset(&sa_fpe, 0, sizeof(sa_fpe));
+  sa_fpe.sa_sigaction = fpe_handler;
+  sa_fpe.sa_flags = SA_SIGINFO | SA_RESTART;
+  sigemptyset(&sa_fpe.sa_mask);
+
+  if (sigaction(SIGFPE, &sa_fpe, NULL) == -1) {
+    fprintf(stderr, "WARNING: Failed to install SIGFPE handler: %s\n",
+            strerror(errno));
+  }
+}
+
+typedef struct {
+  time_t start_time;
+  unsigned long total_checks;
+  unsigned long successful_checks;
+  unsigned long failed_checks;
+  unsigned long segfaults_recovered;
+  unsigned long fpe_recovered;
+  float average_check_time;
+  float min_check_time;
+  float max_check_time;
+  float total_check_time;
+  unsigned long component_failures;
+  unsigned long memory_issues;
+  unsigned long instability_events;
+  unsigned long critical_failures;
+  unsigned long neuron_corrections;
+  unsigned long connection_corrections;
+  unsigned long weight_corrections;
+  unsigned long memory_reinitializations;
+  unsigned long memory_cluster_errors;
+} SystemHealthMetrics;
+
+static SystemHealthMetrics health_metrics = {0};
+
+void initializeSystemHealthMonitor() {
+  health_metrics.start_time = time(NULL);
+  health_metrics.total_checks = 0;
+  health_metrics.successful_checks = 0;
+  health_metrics.failed_checks = 0;
+  health_metrics.segfaults_recovered = 0;
+  health_metrics.fpe_recovered = 0;
+  health_metrics.average_check_time = 0.0f;
+  health_metrics.min_check_time = FLT_MAX;
+  health_metrics.max_check_time = 0.0f;
+  health_metrics.total_check_time = 0.0f;
+  health_metrics.component_failures = 0;
+  health_metrics.memory_issues = 0;
+  health_metrics.instability_events = 0;
+  health_metrics.critical_failures = 0;
+  health_metrics.neuron_corrections = 0;
+  health_metrics.connection_corrections = 0;
+  health_metrics.weight_corrections = 0;
+  health_metrics.memory_reinitializations = 0;
+  health_metrics.memory_cluster_errors = 0;
+
+  setupEnhancedSignalHandlers();
+}
+
+void updateHealthMetrics(bool check_passed, double check_duration) {
+  health_metrics.total_checks++;
+  if (!check_passed) {
+    health_metrics.failed_checks++;
+  }
+
+  health_metrics.average_check_time =
+      (health_metrics.average_check_time * (health_metrics.total_checks - 1) +
+       check_duration) /
+      health_metrics.total_checks;
+}
+
+void printSystemHealthReport() {
+  time_t current_time = time(NULL);
+  double uptime = difftime(current_time, health_metrics.start_time);
+
+  printf("\n=== SYSTEM HEALTH REPORT ===\n");
+  printf("Uptime: %.0f seconds\n", uptime);
+  printf("Total checks: %lu\n", health_metrics.total_checks);
+  printf(
+      "Failed checks: %lu (%.2f%%)\n", health_metrics.failed_checks,
+      health_metrics.total_checks > 0
+          ? (100.0 * health_metrics.failed_checks / health_metrics.total_checks)
+          : 0.0);
+  printf("Segfaults recovered: %lu\n", health_metrics.segfaults_recovered);
+  printf("FPE recovered: %lu\n", health_metrics.fpe_recovered);
+  printf("Average check time: %.6f seconds\n",
+         health_metrics.average_check_time);
+  printf("============================\n");
+}
+
+void systemFallbackCheck(
+    Neuron *neurons, int *connections, float *weights, int *reverse_connections,
+    float *reverse_weights, MemorySystem *memorySystem,
+    NetworkStateSnapshot *stateHistory, PerformanceMetrics *performance_history,
+    float *input_tensor, float *target_outputs, float *previous_outputs,
+    SystemParameters *system_params, WorkingMemorySystem *working_memory,
+    MetaController *metaController,
+    NetworkPerformanceMetrics *performanceMetrics,
+    IntrinsicMotivation *motivation, ReflectionParameters *reflection_params,
+    SelfIdentitySystem *identity_system, KnowledgeFilter *knowledge_filter,
+    MetacognitionMetrics *metacognition, MetaLearningState *meta_learning_state,
+    SocialSystem *social_system, GoalSystem *goalSystem,
+    GlobalContextManager *contextManager, EmotionalSystem *emotional_system,
+    ImaginationSystem *imagination_system,
+    NeuronSpecializationSystem *specialization_system,
+    MoralCompass *moralCompass, int step, int max_neurons, int max_connections,
+    int input_size) {
+  clock_t start_time = clock();
+  bool check_passed = true;
+
+  static bool health_monitor_initialized = false;
+  if (!health_monitor_initialized) {
+    initializeSystemHealthMonitor();
+    initializeSegfaultProtection();
+    health_monitor_initialized = true;
+  }
+
+  int recovery_code = setjmp(segfault_recovery);
+  if (recovery_code == 1) {
+    health_metrics.segfaults_recovered++;
+    check_passed = false;
+    fprintf(stderr, "RECOVERED FROM SEGFAULT: %s at address %p\n",
+            fault_description, fault_address);
+
+    if (fault_address != NULL) {
+      fprintf(stderr, "Attempting emergency recovery for address %p\n",
+              fault_address);
+    }
+
+    segfault_occurred = false;
+    goto health_update;
+  } else if (recovery_code == 2) {
+    health_metrics.fpe_recovered++;
+    check_passed = false;
+    fprintf(stderr,
+            "RECOVERED FROM FPE: Continuing with numerical corrections\n");
+    segfault_occurred = false;
+    goto health_update;
+  }
+
+  if (recovery_code == 0) {
+    if (!validateMemoryBlock(neurons, max_neurons * sizeof(Neuron),
+                             "Neurons")) {
+      fprintf(stderr, "CRITICAL: Neuron array corrupted, system unstable\n");
+      check_passed = false;
+      health_metrics.critical_failures++;
+      exit(EXIT_FAILURE);
+    }
+
+    if (!validateMemoryBlock(connections,
+                             max_neurons * max_connections * sizeof(int),
+                             "Connections")) {
+      fprintf(stderr,
+              "CRITICAL: Connection array corrupted, system unstable\n");
+      check_passed = false;
+      health_metrics.critical_failures++;
+      exit(EXIT_FAILURE);
+    }
+
+    if (!validateMemoryBlock(weights,
+                             max_neurons * max_connections * sizeof(float),
+                             "Weights")) {
+      fprintf(stderr, "CRITICAL: Weight array corrupted, system unstable\n");
+      check_passed = false;
+      health_metrics.critical_failures++;
+      exit(EXIT_FAILURE);
+    }
+
+    int neuron_corrections = 0;
+    for (int i = 0; i < max_neurons; i++) {
+      if (isnan(neurons[i].state) || isinf(neurons[i].state)) {
+        fprintf(stderr,
+                "WARNING: Neuron %d has invalid state value, resetting\n", i);
+        neurons[i].state = 0.0f;
+        neuron_corrections++;
+        check_passed = false;
+      }
+      if (isnan(neurons[i].output) || isinf(neurons[i].output)) {
+        fprintf(stderr,
+                "WARNING: Neuron %d has invalid output value, resetting\n", i);
+        neurons[i].output = 0.0f;
+        neuron_corrections++;
+        check_passed = false;
+      }
+    }
+    health_metrics.neuron_corrections += neuron_corrections;
+
+    int connection_corrections = 0;
+    int weight_corrections = 0;
+    for (int i = 0; i < max_neurons * max_connections; i++) {
+      if (connections[i] < 0 || connections[i] >= max_neurons) {
+        fprintf(
+            stderr,
+            "WARNING: Invalid connection index %d at position %d, resetting\n",
+            connections[i], i);
+        connections[i] = i % max_neurons;
+        connection_corrections++;
+        check_passed = false;
+      }
+      if (isnan(weights[i]) || isinf(weights[i])) {
+        fprintf(stderr, "WARNING: Invalid weight at position %d, resetting\n",
+                i);
+        weights[i] = ((float)rand() / RAND_MAX) * 0.2f - 0.1f;
+        weight_corrections++;
+        check_passed = false;
+      }
+    }
+    health_metrics.connection_corrections += connection_corrections;
+    health_metrics.weight_corrections += weight_corrections;
+
+    if (memorySystem != NULL) {
+      if (!validateMemoryBlock(memorySystem, sizeof(MemorySystem),
+                               "MemorySystem")) {
+        fprintf(stderr, "WARNING: Memory system corrupted, reinitializing\n");
+        check_passed = false;
+        health_metrics.memory_reinitializations++;
+      } else {
+        if (memorySystem->entries == NULL && memorySystem->capacity > 0) {
+          fprintf(stderr,
+                  "WARNING: Memory entries array is NULL, reinitializing\n");
+          memorySystem->entries = (MemoryEntry *)calloc(memorySystem->capacity,
+                                                        sizeof(MemoryEntry));
+          if (memorySystem->entries == NULL) {
+            fprintf(stderr,
+                    "CRITICAL: Failed to allocate memory for entries\n");
+            check_passed = false;
+            health_metrics.critical_failures++;
+          } else {
+            memorySystem->size = 0;
+            memorySystem->head = 0;
+            health_metrics.memory_reinitializations++;
+          }
+        }
+
+        if (!checkMemoryCluster(&memorySystem->hierarchy.short_term,
+                                "Short-term")) {
+          check_passed = false;
+          health_metrics.memory_cluster_errors++;
+        }
+        if (!checkMemoryCluster(&memorySystem->hierarchy.medium_term,
+                                "Medium-term")) {
+          check_passed = false;
+          health_metrics.memory_cluster_errors++;
+        }
+        if (!checkMemoryCluster(&memorySystem->hierarchy.long_term,
+                                "Long-term")) {
+          check_passed = false;
+          health_metrics.memory_cluster_errors++;
+        }
+      }
+    }
+
+    bool system_stable = true;
+
+    system_stable &= checkSystemComponent(working_memory, "Working Memory",
+                                          sizeof(WorkingMemorySystem));
+    system_stable &= checkSystemComponent(metaController, "Meta Controller",
+                                          sizeof(MetaController));
+    system_stable &=
+        checkSystemComponent(performanceMetrics, "Performance Metrics",
+                             sizeof(NetworkPerformanceMetrics));
+    system_stable &= checkSystemComponent(motivation, "Motivation System",
+                                          sizeof(IntrinsicMotivation));
+    system_stable &=
+        checkSystemComponent(reflection_params, "Reflection Parameters",
+                             sizeof(ReflectionParameters));
+    system_stable &= checkSystemComponent(identity_system, "Identity System",
+                                          sizeof(SelfIdentitySystem));
+    system_stable &= checkSystemComponent(knowledge_filter, "Knowledge Filter",
+                                          sizeof(KnowledgeFilter));
+    system_stable &= checkSystemComponent(metacognition, "Metacognition",
+                                          sizeof(MetacognitionMetrics));
+    system_stable &= checkSystemComponent(meta_learning_state, "Meta Learning",
+                                          sizeof(MetaLearningState));
+    system_stable &= checkSystemComponent(social_system, "Social System",
+                                          sizeof(SocialSystem));
+    system_stable &=
+        checkSystemComponent(goalSystem, "Goal System", sizeof(GoalSystem));
+    system_stable &= checkSystemComponent(contextManager, "Context Manager",
+                                          sizeof(GlobalContextManager));
+    system_stable &= checkSystemComponent(emotional_system, "Emotional System",
+                                          sizeof(EmotionalSystem));
+    system_stable &= checkSystemComponent(
+        imagination_system, "Imagination System", sizeof(ImaginationSystem));
+    system_stable &=
+        checkSystemComponent(specialization_system, "Specialization System",
+                             sizeof(NeuronSpecializationSystem));
+    system_stable &= checkSystemComponent(moralCompass, "Moral Compass",
+                                          sizeof(MoralCompass));
+
+    if (!system_stable) {
+      check_passed = false;
+      health_metrics.component_failures++;
+    }
+
+    if (!checkMemoryUsage()) {
+      check_passed = false;
+      health_metrics.memory_issues++;
+    }
+
+    if (step % 100 == 0) {
+      const char *status =
+          (check_passed && system_stable) ? "STABLE" : "UNSTABLE";
+      printf("\nEnhanced Fallback System Check (Step %d): %s - All critical "
+             "structures validated\n",
+             step, status);
+
+      if (!check_passed || !system_stable) {
+        fprintf(stderr, "WARNING: System instability detected at step %d\n",
+                step);
+        health_metrics.instability_events++;
+      }
+    }
+  }
+
+health_update: {
+  clock_t end_time = clock();
+  double check_duration = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+  updateHealthMetrics(check_passed, check_duration);
+
+  health_metrics.total_checks++;
+  if (check_passed) {
+    health_metrics.successful_checks++;
+  }
+
+  if (check_duration > health_metrics.max_check_time) {
+    health_metrics.max_check_time = check_duration;
+  }
+  if (check_duration < health_metrics.min_check_time ||
+      health_metrics.min_check_time == 0.0) {
+    health_metrics.min_check_time = check_duration;
+  }
+
+  if (step % 1000 == 0) {
+    printSystemHealthReport();
+
+    printf("System Health Summary (Step %d):\n", step);
+    printf("  Success Rate: %.2f%% (%lu/%lu)\n",
+           (double)health_metrics.successful_checks /
+               health_metrics.total_checks * 100.0,
+           health_metrics.successful_checks, health_metrics.total_checks);
+    printf("  Average Check Time: %.6f seconds\n",
+           health_metrics.total_check_time / health_metrics.total_checks);
+    printf("  Corrections Made: Neurons=%lu, Connections=%lu, Weights=%lu\n",
+           health_metrics.neuron_corrections,
+           health_metrics.connection_corrections,
+           health_metrics.weight_corrections);
+    printf(
+        "  Critical Events: Segfaults=%lu, FPEs=%lu, Critical Failures=%lu\n",
+        health_metrics.segfaults_recovered, health_metrics.fpe_recovered,
+        health_metrics.critical_failures);
+  }
+
+  segfault_occurred = false;
+}
+}
+
+
 namespace py = pybind11;
 
 PYBIND11_MODULE(neural_web, m) {
@@ -11502,6 +12621,8 @@ PYBIND11_MODULE(neural_web, m) {
     memory.def("saveMemorySystem", &saveMemorySystem);
     memory.def("saveHierarchicalMemory", &saveHierarchicalMemory);
     memory.def("freeMemorySystem", &freeMemorySystem);
+    memory.def("checkMemoryCluster", &checkMemoryCluster);
+    memory.def("validateMemoryRegionDetailed", &validateMemoryRegionDetailed);
 
     // Neural Network
     auto nn = m.def_submodule("neural", "Neural Network Functions");
@@ -11526,6 +12647,7 @@ PYBIND11_MODULE(neural_web, m) {
     perf.def("computeErrorRate", &computeErrorRate);
     perf.def("analyzeNetworkPerformance", &analyzeNetworkPerformance);
     perf.def("generatePerformanceGraph", &generatePerformanceGraph);
+    perf.def("validatePerformanceMetrics", &validatePerformanceMetrics);
 
     // Dynamic Parameters
     auto dyn = m.def_submodule("dynamic", "Dynamic Context Functions");
@@ -11534,6 +12656,7 @@ PYBIND11_MODULE(neural_web, m) {
     dyn.def("updateGlobalContext", &updateGlobalContext);
     dyn.def("integrateGlobalContext", &integrateGlobalContext);
     dyn.def("applyDynamicContext", &applyDynamicContext);
+    dyn.def("validateContextManager", &validateContextManager);
 
     // Imagination System
     auto imagination = m.def_submodule("imagination", "Imagination System Functions");
@@ -11543,6 +12666,7 @@ PYBIND11_MODULE(neural_web, m) {
     imagination.def("evaluateScenarioPlausibility", &evaluateScenarioPlausibility);
     imagination.def("updateImaginationCreativity", &updateImaginationCreativity);
     imagination.def("freeImaginationSystem", &freeImaginationSystem);
+    imagination.def("validateImaginationSystem", &validateImaginationSystem);
 
     // Emotional + Social
     auto affect = m.def_submodule("affect", "Emotion & Social Functions");
@@ -11560,6 +12684,8 @@ PYBIND11_MODULE(neural_web, m) {
     affect.def("negotiateOutcome", &negotiateOutcome);
     affect.def("recordSocialInteraction", &recordSocialInteraction);
     affect.def("freeSocialSystem", &freeSocialSystem);
+    affect.def("validateSocialSystem", &validateSocialSystem);
+    affect.def("validateEmotionalSystem", &validateEmotionalSystem);
 
     // Moral System
     auto moral = m.def_submodule("moral", "Moral/Ethical Functions");
@@ -11571,6 +12697,7 @@ PYBIND11_MODULE(neural_web, m) {
     moral.def("adaptEthicalFramework", &adaptEthicalFramework);
     moral.def("generateEthicalReflection", &generateEthicalReflection);
     moral.def("freeMoralCompass", &freeMoralCompass);
+    moral.def("validateMoralCompass", &validateMoralCompass);
 
     // Specialization
     auto spec = m.def_submodule("specialization", "Specialization System");
@@ -11581,6 +12708,7 @@ PYBIND11_MODULE(neural_web, m) {
     spec.def("evaluateSpecializationEffectiveness", &evaluateSpecializationEffectiveness);
     spec.def("printSpecializationStats", &printSpecializationStats);
     spec.def("freeSpecializationSystem", &freeSpecializationSystem);
+    spec.def("validateSpecializationSystem", &validateSpecializationSystem);
 
     // Motivation and Goals
     auto motivation = m.def_submodule("motivation", "Motivation and Goals");
@@ -11589,6 +12717,8 @@ PYBIND11_MODULE(neural_web, m) {
     motivation.def("initializeGoalSystem", &initializeGoalSystem);
     motivation.def("addGoal", &addGoal);
     motivation.def("updateGoalSystem", &updateGoalSystem);
+    motivation.def("validateMotivationSystem", &validateMotivationSystem);
+    motivation.def("validateGoalSystem", &validateGoalSystem);
 
     // Knowledge
     auto knowledge = m.def_submodule("knowledge", "Knowledge & Metacognition");
@@ -11598,6 +12728,8 @@ PYBIND11_MODULE(neural_web, m) {
     knowledge.def("updateKnowledgeSystem", &updateKnowledgeSystem);
     knowledge.def("printCategoryInsights", &printCategoryInsights);
     knowledge.def("initializeMetacognitionMetrics", &initializeMetacognitionMetrics);
+    knowledge.def("validateKnowledgeFilter", &validateKnowledgeFilter);
+    knowledge.def("validateMetacognition", &validateMetacognition);
 
     // Reflection
     auto self = m.def_submodule("identity", "Self Identity and Reflection");
@@ -11611,6 +12743,8 @@ PYBIND11_MODULE(neural_web, m) {
     self.def("restoreIdentityFromBackup", &restoreIdentityFromBackup);
     self.def("freeIdentityBackup", &freeIdentityBackup);
     self.def("generateIdentityReflection", &generateIdentityReflection);
+    self.def("validateIdentitySystem", &validateIdentitySystem);
+    self.def("validateReflectionParameters", &validateReflectionParameters);
 
     // Meta Control
     auto meta = m.def_submodule("meta", "Meta Control & Learning");
@@ -11619,6 +12753,8 @@ PYBIND11_MODULE(neural_web, m) {
     meta.def("applyMetaControllerAdaptations", &applyMetaControllerAdaptations);
     meta.def("initializeMetaLearningState", &initializeMetaLearningState);
     meta.def("selectOptimalMetaDecisionPath", &selectOptimalMetaDecisionPath);
+    meta.def("validateMetaController", &validateMetaController);
+    meta.def("validateMetaLearning", &validateMetaLearning);
 
     // Utility
     auto util = m.def_submodule("util", "Utility Functions");
@@ -11634,8 +12770,6 @@ PYBIND11_MODULE(neural_web, m) {
     util.def("computeRegionPerformanceMetrics", &computeRegionPerformanceMetrics);
     util.def("validateCriticalSecurity", &validateCriticalSecurity);
     util.def("handleCriticalSecurityViolation", &handleCriticalSecurityViolation);
-
-    // Additional Utility (continued)
     util.def("generatePotentialTargets", &generatePotentialTargets);
     util.def("computeOutcomeMetric", &computeOutcomeMetric);
     util.def("updateCorrelationMatrix", &updateCorrelationMatrix);
@@ -11688,4 +12822,19 @@ PYBIND11_MODULE(neural_web, m) {
     sys.def("loadMetacognitionMetrics", &loadMetacognitionMetrics);
     sys.def("saveMetaLearningState", &saveMetaLearningState);
     sys.def("loadMetaLearningState", &loadMetaLearningState);
+
+    // Additional utility functions
+    util.def("isValidMemoryRegion", &isValidMemoryRegion);
+    util.def("validateMemoryBlock", &validateMemoryBlock);
+    util.def("initializeSegfaultProtection", &initializeSegfaultProtection);
+    util.def("checkMemoryUsage", &checkMemoryUsage);
+    util.def("logSystemState", &logSystemState);
+    util.def("saveEmergencyBackup", &saveEmergencyBackup);
+    util.def("stabilizeSystem", &stabilizeSystem);
+    util.def("attemptSystemRecovery", &attemptSystemRecovery);
+    util.def("setupEnhancedSignalHandlers", &setupEnhancedSignalHandlers);
+    util.def("initializeSystemHealthMonitor", &initializeSystemHealthMonitor);
+    util.def("updateHealthMetrics", &updateHealthMetrics);
+    util.def("printSystemHealthReport", &printSystemHealthReport);
+    util.def("systemFallbackCheck", &systemFallbackCheck);
 }
