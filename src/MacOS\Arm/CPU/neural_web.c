@@ -1,23 +1,17 @@
-#include <ctype.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <Foundation/Foundation.h>
+#include <Metal/Metal.h>
 #include <curl/curl.h>
-#include <errno.h>
-#include <float.h>
 #include <json-c/json.h>
-#include <setjmp.h>
-#include <signal.h>
+#include <math.h>
 #include <simd/simd.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <time.h>
-#include <unistd.h>
 
-#define MAX_NEURONS 8
-#define MAX_CONNECTIONS 2
-#define STEPS 120
+#define MAX_NEURONS 100
+#define MAX_CONNECTIONS 60
+#define STEPS 10
 #define INPUT_SIZE 6            // Size of the input tensor
 #define MEMORY_BUFFER_SIZE 1000 // Size of circular memory buffer
 #define MEMORY_VECTOR_SIZE (2 * MAX_NEURONS + INPUT_SIZE)
@@ -31,15 +25,7 @@
 #define EMBEDDING_SIZE 16         // Size of word embeddings
 #define WEIGHT_DECAY 0.95f        // Weight decay factor
 #define MAX_SIMULATIONS 10        // Number of simulation runs
-#define MIN_WEIGHT -1.0f
-#define MAX_WEIGHT 1.0f
-#define DECAY_RATE 0.8f
-#define CONNECTION_WEIGHT 0.2f
-#define INPUT_WEIGHT 0.1f
-#define ACTIVATION_SCALE 1.5f
-#define ACTIVATION_BIAS 0.1f
-#define MIN_ACTIVATION -1.0f
-#define MAX_ACTIVATION 1.0f
+#define NUM_TIME_STEPS 20
 #define FEATURE_VECTOR_SIZE 128
 #define CONTEXT_VECTOR_SIZE 256
 #define CLAMP_MIN -1e6f // Min value for feature or coherence
@@ -251,24 +237,24 @@ typedef struct ContextNode {
   char *name;
   float importance;
   float *state_vector;
-  int vector_size;
+  uint32_t vector_size;
   struct ContextNode **children;
-  int num_children;
-  int max_children;
+  uint32_t num_children;
+  uint32_t max_children;
   struct ContextNode *parent;
   float temporal_relevance;
-  int last_updated;
+  uint64_t last_updated;
 } ContextNode;
 
 typedef struct GlobalContextManager {
   ContextNode *root;
-  int total_nodes;
+  uint32_t total_nodes;
   float *global_context_vector;
-  int vector_size;
+  uint32_t vector_size;
   float decay_rate;
   float update_threshold;
-  int max_depth;
-  int max_children_per_node;
+  uint32_t max_depth;
+  uint32_t max_children_per_node;
 } GlobalContextManager;
 
 typedef struct {
@@ -398,11 +384,11 @@ typedef struct {
   float *experience_history;  // Compressed history of experiences
   float *behavioral_patterns; // Consistent behavior patterns
 
-  int num_core_values;
-  int num_beliefs;
-  int num_markers;
-  int history_size;
-  int pattern_size;
+  uint32_t num_core_values;
+  uint32_t num_beliefs;
+  uint32_t num_markers;
+  uint32_t history_size;
+  uint32_t pattern_size;
 
   float consistency_score; // Measure of identity stability
   float adaptation_rate;   // Rate of identity evolution
@@ -410,13 +396,13 @@ typedef struct {
 
   // Temporal consistency tracking
   float *temporal_coherence; // Track consistency over time
-  int coherence_window;      // Time window for coherence analysis
+  uint32_t coherence_window; // Time window for coherence analysis
 
   // Identity verification system
   struct {
     float threshold;        // Minimum consistency threshold
     float *reference_state; // Reference identity state
-    int state_size;         // Size of reference state
+    uint32_t state_size;    // Size of reference state
   } verification;
 
 } SelfIdentitySystem;
@@ -427,7 +413,7 @@ typedef struct {
   float *feature_vector;
   float importance;
   float confidence;
-  int usage_count;
+  uint32_t usage_count;
   time_t last_accessed;
 } KnowledgeCategory;
 
@@ -442,20 +428,27 @@ typedef struct {
 
 typedef struct {
   KnowledgeCategory *categories;
-  int num_categories;
-  int capacity;
+  uint32_t num_categories;
+  uint32_t capacity;
   ProblemInstance *problem_history;
-  int num_problems;
-  int problem_capacity;
+  uint32_t num_problems;
+  uint32_t problem_capacity;
   float *category_similarity_matrix;
 } KnowledgeFilter;
 
+typedef struct {
+  float avg_success_rate;
+  float avg_difficulty;
+  uint32_t total_instances;
+  time_t last_encounter;
+} CategoryStatistics;
+
 typedef struct DecisionPath {
-  float *states;    // Predicted neuron states
-  float *weights;   // Weight adjustments
-  int *connections; // Connection changes
-  float score;      // Path evaluation score
-  int num_steps;    // Number of prediction steps
+  float *states;         // Predicted neuron states
+  float *weights;        // Weight adjustments
+  uint32_t *connections; // Connection changes
+  float score;           // Path evaluation score
+  int num_steps;         // Number of prediction steps
 } DecisionPath;
 
 typedef struct MetacognitionMetrics {
@@ -472,15 +465,8 @@ typedef struct MetaLearningState {
   float exploration_rate;    // Balance between exploration/exploitation
   float stability_index;     // System stability measure
   float *priority_weights;   // Attention allocation weights
-  int current_phase;         // Current learning phase
+  uint32_t current_phase;    // Current learning phase
 } MetaLearningState;
-
-typedef struct {
-  float avg_success_rate;
-  float avg_difficulty;
-  int total_instances;
-  time_t last_encounter;
-} CategoryStatistics;
 
 typedef struct {
   bool critical_violation;
@@ -559,7 +545,6 @@ typedef struct {
   float long_term_impact; // Long-term consequence rating
 } DecisionImpact;
 
-// Main moral compass system
 typedef struct {
   EthicalPrinciple *principles; // Array of ethical principles
   int num_principles;           // Number of principles
@@ -675,6 +660,14 @@ InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
 int num_symbols = 0;
 int num_questions = 0;
+
+// Global parameters
+ReflectionParameters params = {.current_adaptation_rate = 0.01f,
+                               .input_noise_scale = 0.1f,
+                               .weight_noise_scale = 0.05f,
+                               .plasticity = 0.8f,
+                               .noise_tolerance = 0.2f,
+                               .learning_rate = 0.01f};
 
 DynamicParameters initDynamicParameters() {
   DynamicParameters params = {.input_noise_scale = 0.1f,
@@ -1416,7 +1409,7 @@ void saveNetworkStates(NetworkStateSnapshot *history, int total_steps) {
   json_object_put(root); // Free the memory used by the JSON object
 }
 
-void initializeNeurons(Neuron *neurons, int *connections, float *weights,
+void initializeNeurons(Neuron *neurons, uint *connections, float *weights,
                        float *input_tensor) {
   for (int i = 0; i < MAX_NEURONS; i++) {
     // Initialize state with input
@@ -1687,7 +1680,6 @@ void tokenizeString(const char *input, char **tokens, int *num_tokens) {
   }
 }
 
-// Word embeddings (randomly initialized)
 float embeddings[vocab_size][EMBEDDING_SIZE];
 
 // Function to calculate letter-based weight for a word
@@ -2538,7 +2530,7 @@ void initializeWeights(float *weights, int max_neurons, int max_connections,
   }
 }
 
-void updateWeights(float *weights, Neuron *neurons, int *connections,
+void updateWeights(float *weights, Neuron *neurons, uint *connections,
                    float learning_rate) {
   for (int i = 0; i < MAX_NEURONS; i++) {
     for (int j = 0; j < neurons[i].num_connections; j++) {
@@ -2562,7 +2554,7 @@ void updateWeights(float *weights, Neuron *neurons, int *connections,
 }
 
 void processNeurons(Neuron *neurons, int num_neurons, float *weights,
-                    int *connections, int max_connections,
+                    uint *connections, int max_connections,
                     float scaled_factor) {
   // Compute attention weights between neurons
   float **attention_weights = malloc(num_neurons * sizeof(float *));
@@ -3203,7 +3195,7 @@ float getWeight(float *weights, int source_neuron, int connection_index) {
   return weights[source_neuron * MAX_CONNECTIONS + connection_index];
 }
 
-void printNeuronDetails(Neuron *neurons, float *weights, int *connections,
+void printNeuronDetails(Neuron *neurons, float *weights, uint *connections,
                         int neuron_index) {
   if (neuron_index < 0 || neuron_index >= MAX_NEURONS) {
     printf("Error: Invalid neuron index %d\n", neuron_index);
@@ -3626,398 +3618,6 @@ MetaController *initializeMetaController(int num_regions) {
   return controller;
 }
 
-void printReplayStatistics(MemorySystem *memorySystem) {
-  if (memorySystem == NULL || memorySystem->size == 0) {
-    printf("No memories available for replay.\n");
-    return;
-  }
-
-  float total_importance = 0.0f;
-  int num_replayed = 0;
-
-  // Iterate through memory entries to calculate statistics
-  for (int i = 0; i < memorySystem->size; i++) {
-    MemoryEntry *entry = &memorySystem->entries[i];
-    if (entry->importance > 0.5f) { // Only consider important memories
-      total_importance += entry->importance;
-      num_replayed++;
-    }
-  }
-
-  // Calculate averages
-  float avg_importance =
-      (num_replayed > 0) ? total_importance / num_replayed : 0.0f;
-
-  // Print statistics
-  printf("\nMemory Replay Statistics:\n");
-  printf("Total Memories: %u\n", memorySystem->size);
-  printf("Memories Replayed: %d\n", num_replayed);
-  printf("Average Importance: %.2f\n", avg_importance);
-}
-
-void normalizeWeights(float *weights, int num_weights) {
-  float max_weight = 0.0f;
-  for (int i = 0; i < num_weights; i++) {
-    if (fabs(weights[i]) > max_weight) {
-      max_weight = fabs(weights[i]);
-    }
-  }
-
-  if (max_weight > 1.0f) {
-    for (int i = 0; i < num_weights; i++) {
-      weights[i] /= max_weight;
-    }
-  }
-}
-
-void updateBidirectionalWeights(float *forward_weights, float *reverse_weights,
-                                Neuron *neurons, int *forward_connections,
-                                int *reverse_connections, float learning_rate) {
-  // Update forward weights
-  for (int i = 0; i < MAX_NEURONS; i++) {
-    for (int j = 0; j < MAX_CONNECTIONS; j++) {
-      int conn_idx = i * MAX_CONNECTIONS + j;
-      int target_neuron = forward_connections[conn_idx];
-
-      // Calculate weight update for forward pathway
-      float forward_delta =
-          learning_rate * neurons[i].output * neurons[target_neuron].state;
-      forward_weights[conn_idx] += forward_delta;
-
-      // Apply weight decay or regularization if needed
-      forward_weights[conn_idx] *= (1.0f - WEIGHT_DECAY);
-    }
-  }
-
-  // Update reverse weights
-  for (int i = 0; i < MAX_NEURONS; i++) {
-    for (int j = 0; j < MAX_CONNECTIONS; j++) {
-      int conn_idx = i * MAX_CONNECTIONS + j;
-      int source_neuron = reverse_connections[conn_idx];
-
-      // Calculate weight update for reverse pathway
-      float reverse_delta =
-          learning_rate * neurons[i].state * neurons[source_neuron].output;
-      reverse_weights[conn_idx] += reverse_delta;
-
-      // Apply weight decay or regularization if needed
-      reverse_weights[conn_idx] *= (1.0f - WEIGHT_DECAY);
-    }
-  }
-
-  // Optional: Normalize weights to prevent explosion
-  normalizeWeights(forward_weights, MAX_NEURONS * MAX_CONNECTIONS);
-  normalizeWeights(reverse_weights, MAX_NEURONS * MAX_CONNECTIONS);
-}
-
-void generatePredictiveInputs(float *input_tensor,
-                              NetworkStateSnapshot *previous_states,
-                              int max_neurons) {
-  for (int i = 0; i < max_neurons; i++) {
-    // Use previous states with some variation
-    if (previous_states) {
-      // Linear prediction with some noise
-      input_tensor[i] = previous_states->states[i] *
-                        (1.0f + (rand() / (float)RAND_MAX - 0.5f) * 0.2f);
-    }
-  }
-}
-
-void computePredictionErrors(Neuron *neurons, float *actual_inputs,
-                             int max_neurons) {
-  for (int i = 0; i < max_neurons; i++) {
-    // Compute prediction based on current neuron output
-    float prediction =
-        neurons[i].output * predictive_params[i].prediction_weight;
-
-    // Calculate prediction error
-    predictive_params[i].prediction_error = actual_inputs[i] - prediction;
-
-    // Adaptive weight update
-    predictive_params[i].prediction_weight +=
-        0.01f * predictive_params[i].prediction_error * neurons[i].output;
-  }
-}
-
-void updateNeuronsWithPredictiveCoding(Neuron *neurons, float *actual_inputs,
-                                       int max_neurons, float learning_rate) {
-  for (int i = 0; i < max_neurons; i++) {
-    // Adjust neuron state based on prediction error
-    neurons[i].state += learning_rate * predictive_params[i].prediction_error *
-                        predictive_params[i].adaptation_rate;
-
-    // Soft bounds to prevent state explosion
-    neurons[i].state = fminf(fmaxf(neurons[i].state, -1.0f), 1.0f);
-  }
-}
-
-void initPredictiveCodingParams(int max_neurons) {
-  for (int i = 0; i < max_neurons; i++) {
-    predictive_params[i].prediction_weight = 1.0f;
-    predictive_params[i].prediction_error = 0.0f;
-    predictive_params[i].adaptation_rate = 0.5f;
-  }
-}
-
-void removeUnderperformingNeuron(Neuron *neurons, int *connections,
-                                 float *weights, int *num_neurons,
-                                 int max_neurons, int neuron_index) {
-  if (*num_neurons <= 1 || neuron_index >= *num_neurons)
-    return;
-
-  // Shift neurons after the removed neuron
-  for (int i = neuron_index; i < *num_neurons - 1; i++) {
-    neurons[i] = neurons[i + 1];
-  }
-
-  // Update connections and weights
-  for (int i = 0; i < *num_neurons; i++) {
-    for (int j = 0; j < MAX_CONNECTIONS; j++) {
-      if (connections[i * MAX_CONNECTIONS + j] == neuron_index) {
-        // Remove this connection
-        connections[i * MAX_CONNECTIONS + j] = 0;
-        weights[i * MAX_CONNECTIONS + j] = 0.0f;
-      } else if (connections[i * MAX_CONNECTIONS + j] > neuron_index) {
-        // Adjust connections to neurons after the removed neuron
-        connections[i * MAX_CONNECTIONS + j]--;
-      }
-    }
-  }
-
-  // Decrease neuron count
-  (*num_neurons)--;
-}
-
-void addNewNeuron(Neuron *neurons, int *connections, float *weights,
-                  int *num_neurons, int max_neurons, float *input_tensor) {
-  if (*num_neurons >= max_neurons)
-    return;
-
-  // Create a new neuron with default initialization
-  Neuron new_neuron = {
-      .state = 0.0f,
-      .output = 0.0f,
-      .num_connections = MAX_CONNECTIONS,
-      .layer_id = (*num_neurons) % 2 // Alternate layers
-  };
-
-  // Add the new neuron
-  neurons[*num_neurons] = new_neuron;
-
-  // Initialize connections for the new neuron
-  int base_index = *num_neurons * MAX_CONNECTIONS;
-  connections[base_index] =
-      (*num_neurons + 1) % *num_neurons; // Forward connection
-  connections[base_index + 1] =
-      (*num_neurons - 1 + *num_neurons) % *num_neurons; // Backward connection
-
-  // Initialize weights for the new neuron
-  weights[base_index] = 0.6f;      // Forward weight
-  weights[base_index + 1] = -0.4f; // Backward weight
-
-  // Slightly perturb the input tensor to help integration
-  input_tensor[*num_neurons] = 0.1f * ((float)rand() / RAND_MAX - 0.5f);
-
-  // Increase neuron count
-  (*num_neurons)++;
-}
-
-void computeNeuronPerformanceMetrics(Neuron *neurons, float *target_outputs,
-                                     int *connections, float *weights,
-                                     NeuronPerformanceMetric *metrics,
-                                     int num_neurons,
-                                     NetworkStateSnapshot *stateHistory,
-                                     int current_step) {
-  for (int i = 0; i < num_neurons; i++) {
-    // Output Stability: Variance of neuron's output over recent steps
-    float output_variance = 0.0f;
-    if (current_step > 5) {
-      float mean_output = 0.0f;
-      for (int j = 1; j <= 5; j++) {
-        mean_output += stateHistory[current_step - j].states[i];
-      }
-      mean_output /= 5.0f;
-
-      for (int j = 1; j <= 5; j++) {
-        float diff = stateHistory[current_step - j].states[i] - mean_output;
-        output_variance += diff * diff;
-      }
-      output_variance /= 5.0f;
-    }
-    metrics[i].output_stability = 1.0f / (1.0f + output_variance);
-
-    // Prediction Error
-    metrics[i].prediction_error = fabs(neurons[i].output - target_outputs[i]);
-
-    // Connection Quality: Assess weight distribution and connection
-    // effectiveness
-    float total_connection_strength = 0.0f;
-    float weight_variation = 0.0f;
-    float mean_weight = 0.0f;
-
-    for (int j = 0; j < neurons[i].num_connections; j++) {
-      total_connection_strength += fabs(weights[i * MAX_CONNECTIONS + j]);
-      mean_weight += weights[i * MAX_CONNECTIONS + j];
-    }
-    mean_weight /= neurons[i].num_connections;
-
-    for (int j = 0; j < neurons[i].num_connections; j++) {
-      float weight_diff = weights[i * MAX_CONNECTIONS + j] - mean_weight;
-      weight_variation += weight_diff * weight_diff;
-    }
-    weight_variation /= neurons[i].num_connections;
-
-    metrics[i].connection_quality =
-        (total_connection_strength / neurons[i].num_connections) *
-        (1.0f / (1.0f + weight_variation));
-
-    // Adaptive Response: How well neuron responds to different input patterns
-    metrics[i].adaptive_response =
-        1.0f - fabs(neurons[i].output - neurons[i].state) /
-                   (fabs(neurons[i].output) + 1e-5);
-
-    // Importance Score: Combines all metrics with weighted approach
-    metrics[i].importance_score =
-        0.3f * (1.0f - metrics[i].output_stability) +
-        0.3f * metrics[i].prediction_error +
-        0.2f * (1.0f - metrics[i].connection_quality) +
-        0.2f * (1.0f - metrics[i].adaptive_response);
-  }
-}
-
-void advancedNeuronManagement(Neuron *neurons, int *connections, float *weights,
-                              int *num_neurons, int max_neurons,
-                              float *input_tensor, float *target_outputs,
-                              NetworkStateSnapshot *stateHistory,
-                              int current_step) {
-  NeuronPerformanceMetric *metrics =
-      malloc(*num_neurons * sizeof(NeuronPerformanceMetric));
-
-  computeNeuronPerformanceMetrics(neurons, target_outputs, connections, weights,
-                                  metrics, *num_neurons, stateHistory,
-                                  current_step);
-
-  // Find neurons for potential removal
-  float removal_threshold =
-      0.7f; // High importance score means poor performance
-  for (int i = 0; i < *num_neurons; i++) {
-    if (metrics[i].importance_score > removal_threshold) {
-      removeUnderperformingNeuron(neurons, connections, weights, num_neurons,
-                                  max_neurons, i);
-
-      addNewNeuron(neurons, connections, weights, num_neurons, max_neurons,
-                   input_tensor);
-      break; // Remove and replace only one neuron per cycle
-    }
-  }
-
-  free(metrics);
-}
-
-float evaluateFutureOutcome(Neuron *simulated_neurons, float *target_outputs,
-                            int max_neurons) {
-  float total_alignment = 0.0f;
-  float prediction_confidence = 0.0f;
-
-  // Compute alignment between simulated neuron states and target outputs
-  for (int i = 0; i < max_neurons; i++) {
-    float neuron_output = simulated_neurons[i].output;
-    float target_output = target_outputs[i];
-
-    // Compute alignment as cosine similarity
-    float alignment = 1.0f - fabs(neuron_output - target_output);
-    total_alignment += alignment;
-
-    // Compute confidence based on output proximity
-    prediction_confidence +=
-        1.0f / (1.0f + fabs(neuron_output - target_output));
-  }
-
-  // Normalize alignment and confidence
-  total_alignment /= max_neurons;
-  prediction_confidence /= max_neurons;
-
-  // Combine alignment and confidence with a weighted score
-  return (0.6f * total_alignment) + (0.4f * prediction_confidence);
-}
-
-float *generatePotentialTargets(int max_neurons, float *previous_outputs,
-                                NetworkStateSnapshot *stateHistory, int step,
-                                MemoryEntry *relevantMemory,
-                                DynamicParameters params) {
-  float *target_outputs = (float *)malloc(sizeof(float) * max_neurons);
-  if (target_outputs == NULL) {
-    fprintf(stderr, "Failed to allocate memory for target outputs.\n");
-    exit(EXIT_FAILURE);
-  }
-
-  for (int i = 0; i < max_neurons; i++) {
-    float memory_adjustment = 0.0f;
-
-    // Check if there's relevant memory to influence the target output
-    if (relevantMemory != NULL) {
-      memory_adjustment = relevantMemory->vector[i] * 0.2f;
-    }
-
-    target_outputs[i] = (stateHistory[step].states[i] * 0.5f) +
-                        (previous_outputs[i] * 0.3f) + memory_adjustment +
-                        0.2f; // Adding a small bias term
-
-    float adaptation_factor = params.current_adaptation_rate;
-    target_outputs[i] *= adaptation_factor;
-  }
-
-  return target_outputs;
-}
-
-void simulateFutureStates(Neuron *neurons, float *weights, int *connections,
-                          float *input_tensor, int max_neurons, int steps) {
-  for (int step = 0; step < steps; step++) {
-    for (int i = 0; i < max_neurons; i++) {
-      neurons[i].state += input_tensor[i % INPUT_SIZE] * 0.1f;
-    }
-    processNeurons(neurons, max_neurons, weights, connections, MAX_CONNECTIONS,
-                   1.5f);
-  }
-}
-
-void selectOptimalDecisionPath(Neuron *neurons, float *weights,
-                               int *connections, float *input_tensor,
-                               int max_neurons, float *previous_outputs,
-                               NetworkStateSnapshot *stateHistory, int step,
-                               MemoryEntry *relevantMemory,
-                               DynamicParameters params) {
-  int simulation_depths[] = {3, 5, 7};
-  float depth_outcomes[3];
-
-  for (int i = 0; i < 3; i++) {
-    Neuron simulation_copy[MAX_NEURONS];
-    memcpy(simulation_copy, neurons, sizeof(Neuron) * max_neurons);
-
-    simulateFutureStates(simulation_copy, weights, connections, input_tensor,
-                         max_neurons, simulation_depths[i]);
-
-    // Evaluate overall simulation outcome
-    float *potential_targets =
-        generatePotentialTargets(max_neurons, previous_outputs, stateHistory,
-                                 step, relevantMemory, params);
-    depth_outcomes[i] =
-        evaluateFutureOutcome(simulation_copy, potential_targets, max_neurons);
-  }
-
-  // Select the simulation depth with the best outcome
-  int best_depth_index = 0;
-  for (int i = 1; i < 3; i++) {
-    if (depth_outcomes[i] > depth_outcomes[best_depth_index]) {
-      best_depth_index = i;
-    }
-  }
-
-  // Apply modifications based on the best simulation
-  simulateFutureStates(neurons, weights, connections, input_tensor, max_neurons,
-                       simulation_depths[best_depth_index]);
-}
-
 MetacognitionMetrics *initializeMetacognitionMetrics() {
   MetacognitionMetrics *metacog = malloc(sizeof(MetacognitionMetrics));
   if (!metacog)
@@ -4145,21 +3745,21 @@ void mutatePathParameters(DecisionPath *path, int max_neurons, int step) {
 }
 
 DecisionPath generateDecisionPath(Neuron *neurons, float *weights,
-                                  int *connections, float *input_tensor,
+                                  uint *connections, float *input_tensor,
                                   int max_neurons, float explore_rate) {
   DecisionPath path;
 
   // Allocate memory for path components
   path.states = malloc(sizeof(float) * max_neurons * MAX_DECISION_STEPS);
   path.weights = malloc(sizeof(float) * max_neurons * MAX_CONNECTIONS);
-  path.connections = malloc(sizeof(int) * max_neurons * MAX_CONNECTIONS);
+  path.connections = malloc(sizeof(uint32_t) * max_neurons * MAX_CONNECTIONS);
   path.num_steps = 0;
   path.score = 0.0f;
 
   // Copy initial states and parameters
   memcpy(path.weights, weights, sizeof(float) * max_neurons * MAX_CONNECTIONS);
   memcpy(path.connections, connections,
-         sizeof(int) * max_neurons * MAX_CONNECTIONS);
+         sizeof(uint32_t) * max_neurons * MAX_CONNECTIONS);
 
   // Generate future states with exploration
   for (int step = 0; step < MAX_DECISION_STEPS; step++) {
@@ -4197,7 +3797,7 @@ DecisionPath selectBestPath(DecisionPath *paths, int num_paths) {
 }
 
 void applyDecisionPath(DecisionPath path, Neuron *neurons, float *weights,
-                       int *connections, float confidence) {
+                       uint *connections, float confidence) {
   // Apply state changes with confidence-based modulation
   for (int i = 0; i < path.num_steps; i++) {
     float *target_state = &path.states[i];
@@ -4463,8 +4063,402 @@ void applyMetaControllerAdaptations(Neuron *neurons, float *weights,
   }
 }
 
+void printReplayStatistics(MemorySystem *memorySystem) {
+  if (memorySystem == NULL || memorySystem->size == 0) {
+    printf("No memories available for replay.\n");
+    return;
+  }
+
+  float total_importance = 0.0f;
+  int num_replayed = 0;
+
+  // Iterate through memory entries to calculate statistics
+  for (int i = 0; i < memorySystem->size; i++) {
+    MemoryEntry *entry = &memorySystem->entries[i];
+    if (entry->importance > 0.5f) { // Only consider important memories
+      total_importance += entry->importance;
+      num_replayed++;
+    }
+  }
+
+  // Calculate averages
+  float avg_importance =
+      (num_replayed > 0) ? total_importance / num_replayed : 0.0f;
+
+  // Print statistics
+  printf("\nMemory Replay Statistics:\n");
+  printf("Total Memories: %u\n", memorySystem->size);
+  printf("Memories Replayed: %d\n", num_replayed);
+  printf("Average Importance: %.2f\n", avg_importance);
+}
+
+void normalizeWeights(float *weights, int num_weights) {
+  float max_weight = 0.0f;
+  for (int i = 0; i < num_weights; i++) {
+    if (fabs(weights[i]) > max_weight) {
+      max_weight = fabs(weights[i]);
+    }
+  }
+
+  if (max_weight > 1.0f) {
+    for (int i = 0; i < num_weights; i++) {
+      weights[i] /= max_weight;
+    }
+  }
+}
+
+void updateBidirectionalWeights(float *forward_weights, float *reverse_weights,
+                                Neuron *neurons, uint *forward_connections,
+                                uint *reverse_connections,
+                                float learning_rate) {
+  // Update forward weights
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    for (int j = 0; j < MAX_CONNECTIONS; j++) {
+      uint conn_idx = i * MAX_CONNECTIONS + j;
+      uint target_neuron = forward_connections[conn_idx];
+
+      // Calculate weight update for forward pathway
+      float forward_delta =
+          learning_rate * neurons[i].output * neurons[target_neuron].state;
+      forward_weights[conn_idx] += forward_delta;
+
+      // Apply weight decay or regularization if needed
+      forward_weights[conn_idx] *= (1.0f - WEIGHT_DECAY);
+    }
+  }
+
+  // Update reverse weights
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    for (int j = 0; j < MAX_CONNECTIONS; j++) {
+      uint conn_idx = i * MAX_CONNECTIONS + j;
+      uint source_neuron = reverse_connections[conn_idx];
+
+      // Calculate weight update for reverse pathway
+      float reverse_delta =
+          learning_rate * neurons[i].state * neurons[source_neuron].output;
+      reverse_weights[conn_idx] += reverse_delta;
+
+      // Apply weight decay or regularization if needed
+      reverse_weights[conn_idx] *= (1.0f - WEIGHT_DECAY);
+    }
+  }
+
+  // Optional: Normalize weights to prevent explosion
+  normalizeWeights(forward_weights, MAX_NEURONS * MAX_CONNECTIONS);
+  normalizeWeights(reverse_weights, MAX_NEURONS * MAX_CONNECTIONS);
+}
+
+void generatePredictiveInputs(float *input_tensor,
+                              NetworkStateSnapshot *previous_states,
+                              int max_neurons) {
+  for (int i = 0; i < max_neurons; i++) {
+    // Use previous states with some variation
+    if (previous_states) {
+      // Linear prediction with some noise
+      input_tensor[i] = previous_states->states[i] *
+                        (1.0f + (rand() / (float)RAND_MAX - 0.5f) * 0.2f);
+    }
+  }
+}
+
+void computePredictionErrors(Neuron *neurons, float *actual_inputs,
+                             int max_neurons) {
+  for (int i = 0; i < max_neurons; i++) {
+    // Compute prediction based on current neuron output
+    float prediction =
+        neurons[i].output * predictive_params[i].prediction_weight;
+
+    // Calculate prediction error
+    predictive_params[i].prediction_error = actual_inputs[i] - prediction;
+
+    // Adaptive weight update
+    predictive_params[i].prediction_weight +=
+        0.01f * predictive_params[i].prediction_error * neurons[i].output;
+  }
+}
+
+void updateNeuronsWithPredictiveCoding(Neuron *neurons, float *actual_inputs,
+                                       int max_neurons, float learning_rate) {
+  for (int i = 0; i < max_neurons; i++) {
+    // Adjust neuron state based on prediction error
+    neurons[i].state += learning_rate * predictive_params[i].prediction_error *
+                        predictive_params[i].adaptation_rate;
+
+    // Soft bounds to prevent state explosion
+    neurons[i].state = fminf(fmaxf(neurons[i].state, -1.0f), 1.0f);
+  }
+}
+
+void initPredictiveCodingParams(int max_neurons) {
+  for (int i = 0; i < max_neurons; i++) {
+    predictive_params[i].prediction_weight = 1.0f;
+    predictive_params[i].prediction_error = 0.0f;
+    predictive_params[i].adaptation_rate = 0.5f;
+  }
+}
+
+void removeUnderperformingNeuron(Neuron *neurons, uint *connections,
+                                 float *weights, uint *num_neurons,
+                                 uint max_neurons, int neuron_index) {
+  if (*num_neurons <= 1 || neuron_index >= *num_neurons)
+    return;
+
+  // Shift neurons after the removed neuron
+  for (int i = neuron_index; i < *num_neurons - 1; i++) {
+    neurons[i] = neurons[i + 1];
+  }
+
+  // Update connections and weights
+  for (int i = 0; i < *num_neurons; i++) {
+    for (int j = 0; j < MAX_CONNECTIONS; j++) {
+      if (connections[i * MAX_CONNECTIONS + j] == neuron_index) {
+        // Remove this connection
+        connections[i * MAX_CONNECTIONS + j] = 0;
+        weights[i * MAX_CONNECTIONS + j] = 0.0f;
+      } else if (connections[i * MAX_CONNECTIONS + j] > neuron_index) {
+        // Adjust connections to neurons after the removed neuron
+        connections[i * MAX_CONNECTIONS + j]--;
+      }
+    }
+  }
+
+  // Decrease neuron count
+  (*num_neurons)--;
+}
+
+void addNewNeuron(Neuron *neurons, uint *connections, float *weights,
+                  uint *num_neurons, uint max_neurons, float *input_tensor) {
+  if (*num_neurons >= max_neurons)
+    return;
+
+  // Create a new neuron with default initialization
+  Neuron new_neuron = {
+      .state = 0.0f,
+      .output = 0.0f,
+      .num_connections = MAX_CONNECTIONS,
+      .layer_id = (*num_neurons) % 2 // Alternate layers
+  };
+
+  // Add the new neuron
+  neurons[*num_neurons] = new_neuron;
+
+  // Initialize connections for the new neuron
+  int base_index = *num_neurons * MAX_CONNECTIONS;
+  connections[base_index] =
+      (*num_neurons + 1) % *num_neurons; // Forward connection
+  connections[base_index + 1] =
+      (*num_neurons - 1 + *num_neurons) % *num_neurons; // Backward connection
+
+  // Initialize weights for the new neuron
+  weights[base_index] = 0.6f;      // Forward weight
+  weights[base_index + 1] = -0.4f; // Backward weight
+
+  // Slightly perturb the input tensor to help integration
+  input_tensor[*num_neurons] = 0.1f * ((float)rand() / RAND_MAX - 0.5f);
+
+  // Increase neuron count
+  (*num_neurons)++;
+}
+
+void computeNeuronPerformanceMetrics(Neuron *neurons, float *target_outputs,
+                                     uint *connections, float *weights,
+                                     NeuronPerformanceMetric *metrics,
+                                     uint num_neurons,
+                                     NetworkStateSnapshot *stateHistory,
+                                     int current_step) {
+  for (int i = 0; i < num_neurons; i++) {
+    // Output Stability: Variance of neuron's output over recent steps
+    float output_variance = 0.0f;
+    if (current_step > 5) {
+      float mean_output = 0.0f;
+      for (int j = 1; j <= 5; j++) {
+        mean_output += stateHistory[current_step - j].states[i];
+      }
+      mean_output /= 5.0f;
+
+      for (int j = 1; j <= 5; j++) {
+        float diff = stateHistory[current_step - j].states[i] - mean_output;
+        output_variance += diff * diff;
+      }
+      output_variance /= 5.0f;
+    }
+    metrics[i].output_stability = 1.0f / (1.0f + output_variance);
+
+    // Prediction Error
+    metrics[i].prediction_error = fabs(neurons[i].output - target_outputs[i]);
+
+    // Connection Quality: Assess weight distribution and connection
+    // effectiveness
+    float total_connection_strength = 0.0f;
+    float weight_variation = 0.0f;
+    float mean_weight = 0.0f;
+
+    for (int j = 0; j < neurons[i].num_connections; j++) {
+      total_connection_strength += fabs(weights[i * MAX_CONNECTIONS + j]);
+      mean_weight += weights[i * MAX_CONNECTIONS + j];
+    }
+    mean_weight /= neurons[i].num_connections;
+
+    for (int j = 0; j < neurons[i].num_connections; j++) {
+      float weight_diff = weights[i * MAX_CONNECTIONS + j] - mean_weight;
+      weight_variation += weight_diff * weight_diff;
+    }
+    weight_variation /= neurons[i].num_connections;
+
+    metrics[i].connection_quality =
+        (total_connection_strength / neurons[i].num_connections) *
+        (1.0f / (1.0f + weight_variation));
+
+    // Adaptive Response: How well neuron responds to different input patterns
+    metrics[i].adaptive_response =
+        1.0f - fabs(neurons[i].output - neurons[i].state) /
+                   (fabs(neurons[i].output) + 1e-5);
+
+    // Importance Score: Combines all metrics with weighted approach
+    metrics[i].importance_score =
+        0.3f * (1.0f - metrics[i].output_stability) +
+        0.3f * metrics[i].prediction_error +
+        0.2f * (1.0f - metrics[i].connection_quality) +
+        0.2f * (1.0f - metrics[i].adaptive_response);
+  }
+}
+
+void advancedNeuronManagement(Neuron *neurons, uint *connections,
+                              float *weights, uint *num_neurons,
+                              uint max_neurons, float *input_tensor,
+                              float *target_outputs,
+                              NetworkStateSnapshot *stateHistory,
+                              int current_step) {
+  NeuronPerformanceMetric *metrics =
+      malloc(*num_neurons * sizeof(NeuronPerformanceMetric));
+
+  computeNeuronPerformanceMetrics(neurons, target_outputs, connections, weights,
+                                  metrics, *num_neurons, stateHistory,
+                                  current_step);
+
+  // Find neurons for potential removal
+  float removal_threshold =
+      0.7f; // High importance score means poor performance
+  for (int i = 0; i < *num_neurons; i++) {
+    if (metrics[i].importance_score > removal_threshold) {
+      removeUnderperformingNeuron(neurons, connections, weights, num_neurons,
+                                  max_neurons, i);
+
+      addNewNeuron(neurons, connections, weights, num_neurons, max_neurons,
+                   input_tensor);
+      break; // Remove and replace only one neuron per cycle
+    }
+  }
+
+  free(metrics);
+}
+
+float evaluateFutureOutcome(Neuron *simulated_neurons, float *target_outputs,
+                            int max_neurons) {
+  float total_alignment = 0.0f;
+  float prediction_confidence = 0.0f;
+
+  // Compute alignment between simulated neuron states and target outputs
+  for (int i = 0; i < max_neurons; i++) {
+    float neuron_output = simulated_neurons[i].output;
+    float target_output = target_outputs[i];
+
+    // Compute alignment as cosine similarity
+    float alignment = 1.0f - fabs(neuron_output - target_output);
+    total_alignment += alignment;
+
+    // Compute confidence based on output proximity
+    prediction_confidence +=
+        1.0f / (1.0f + fabs(neuron_output - target_output));
+  }
+
+  // Normalize alignment and confidence
+  total_alignment /= max_neurons;
+  prediction_confidence /= max_neurons;
+
+  // Combine alignment and confidence with a weighted score
+  return (0.6f * total_alignment) + (0.4f * prediction_confidence);
+}
+
+float *generatePotentialTargets(int max_neurons, float *previous_outputs,
+                                NetworkStateSnapshot *stateHistory, int step,
+                                MemoryEntry *relevantMemory,
+                                DynamicParameters params) {
+  float *target_outputs = (float *)malloc(sizeof(float) * max_neurons);
+  if (target_outputs == NULL) {
+    fprintf(stderr, "Failed to allocate memory for target outputs.\n");
+    exit(EXIT_FAILURE);
+  }
+
+  for (int i = 0; i < max_neurons; i++) {
+    float memory_adjustment = 0.0f;
+
+    // Check if there's relevant memory to influence the target output
+    if (relevantMemory != NULL) {
+      memory_adjustment = relevantMemory->vector[i] * 0.2f;
+    }
+
+    target_outputs[i] = (stateHistory[step].states[i] * 0.5f) +
+                        (previous_outputs[i] * 0.3f) + memory_adjustment +
+                        0.2f; // Adding a small bias term
+
+    float adaptation_factor = params.current_adaptation_rate;
+    target_outputs[i] *= adaptation_factor;
+  }
+
+  return target_outputs;
+}
+
+void simulateFutureStates(Neuron *neurons, float *weights, uint *connections,
+                          float *input_tensor, int max_neurons, int steps) {
+  for (int step = 0; step < steps; step++) {
+    for (int i = 0; i < max_neurons; i++) {
+      neurons[i].state += input_tensor[i % INPUT_SIZE] * 0.1f;
+    }
+    processNeurons(neurons, max_neurons, weights, connections, MAX_CONNECTIONS,
+                   1.5f);
+  }
+}
+
+void selectOptimalDecisionPath(Neuron *neurons, float *weights,
+                               uint *connections, float *input_tensor,
+                               int max_neurons, float *previous_outputs,
+                               NetworkStateSnapshot *stateHistory, int step,
+                               MemoryEntry *relevantMemory,
+                               DynamicParameters params) {
+  int simulation_depths[] = {3, 5, 7};
+  float depth_outcomes[3];
+
+  for (int i = 0; i < 3; i++) {
+    Neuron simulation_copy[MAX_NEURONS];
+    memcpy(simulation_copy, neurons, sizeof(Neuron) * max_neurons);
+
+    simulateFutureStates(simulation_copy, weights, connections, input_tensor,
+                         max_neurons, simulation_depths[i]);
+
+    // Evaluate overall simulation outcome
+    float *potential_targets =
+        generatePotentialTargets(max_neurons, previous_outputs, stateHistory,
+                                 step, relevantMemory, params);
+    depth_outcomes[i] =
+        evaluateFutureOutcome(simulation_copy, potential_targets, max_neurons);
+  }
+
+  // Select the simulation depth with the best outcome
+  int best_depth_index = 0;
+  for (int i = 1; i < 3; i++) {
+    if (depth_outcomes[i] > depth_outcomes[best_depth_index]) {
+      best_depth_index = i;
+    }
+  }
+
+  // Apply modifications based on the best simulation
+  simulateFutureStates(neurons, weights, connections, input_tensor, max_neurons,
+                       simulation_depths[best_depth_index]);
+}
+
 void selectOptimalMetaDecisionPath(Neuron *neurons, float *weights,
-                                   int *connections, float *input_tensor,
+                                   uint *connections, float *input_tensor,
                                    int max_neurons,
                                    MetaLearningState *meta_state,
                                    MetacognitionMetrics *metacog) {
@@ -4492,289 +4486,7 @@ void selectOptimalMetaDecisionPath(Neuron *neurons, float *weights,
                     metacog->confidence_level);
 }
 
-static inline float fast_tanh(float x) {
-  float x2 = x * x;
-  float a = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
-  float b = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
-  return fmax(fmin(a / b, MAX_ACTIVATION), MIN_ACTIVATION);
-}
-
-// ReLU activation function
-static inline float relu(float x) { return fmax(0.0f, x); }
-
-// Sigmoid activation function
-static inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
-
-// Leaky ReLU activation function
-static inline float leaky_relu(float x, float alpha) {
-  return x > 0.0f ? x : alpha * x;
-}
-
-// Swish activation function (x * sigmoid(x))
-static inline float swish(float x) { return x * sigmoid(x); }
-
-// Activation function with configurable response curve and type
-static inline float activation_function(float x, float scale, float bias,
-                                        unsigned int activation_type) {
-  // Apply scale and bias
-  float scaled = x * scale + bias;
-
-  // Select activation function based on type
-  float base_activation;
-  switch (activation_type) {
-  case ACTIVATION_RELU:
-    base_activation = relu(scaled);
-    break;
-  case ACTIVATION_SIGMOID:
-    base_activation = sigmoid(scaled);
-    break;
-  case ACTIVATION_LEAKY_RELU:
-    base_activation = leaky_relu(scaled, 0.01f);
-    break;
-  case ACTIVATION_SWISH:
-    base_activation = swish(scaled);
-    break;
-  case ACTIVATION_TANH:
-  default:
-    base_activation = fast_tanh(scaled);
-    break;
-  }
-
-  // Add nonlinearity for more dynamic response for tanh and sigmoid only
-  if (activation_type == ACTIVATION_TANH ||
-      activation_type == ACTIVATION_SIGMOID) {
-    float sign_val = base_activation >= 0 ? 1.0f : -1.0f;
-    float abs_val = fabsf(base_activation);
-    return sign_val * powf(abs_val, 1.1f);
-  } else {
-    return base_activation;
-  }
-}
-
-// Generate random value based on seed and input value
-float generate_random(int seed, float value) {
-  float x = sinf(seed * 12.9898f + value * 78.233f) * 43758.5453f;
-  return x - floorf(x);
-}
-
-void updateNeuronsOnCPU(Neuron *neurons, const float *weights,
-                        const int *connections, int max_neurons,
-                        int max_connections, const float *input_tensor,
-                        int input_size, const unsigned int activation_type) {
-  for (int id = 0; id < max_neurons; id++) {
-    // Load neuron data into thread-local storage
-    float current_state = neurons[id].state;
-    float current_output = neurons[id].output;
-    int num_conn = neurons[id].num_connections;
-    int layer = neurons[id].layer_id;
-
-    // Calculate weighted sum of inputs from connected neurons
-    float weighted_sum = 0.0f;
-
-    // Process connections
-    for (int i = 0; i < num_conn; i++) {
-      int conn_idx = id * max_connections + i;
-      int target = connections[conn_idx];
-
-      // Add weight scaling based on layer depth
-      float depth_scale = 1.0f / (1.0f + layer);
-      float connection_strength = weights[conn_idx] * depth_scale;
-
-      // Combine state and output influences
-      weighted_sum += neurons[target].state * connection_strength * 0.6f +
-                      neurons[target].output * connection_strength * 0.4f;
-    }
-
-    // Calculate input influence with temporal dynamics
-    float input_influence = input_tensor[id % input_size];
-    float temporal_factor =
-        1.0f / (1.0f + id % 4); // Creates wave-like temporal patterns
-
-    // Update state with multiple influences
-    float new_state = current_state * DECAY_RATE +
-                      weighted_sum * CONNECTION_WEIGHT +
-                      input_influence * INPUT_WEIGHT * temporal_factor;
-
-    // Add recurrent connection influence
-    float recurrent_influence = current_output * weights[id];
-    new_state += recurrent_influence * 0.15f;
-
-    // Apply activation function with dynamic scaling
-    float dynamic_scale =
-        ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-    float new_output = activation_function(new_state, dynamic_scale,
-                                           ACTIVATION_BIAS, activation_type);
-
-    // Add slight randomization for variability
-    float random_val = generate_random(id, new_state);
-    new_output += random_val * 0.01f;
-
-    // Ensure outputs stay within valid range
-    new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
-
-    // Write back results
-    neurons[id].state = new_state;
-    neurons[id].output = new_output;
-  }
-}
-
-void updateWeightsOnCPU(float *weights, const Neuron *neurons,
-                        const int *connections, const float learning_rate,
-                        const int max_neurons, const int max_connections) {
-  const float momentum = 0.9f;
-
-  for (int id = 0; id < max_neurons * max_connections; id++) {
-    int neuron_idx = id / max_connections;
-    int conn_idx = id % max_connections;
-
-    if (conn_idx >= neurons[neuron_idx].num_connections)
-      continue;
-
-    int target_idx = connections[id];
-
-    // Modified Hebbian learning with normalization
-    float pre_activation = neurons[neuron_idx].state;
-    float post_activation = neurons[target_idx].output;
-    float current_weight = weights[id];
-
-    // Calculate weight update
-    float hebbian_term = pre_activation * post_activation;
-    float normalization_term = current_weight * WEIGHT_DECAY;
-    float delta_w = learning_rate * (hebbian_term - normalization_term);
-
-    // Update weight with momentum
-    float new_weight = current_weight + delta_w;
-    new_weight = momentum * current_weight + (1.0f - momentum) * new_weight;
-
-    // Clip weights
-    weights[id] = fmin(fmax(new_weight, MIN_WEIGHT), MAX_WEIGHT);
-  }
-}
-
-void backpropagationOnCPU(const Neuron *neurons, float *weights,
-                          const int *connections, const int max_neurons,
-                          const int max_connections,
-                          const float *target_outputs, float *output_errors,
-                          const float learning_rate) {
-  for (int id = 0; id < max_neurons; id++) {
-    // Compute output error for the current neuron
-    float predicted_output = neurons[id].output;
-    float target_output = target_outputs[id];
-
-    // Compute the error between predicted and target output
-    float error = predicted_output - target_output;
-    output_errors[id] = error;
-
-    float activation_gradient = predicted_output * (1.0f - predicted_output);
-
-    // Calculate weight updates for all connections to this neuron
-    for (int i = 0; i < max_connections; i++) {
-      int conn_idx = id * max_connections + i;
-      int connected_neuron = connections[conn_idx];
-
-      if (connected_neuron >= max_neurons)
-        continue;
-
-      // Calculate gradient for this weight (backpropagation)
-      float input_gradient =
-          neurons[connected_neuron].output * error * activation_gradient;
-
-      // Update weight using learning rate (gradient descent)
-      weights[conn_idx] -= learning_rate * input_gradient;
-    }
-  }
-}
-
-void reverseProcessOnCPU(Neuron *neurons, float *reverse_weights,
-                         int *reverse_connections, int max_neurons,
-                         int max_connections) {
-  for (int id = 0; id < max_neurons; id++) {
-    float sum = 0.0f;
-    for (int c = 0; c < max_connections; c++) {
-      int conn_idx = id * max_connections + c;
-      int source_neuron = reverse_connections[conn_idx];
-      sum += neurons[source_neuron].output * reverse_weights[conn_idx];
-    }
-    neurons[id].state += 0.1f * sum;
-  }
-}
-
-void memoryReplayOnCPU(Neuron *neurons, float *weights, int *connections,
-                       MemoryEntry *memories, int memory_capacity,
-                       int max_neurons, int max_connections) {
-  for (int id = 0; id < memory_capacity; id++) {
-    MemoryEntry memory = memories[id];
-
-    for (int i = 0; i < max_neurons; i++) {
-      for (int j = 0; j < max_connections; j++) {
-        int conn_idx = i * max_connections + j;
-        int target_neuron = connections[conn_idx];
-
-        float weight_delta = 0.01f * memory.importance * neurons[i].output *
-                             memory.vector[target_neuron];
-        weights[conn_idx] += weight_delta;
-      }
-    }
-  }
-}
-
-void processNeuronsOnCPU(Neuron *neurons, const float *weights,
-                         const int *connections, const int max_neurons,
-                         const int max_connections, const float *input_tensor,
-                         const int input_size,
-                         const unsigned int activation_type) {
-  for (int id = 0; id < max_neurons; id++) {
-    float current_state = neurons[id].state;
-    float current_output = neurons[id].output;
-    int num_conn = neurons[id].num_connections;
-    int layer = neurons[id].layer_id;
-
-    // Calculate weighted sum
-    float weighted_sum = 0.0f;
-    for (int i = 0; i < num_conn; i++) {
-      int conn_idx = id * max_connections + i;
-      int target = connections[conn_idx];
-
-      float depth_scale = 1.0f / (1.0f + layer);
-      float connection_strength = weights[conn_idx] * depth_scale;
-
-      weighted_sum += neurons[target].state * connection_strength * 0.6f +
-                      neurons[target].output * connection_strength * 0.4f;
-    }
-
-    // Input processing with temporal dynamics
-    float input_influence = input_tensor[id % input_size];
-    float temporal_factor = 1.0f / (1.0f + id % 4);
-
-    // State update with multiple influences
-    float new_state = current_state * DECAY_RATE +
-                      weighted_sum * CONNECTION_WEIGHT +
-                      input_influence * INPUT_WEIGHT * temporal_factor;
-
-    // Add recurrent influence
-    float recurrent_influence = current_output * weights[id];
-    new_state += recurrent_influence * 0.15f;
-
-    // Dynamic activation
-    float dynamic_scale =
-        ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-    float new_output = activation_function(new_state, dynamic_scale,
-                                           ACTIVATION_BIAS, activation_type);
-
-    // Add controlled randomization
-    float random_val = generate_random(id, new_state);
-    new_output += random_val * 0.01f;
-
-    // Clamp output
-    new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
-
-    // Store results
-    neurons[id].state = new_state;
-    neurons[id].output = new_output;
-  }
-}
-
-ContextNode *createContextNode(const char *name, int vector_size,
+ContextNode *createContextNode(const char *name, uint32_t vector_size,
                                ContextNode *parent) {
   ContextNode *node = (ContextNode *)malloc(sizeof(ContextNode));
   node->name = strdup(name);
@@ -4790,7 +4502,7 @@ ContextNode *createContextNode(const char *name, int vector_size,
   return node;
 }
 
-GlobalContextManager *initializeGlobalContextManager(int vector_size) {
+GlobalContextManager *initializeGlobalContextManager(uint32_t vector_size) {
   GlobalContextManager *manager =
       (GlobalContextManager *)malloc(sizeof(GlobalContextManager));
   manager->vector_size = vector_size;
@@ -4822,7 +4534,7 @@ GlobalContextManager *initializeGlobalContextManager(int vector_size) {
 }
 
 void updateContextNode(ContextNode *node, float *new_state, float importance) {
-  for (int i = 0; i < node->vector_size; i++) {
+  for (uint32_t i = 0; i < node->vector_size; i++) {
     node->state_vector[i] =
         node->state_vector[i] * (1 - importance) + new_state[i] * importance;
   }
@@ -4836,13 +4548,13 @@ void propagateContextUpdates(ContextNode *node) {
     float total_importance = 0.0f;
 
     // Aggregate child states weighted by importance
-    for (int i = 0; i < node->parent->num_children; i++) {
+    for (uint32_t i = 0; i < node->parent->num_children; i++) {
       ContextNode *sibling = node->parent->children[i];
       float temp_relevance =
           expf(-(time(NULL) - sibling->last_updated) / 3600.0f);
       float weight = sibling->importance * temp_relevance;
 
-      for (int j = 0; j < node->vector_size; j++) {
+      for (uint32_t j = 0; j < node->vector_size; j++) {
         aggregated[j] += sibling->state_vector[j] * weight;
       }
       total_importance += weight;
@@ -4850,7 +4562,7 @@ void propagateContextUpdates(ContextNode *node) {
 
     // Normalize and update parent
     if (total_importance > 0) {
-      for (int i = 0; i < node->vector_size; i++) {
+      for (uint32_t i = 0; i < node->vector_size; i++) {
         aggregated[i] /= total_importance;
       }
       updateContextNode(node->parent, aggregated, 0.3f);
@@ -4866,7 +4578,7 @@ ContextNode *findContextNode(ContextNode *root, const char *name) {
     return root;
   }
 
-  for (int i = 0; i < root->num_children; i++) {
+  for (uint32_t i = 0; i < root->num_children; i++) {
     ContextNode *result = findContextNode(root->children[i], name);
     if (result) {
       return result;
@@ -4896,7 +4608,7 @@ ContextNode *addContextNode(GlobalContextManager *manager, const char *name,
 }
 
 float evaluateConstraintSatisfaction(ContextNode *constraint, Neuron *neurons,
-                                     int num_neurons) {
+                                     uint32_t num_neurons) {
   float satisfaction = 1.0f;
 
   if (strcmp(constraint->name, "ActivityLevel") == 0) {
@@ -4904,13 +4616,13 @@ float evaluateConstraintSatisfaction(ContextNode *constraint, Neuron *neurons,
     float variance = 0.0f;
 
     // Compute total activity and mean
-    for (int i = 0; i < num_neurons; i++) {
+    for (uint32_t i = 0; i < num_neurons; i++) {
       total_activity += neurons[i].output;
     }
     float mean_activity = total_activity / num_neurons;
 
     // Compute variance
-    for (int i = 0; i < num_neurons; i++) {
+    for (uint32_t i = 0; i < num_neurons; i++) {
       float diff = neurons[i].output - mean_activity;
       variance += diff * diff;
     }
@@ -4925,12 +4637,12 @@ float evaluateConstraintSatisfaction(ContextNode *constraint, Neuron *neurons,
 }
 
 void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
-                         int num_neurons, float *input_tensor) {
+                         uint32_t num_neurons, float *input_tensor) {
   // Extract relevant features from current network state
   float *current_context = (float *)calloc(manager->vector_size, sizeof(float));
 
   // Analyze network activity patterns
-  for (int i = 0; i < manager->vector_size && i < num_neurons; i++) {
+  for (uint32_t i = 0; i < manager->vector_size && i < num_neurons; i++) {
     current_context[i] = neurons[i].output;
   }
 
@@ -4947,10 +4659,10 @@ void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
     float *constraint_state =
         (float *)calloc(manager->vector_size, sizeof(float));
     // Evaluate current constraint satisfaction
-    for (int i = 0; i < constraints->num_children; i++) {
+    for (uint32_t i = 0; i < constraints->num_children; i++) {
       float satisfaction = evaluateConstraintSatisfaction(
           constraints->children[i], neurons, num_neurons);
-      for (int j = 0; j < manager->vector_size; j++) {
+      for (uint32_t j = 0; j < manager->vector_size; j++) {
         constraint_state[j] += satisfaction;
       }
     }
@@ -4959,12 +4671,12 @@ void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
   }
 
   // Update global context vector
-  for (int i = 0; i < manager->vector_size; i++) {
+  for (uint32_t i = 0; i < manager->vector_size; i++) {
     manager->global_context_vector[i] = 0;
     float total_weight = 0;
 
     // Weighted combination of all top-level contexts
-    for (int j = 0; j < manager->root->num_children; j++) {
+    for (uint32_t j = 0; j < manager->root->num_children; j++) {
       ContextNode *child = manager->root->children[j];
       float weight = child->importance * child->temporal_relevance;
       manager->global_context_vector[i] += child->state_vector[i] * weight;
@@ -4980,22 +4692,22 @@ void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
 }
 
 void integrateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
-                            int num_neurons, float *weights,
-                            int max_connections) {
+                            uint32_t num_neurons, float *weights,
+                            uint32_t max_connections) {
   // Compute network-wide entropy as a measure of state variability
   float total_entropy = 0.0f;
-  for (int i = 0; i < num_neurons; i++) {
+  for (uint32_t i = 0; i < num_neurons; i++) {
     total_entropy += fabs(neurons[i].output);
   }
   float network_entropy = total_entropy / num_neurons;
   float context_sensitivity = 1.0f - network_entropy;
 
   // Modulate neuron behavior based on global context
-  for (int i = 0; i < num_neurons; i++) {
+  for (uint32_t i = 0; i < num_neurons; i++) {
     float context_influence = 0;
 
     // Compute context influence on this neuron
-    for (int j = 0; j < manager->vector_size && j < num_neurons; j++) {
+    for (uint32_t j = 0; j < manager->vector_size && j < num_neurons; j++) {
       context_influence +=
           manager->global_context_vector[j] * weights[i * max_connections + j];
     }
@@ -5439,17 +5151,19 @@ float estimateTaskDifficulty(TaskPrompt current_prompt, float error_rate) {
 
 float addRandomNoise(float value, float noise_level) {
   // Generate random noise within the range [-noise_level, noise_level]
-  float noise = ((float)rand() / UINT32_MAX) * 2.0f * noise_level - noise_level;
+  float noise =
+      ((float)arc4random() / UINT32_MAX) * 2.0f * noise_level - noise_level;
   return value + noise;
 }
 
-float computeNovelty(Neuron *neurons, NetworkStateSnapshot stateHistory,
+float computeNovelty(Neuron *updatedNeurons, NetworkStateSnapshot stateHistory,
                      int step) {
   float novelty_score = 0.0f;
 
   // Compare current neurons to historical state to compute novelty
   for (int i = 0; i < step; i++) {
-    float state_difference = fabs(neurons[i].state - stateHistory.states[i]);
+    float state_difference =
+        fabs(updatedNeurons[i].state - stateHistory.states[i]);
     novelty_score += state_difference;
   }
 
@@ -5596,7 +5310,7 @@ float analyzeResponseCoherence(Neuron *neurons, MemorySystem *memorySystem,
   // sampling
   for (int i = 0; i < MAX_NEURONS - 1;
        i += 3) { // Sample fewer pairs for efficiency
-    for (int j = i + 1; j < fmin(i + 10, MAX_NEURONS); j++) {
+    for (int j = i + 1; j < MIN(i + 10, MAX_NEURONS); j++) {
       if (neurons[i].layer_id == neurons[j].layer_id) {
         float activation_diff = fabs(neurons[i].output - neurons[j].output);
         // More gradual penalty for differences
@@ -5611,7 +5325,7 @@ float analyzeResponseCoherence(Neuron *neurons, MemorySystem *memorySystem,
   // Normalize if we compared at least some neurons
   if (activation_count > 0) {
     // Ensure coherence doesn't drop too rapidly
-    coherence_score = fmax(coherence_score, 0.4f);
+    coherence_score = MAX(coherence_score, 0.4f);
   }
 
   // Compare with recent history, but limit historical influence
@@ -5629,11 +5343,11 @@ float analyzeResponseCoherence(Neuron *neurons, MemorySystem *memorySystem,
         computeMemoryConsistency(neurons, relevant_memory);
     // Limit memory influence to prevent cascading errors
     coherence_score =
-        (0.8f * coherence_score + 0.2f * fmax(0.5f, memory_consistency));
+        (0.8f * coherence_score + 0.2f * MAX(0.5f, memory_consistency));
   }
 
   // Ensure coherence stays within reasonable bounds
-  return fmax(0.3f, fmin(coherence_score, 1.0f));
+  return MAX(0.3f, MIN(coherence_score, 1.0f));
 }
 
 // Detect potential confabulation by analyzing response patterns
@@ -5662,7 +5376,7 @@ bool detectConfabulation(Neuron *neurons, ReflectionHistory *history,
   // Compare with historical coherence using a sliding window
   float recent_historical_coherence = 0.0f;
   int valid_history = 0;
-  for (int i = 0; i < fmin(20, 100);
+  for (int i = 0; i < MIN(20, 100);
        i++) { // Look at more recent history (last 20)
     int idx = (history->history_index - i + 100) % 100;
     if (history->historical_coherence[idx] > 0) {
@@ -5693,14 +5407,14 @@ bool detectConfabulation(Neuron *neurons, ReflectionHistory *history,
 // Helper function to regenerate response when confabulation is detected
 void regenerateResponse(Neuron *neurons, MemorySystem *memorySystem,
                         ReflectionMetrics metrics, float *weights,
-                        int *connections, ReflectionParameters *params) {
+                        uint *connections, ReflectionParameters *params) {
   // Save original parameters
   float original_noise_scale = params->input_noise_scale;
   float original_learning_rate = params->learning_rate;
 
   // Temporary parameter adjustments with upper bounds
-  params->input_noise_scale = fmin(original_noise_scale * 1.5f, 0.4f);
-  params->learning_rate = fmin(original_learning_rate * 1.2f, 0.05f);
+  params->input_noise_scale = MIN(original_noise_scale * 1.5f, 0.4f);
+  params->learning_rate = MIN(original_learning_rate * 1.2f, 0.05f);
 
   // Gently modify neuron states instead of aggressive scaling
   for (int i = 0; i < MAX_NEURONS; i++) {
@@ -5709,11 +5423,11 @@ void regenerateResponse(Neuron *neurons, MemorySystem *memorySystem,
 
     // Dampen neuron states with bounds protection
     neurons[i].state =
-        fmax(0.1f, fmin(neurons[i].state * 0.8f + noise_factor, 0.9f));
+        MAX(0.1f, MIN(neurons[i].state * 0.8f + noise_factor, 0.9f));
 
     // Adjust outputs more conservatively
     neurons[i].output =
-        fmax(0.1f, fmin(neurons[i].output * 0.9f + noise_factor * 0.5f, 0.9f));
+        MAX(0.1f, MIN(neurons[i].output * 0.9f + noise_factor * 0.5f, 0.9f));
   }
 
   // Process neurons with gentler parameters to avoid instability
@@ -5756,14 +5470,14 @@ ReflectionMetrics performSelfReflection(Neuron *neurons,
 
   // Assess novelty with bounds protection
   metrics.novelty_score =
-      fmax(0.1f, fmin(computeNovelty(neurons, *history, current_step),
-                      0.9f)); // Prevent extreme novelty values
+      MAX(0.1f, MIN(computeNovelty(neurons, *history, current_step),
+                    0.9f)); // Prevent extreme novelty values
 
   // Check consistency with previous responses
   metrics.consistency_score = 1.0f;
   if (current_step > 0) {
     metrics.consistency_score =
-        fmax(0.3f, computeConsistencyScore(neurons, history, current_step));
+        MAX(0.3f, computeConsistencyScore(neurons, history, current_step));
   }
 
   // Detect potential confabulation with improved detection
@@ -5813,7 +5527,7 @@ ReflectionMetrics performSelfReflection(Neuron *neurons,
 
 void integrateReflectionSystem(Neuron *neurons, MemorySystem *memorySystem,
                                NetworkStateSnapshot *history, int step,
-                               float *weights, int *connections,
+                               float *weights, uint *connections,
                                ReflectionParameters *params) {
   static ReflectionHistory *reflection_history = NULL;
   if (reflection_history == NULL) {
@@ -5843,30 +5557,29 @@ void integrateReflectionSystem(Neuron *neurons, MemorySystem *memorySystem,
   // Parameter adaptation with homeostatic constraints
   // Only make small adjustments with bounds protection
   if (metrics.coherence_score < reflection_history->coherence_threshold) {
-    params->learning_rate = fmax(0.001f, params->learning_rate * 0.9f);
+    params->learning_rate = MAX(0.001f, params->learning_rate * 0.9f);
   } else {
     // Gradually restore learning rate if things are stable
-    params->learning_rate = fmin(0.02f, params->learning_rate * 1.05f);
+    params->learning_rate = MIN(0.02f, params->learning_rate * 1.05f);
   }
 
   // Adjust plasticity while maintaining within reasonable bounds
   float target_plasticity = 0.8f + 0.2f * metrics.confidence_score;
   params->plasticity = params->plasticity * 0.9f + target_plasticity * 0.1f;
-  params->plasticity = fmax(0.5f, fmin(params->plasticity, 0.95f));
+  params->plasticity = MAX(0.5f, MIN(params->plasticity, 0.95f));
 
   // Adjust noise tolerance based on novelty but with stricter bounds
-  float target_noise_tolerance =
-      fmax(0.1f, 0.3f - 0.2f * metrics.novelty_score);
+  float target_noise_tolerance = MAX(0.1f, 0.3f - 0.2f * metrics.novelty_score);
   params->noise_tolerance =
       params->noise_tolerance * 0.9f + target_noise_tolerance * 0.1f;
-  params->noise_tolerance = fmax(0.05f, fmin(params->noise_tolerance, 0.4f));
+  params->noise_tolerance = MAX(0.05f, MIN(params->noise_tolerance, 0.4f));
 
   // Periodically reset parameters to avoid drift
   if (step % 500 == 0) {
     params->input_noise_scale =
-        fmax(0.05f, fmin(params->input_noise_scale, 0.2f));
+        MAX(0.05f, MIN(params->input_noise_scale, 0.2f));
     params->weight_noise_scale =
-        fmax(0.01f, fmin(params->weight_noise_scale, 0.1f));
+        MAX(0.01f, MIN(params->weight_noise_scale, 0.1f));
   }
 }
 
@@ -5890,10 +5603,11 @@ ReflectionParameters *initializeReflectionParameters() {
   return params;
 }
 
-// Initialize the self-identity system
-SelfIdentitySystem *initializeSelfIdentity(int num_values, int num_beliefs,
-                                           int num_markers, int history_size,
-                                           int pattern_size) {
+SelfIdentitySystem *initializeSelfIdentity(uint32_t num_values,
+                                           uint32_t num_beliefs,
+                                           uint32_t num_markers,
+                                           uint32_t history_size,
+                                           uint32_t pattern_size) {
   SelfIdentitySystem *system =
       (SelfIdentitySystem *)malloc(sizeof(SelfIdentitySystem));
 
@@ -5910,8 +5624,8 @@ SelfIdentitySystem *initializeSelfIdentity(int num_values, int num_beliefs,
   system->experience_history = (float *)calloc(history_size, sizeof(float));
   system->behavioral_patterns = (float *)calloc(pattern_size, sizeof(float));
 
-  // Initialize temporal coherence tracking
-  system->coherence_window = 100; // Track last 100 states
+  // Initialize temporal coherence tracking with a smaller window
+  system->coherence_window = 50; // Reduced from 100 to 50
   system->temporal_coherence =
       (float *)calloc(system->coherence_window, sizeof(float));
 
@@ -5920,7 +5634,7 @@ SelfIdentitySystem *initializeSelfIdentity(int num_values, int num_beliefs,
   system->adaptation_rate = 0.01f;
   system->confidence_level = 0.5f;
 
-  // Initialize verification system
+  // Initialize verification system with reduced state size
   system->verification.threshold = 0.8f;
   system->verification.state_size = num_values + num_beliefs + num_markers;
   system->verification.reference_state =
@@ -5930,16 +5644,16 @@ SelfIdentitySystem *initializeSelfIdentity(int num_values, int num_beliefs,
 }
 
 // Extract behavioral patterns from neural network state
-float *extractBehavioralPatterns(Neuron *neurons, int num_neurons) {
+float *extractBehavioralPatterns(Neuron *neurons, uint32_t num_neurons) {
   float *patterns = (float *)calloc(PATTERN_SIZE, sizeof(float));
 
   // Calculate activation patterns
-  for (int i = 0; i < PATTERN_SIZE; i++) {
+  for (uint32_t i = 0; i < PATTERN_SIZE; i++) {
     float pattern_sum = 0.0f;
-    int neurons_per_pattern = num_neurons / PATTERN_SIZE;
+    uint32_t neurons_per_pattern = num_neurons / PATTERN_SIZE;
 
-    for (int j = 0; j < neurons_per_pattern; j++) {
-      int neuron_idx = i * neurons_per_pattern + j;
+    for (uint32_t j = 0; j < neurons_per_pattern; j++) {
+      uint32_t neuron_idx = i * neurons_per_pattern + j;
       if (neuron_idx < num_neurons) {
         pattern_sum += neurons[neuron_idx].output;
       }
@@ -5949,12 +5663,12 @@ float *extractBehavioralPatterns(Neuron *neurons, int num_neurons) {
 
   // Normalize patterns
   float max_pattern = 0.0f;
-  for (int i = 0; i < PATTERN_SIZE; i++) {
+  for (uint32_t i = 0; i < PATTERN_SIZE; i++) {
     if (patterns[i] > max_pattern)
       max_pattern = patterns[i];
   }
   if (max_pattern > 0.0f) {
-    for (int i = 0; i < PATTERN_SIZE; i++) {
+    for (uint32_t i = 0; i < PATTERN_SIZE; i++) {
       patterns[i] /= max_pattern;
     }
   }
@@ -5964,11 +5678,11 @@ float *extractBehavioralPatterns(Neuron *neurons, int num_neurons) {
 
 // Compute consistency between current and stored patterns
 float computePatternConsistency(float *stored_patterns, float *current_patterns,
-                                int pattern_size) {
+                                uint32_t pattern_size) {
   float consistency = 0.0f;
   float sum_squared_diff = 0.0f;
 
-  for (int i = 0; i < pattern_size; i++) {
+  for (uint32_t i = 0; i < pattern_size; i++) {
     float diff = stored_patterns[i] - current_patterns[i];
     sum_squared_diff += diff * diff;
   }
@@ -5977,7 +5691,7 @@ float computePatternConsistency(float *stored_patterns, float *current_patterns,
   return fmax(0.0f, consistency); // Ensure non-negative
 }
 
-float computeValueConsistency(float *core_values, int num_values) {
+float computeValueConsistency(float *core_values, uint32_t num_values) {
   if (num_values == 0)
     return 0.0f;
 
@@ -5987,7 +5701,7 @@ float computeValueConsistency(float *core_values, int num_values) {
   bool has_valid_values = false;
 
   // First pass - check if we have any non-zero values
-  for (int i = 0; i < num_values; i++) {
+  for (uint32_t i = 0; i < num_values; i++) {
     if (core_values[i] != 0.0f) {
       has_valid_values = true;
       break;
@@ -5996,14 +5710,14 @@ float computeValueConsistency(float *core_values, int num_values) {
 
   // If all values are 0, initialize with small random values
   if (!has_valid_values) {
-    for (int i = 0; i < num_values; i++) {
+    for (uint32_t i = 0; i < num_values; i++) {
       // Initialize with small random values between 0.1 and 0.3
       core_values[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
     }
   }
 
   // Calculate consistency
-  for (int i = 0; i < num_values; i++) {
+  for (uint32_t i = 0; i < num_values; i++) {
     if (isnan(core_values[i])) {
       core_values[i] = 0.1f; // Handle NaN with small non-zero value
     }
@@ -6022,11 +5736,11 @@ float computeValueConsistency(float *core_values, int num_values) {
   return fmin(1.0f, fmax(0.1f, consistency));
 }
 
-bool haveCommonPrimeFactors(int a, int b) {
+bool haveCommonPrimeFactors(uint32_t a, uint32_t b) {
   while (a % 2 == 0 && b % 2 == 0) {
     return true;
   }
-  for (int i = 3; i <= sqrt((a > b) ? a : b); i += 2) {
+  for (uint32_t i = 3; i <= sqrt((a > b) ? a : b); i += 2) {
     if (a % i == 0 && b % i == 0) {
       return true;
     }
@@ -6035,8 +5749,8 @@ bool haveCommonPrimeFactors(int a, int b) {
 }
 
 // Function to count the number of differing bits between two numbers
-int countDifferentBits(int a, int b) {
-  int xor_result = a ^ b;
+int countDifferentBits(uint32_t a, uint32_t b) {
+  uint32_t xor_result = a ^ b;
   int count = 0;
   while (xor_result) {
     count += xor_result & 1;
@@ -6046,15 +5760,15 @@ int countDifferentBits(int a, int b) {
 }
 
 // Function to check bitwise similarity (at most `threshold` differing bits)
-bool areBitsSimilar(int a, int b, int threshold) {
+bool areBitsSimilar(uint32_t a, uint32_t b, int threshold) {
   return countDifferentBits(a, b) <= threshold;
 }
 
-bool areNumericallyClose(int a, int b, int threshold) {
+bool areNumericallyClose(uint32_t a, uint32_t b, uint32_t threshold) {
   return (a > b) ? (a - b <= threshold) : (b - a <= threshold);
 }
 
-bool areBeliefsProbablyRelated(int belief1_idx, int belief2_idx) {
+bool areBeliefsProbablyRelated(uint32_t belief1_idx, uint32_t belief2_idx) {
   return (belief1_idx / 10 == belief2_idx / 10) || // Same decade cluster
          (belief1_idx % 7 == belief2_idx % 7) || // Additional clustering factor
          haveCommonPrimeFactors(belief1_idx,
@@ -6064,23 +5778,23 @@ bool areBeliefsProbablyRelated(int belief1_idx, int belief2_idx) {
                              5); // Numeric proximity threshold
 }
 
-float computeBeliefConsistency(float *beliefs, int num_beliefs) {
+float computeBeliefConsistency(float *beliefs, uint32_t num_beliefs) {
   if (num_beliefs == 0)
     return 0.0f;
 
   float consistency = 0.0f;
   float belief_coherence = 0.0f;
-  int total_comparisons = 0;
+  uint32_t total_comparisons = 0;
 
-  for (int i = 0; i < num_beliefs; i++) {
+  for (uint32_t i = 0; i < num_beliefs; i++) {
     if (isnan(beliefs[i])) {
       beliefs[i] = 0.0f; // Handle NaN values
     }
 
     float local_coherence = 0.0f;
-    int related_beliefs = 0;
+    uint32_t related_beliefs = 0;
 
-    for (int j = 0; j < num_beliefs; j++) {
+    for (uint32_t j = 0; j < num_beliefs; j++) {
       if (i != j && areBeliefsProbablyRelated(i, j)) {
         if (!isnan(beliefs[j])) {
           local_coherence += 1.0f - fabs(beliefs[i] - beliefs[j]);
@@ -6103,17 +5817,17 @@ float computeBeliefConsistency(float *beliefs, int num_beliefs) {
               fmax(0.0f, consistency)); // Ensure result is between 0 and 1
 }
 
-float computeMarkerStability(float *markers, int num_markers) {
+float computeMarkerStability(float *markers, uint32_t num_markers) {
   if (num_markers == 0)
     return 0.0f;
 
   float stability = 0.0f;
   float marker_strength = 0.0f;
-  int valid_markers = 0;
+  uint32_t valid_markers = 0;
   bool has_valid_markers = false;
 
   // First pass - check if we have any non-zero values
-  for (int i = 0; i < num_markers; i++) {
+  for (uint32_t i = 0; i < num_markers; i++) {
     if (markers[i] != 0.0f) {
       has_valid_markers = true;
       break;
@@ -6122,7 +5836,7 @@ float computeMarkerStability(float *markers, int num_markers) {
 
   // If all markers are 0, initialize with small random values
   if (!has_valid_markers) {
-    for (int i = 0; i < num_markers; i++) {
+    for (uint32_t i = 0; i < num_markers; i++) {
       // Initialize with small random values between 0.1 and 0.3
       markers[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
     }
@@ -6130,7 +5844,7 @@ float computeMarkerStability(float *markers, int num_markers) {
 
   // Calculate stability with enhanced weighting
   float max_strength = 0.0f;
-  for (int i = 0; i < num_markers; i++) {
+  for (uint32_t i = 0; i < num_markers; i++) {
     if (!isnan(markers[i])) {
       float strength = fabs(markers[i]);
       marker_strength += strength * strength; // Quadratic weighting
@@ -6155,26 +5869,25 @@ void initializeIdentityComponents(SelfIdentitySystem *system) {
     return;
 
   // Initialize core values with small random values
-  for (int i = 0; i < system->num_core_values; i++) {
+  for (uint32_t i = 0; i < system->num_core_values; i++) {
     system->core_values[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
   }
 
   // Initialize identity markers with small random values
-  for (int i = 0; i < system->num_markers; i++) {
+  for (uint32_t i = 0; i < system->num_markers; i++) {
     system->identity_markers[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
   }
 
   // Initialize belief system with small random values
-  for (int i = 0; i < system->num_beliefs; i++) {
+  for (uint32_t i = 0; i < system->num_beliefs; i++) {
     system->belief_system[i] = 0.1f + (float)rand() / RAND_MAX * 0.2f;
   }
 }
 
-// Get current complete identity state
 float *getCurrentIdentityState(SelfIdentitySystem *system) {
-  int total_size = system->verification.state_size;
+  uint32_t total_size = system->verification.state_size;
   float *current_state = (float *)malloc(total_size * sizeof(float));
-  int offset = 0;
+  uint32_t offset = 0;
 
   // Copy core values
   memcpy(current_state + offset, system->core_values,
@@ -6194,12 +5907,13 @@ float *getCurrentIdentityState(SelfIdentitySystem *system) {
 }
 
 // Compute consistency between two identity states
-float computeStateConsistency(float *state1, float *state2, int state_size) {
+float computeStateConsistency(float *state1, float *state2,
+                              uint32_t state_size) {
   float consistency = 0.0f;
   float sum_squared_diff = 0.0f;
   float sum_magnitudes = 0.0f;
 
-  for (int i = 0; i < state_size; i++) {
+  for (uint32_t i = 0; i < state_size; i++) {
     float diff = state1[i] - state2[i];
     sum_squared_diff += diff * diff;
     sum_magnitudes += fabs(state1[i]) + fabs(state2[i]);
@@ -6252,6 +5966,8 @@ void updateReferenceStates(SelfIdentitySystem *system, float *current_state) {
         clampValue(system->verification.reference_state[i]);
   }
 }
+
+float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
 
 // Compute experience value using weighted encoding
 float computeExperienceValue(float *experience_vector) {
@@ -6530,9 +6246,19 @@ void updateIdentity(SelfIdentitySystem *system, Neuron *neurons,
   free(experience_vector);
 }
 
-// Verify identity consistency
+void printArray(const char *name, float *array, uint32_t size) {
+  printf("%s: ", name);
+  for (uint32_t i = 0; i < size; i++) {
+    printf("%.2f ", array[i]);
+  }
+  printf("\n");
+}
+
 bool verifyIdentity(SelfIdentitySystem *system) {
   float *current_state = getCurrentIdentityState(system);
+  for (uint32_t i = 0; i < system->verification.state_size; i++) {
+    current_state[i] = clampValue(current_state[i]);
+  }
   float consistency = computeStateConsistency(
       current_state, system->verification.reference_state,
       system->verification.state_size);
@@ -6574,7 +6300,7 @@ char *generateIdentityReflection(SelfIdentitySystem *system) {
   return reflection;
 }
 
-KnowledgeFilter *initializeKnowledgeFilter(int initial_capacity) {
+KnowledgeFilter *initializeKnowledgeFilter(uint32_t initial_capacity) {
   KnowledgeFilter *filter = (KnowledgeFilter *)malloc(sizeof(KnowledgeFilter));
   filter->categories =
       (KnowledgeCategory *)malloc(initial_capacity * sizeof(KnowledgeCategory));
@@ -6623,17 +6349,17 @@ float computeCategorySimilarity(float *feature_vector1,
     norm2 += feature_vector2[i] * feature_vector2[i];
   }
 
-  // Avoid NaN by checking for zero norm
-  if (norm1 == 0.0f || norm2 == 0.0f) {
-    return 0.0f; // No valid similarity if either vector is zero
+  // Prevent division by zero - this was the primary cause of NaNs
+  if (norm1 < 1e-10f || norm2 < 1e-10f) {
+    return 0.0f;
   }
 
-  return dot_product / (sqrtf(norm1) * sqrtf(norm2));
+  return dot_product / (sqrt(norm1) * sqrt(norm2));
 }
 
 void updateCategorySimilarityMatrix(KnowledgeFilter *filter) {
-  for (int i = 0; i < filter->num_categories; i++) {
-    for (int j = i; j < filter->num_categories; j++) {
+  for (uint32_t i = 0; i < filter->num_categories; i++) {
+    for (uint32_t j = i; j < filter->num_categories; j++) {
       float similarity =
           computeCategorySimilarity(filter->categories[i].feature_vector,
                                     filter->categories[j].feature_vector);
@@ -6648,9 +6374,39 @@ KnowledgeCategory *categorizeInput(KnowledgeFilter *filter, float *input_vector,
   KnowledgeCategory *best_match = NULL;
   float best_similarity = threshold;
 
-  for (int i = 0; i < filter->num_categories; i++) {
+  for (uint32_t i = 0; i < filter->num_categories; i++) {
+    // Check if feature vector contains any NaN values
+    bool has_nan = false;
+    for (int j = 0; j < FEATURE_VECTOR_SIZE; j++) {
+      if (isnan(filter->categories[i].feature_vector[j])) {
+        filter->categories[i].feature_vector[j] = 0.0f; // Fix NaN values
+        has_nan = true;
+      }
+    }
+
+    // If NaN values were detected, normalize the vector
+    if (has_nan) {
+      float sum = 0.0f;
+      for (int j = 0; j < FEATURE_VECTOR_SIZE; j++) {
+        sum += filter->categories[i].feature_vector[j] *
+               filter->categories[i].feature_vector[j];
+      }
+
+      if (sum > 0.0f) {
+        float norm = sqrt(sum);
+        for (int j = 0; j < FEATURE_VECTOR_SIZE; j++) {
+          filter->categories[i].feature_vector[j] /= norm;
+        }
+      }
+    }
+
     float similarity = computeCategorySimilarity(
         input_vector, filter->categories[i].feature_vector);
+
+    // Skip if similarity calculation resulted in NaN
+    if (isnan(similarity)) {
+      continue;
+    }
 
     if (similarity > best_similarity) {
       best_similarity = similarity;
@@ -6659,17 +6415,24 @@ KnowledgeCategory *categorizeInput(KnowledgeFilter *filter, float *input_vector,
   }
 
   if (best_match) {
+    // Update usage statistics
     best_match->usage_count++;
     best_match->last_accessed = time(NULL);
 
-    // Update confidence based on similarity score
-    best_match->confidence =
+    // Update confidence based on similarity score with safety check
+    float new_confidence =
         (best_match->confidence * 0.9f + best_similarity * 0.1f);
+    best_match->confidence = isnan(new_confidence)
+                                 ? best_match->confidence
+                                 : fmax(0.0f, fmin(1.0f, new_confidence));
 
-    // Adjust importance based on usage and confidence
-    best_match->importance =
-        (best_match->usage_count / (float)MAX_USAGE_COUNT) * 0.5f +
-        best_match->confidence * 0.5f;
+    // Adjust importance based on usage and confidence with safety check
+    float usage_factor =
+        fmin(1.0f, (float)best_match->usage_count / (float)MAX_USAGE_COUNT);
+    float new_importance = usage_factor * 0.5f + best_match->confidence * 0.5f;
+    best_match->importance = isnan(new_importance)
+                                 ? best_match->importance
+                                 : fmax(0.0f, fmin(1.0f, new_importance));
   } else {
     printf("\nNo category matched above threshold (%.2f)\n", threshold);
   }
@@ -6708,10 +6471,19 @@ CategoryStatistics analyzeCategory(KnowledgeFilter *filter,
   stats.total_instances = 0;
   stats.last_encounter = 0;
 
-  for (int i = 0; i < filter->num_problems; i++) {
+  int valid_instances = 0;
+  for (uint32_t i = 0; i < filter->num_problems; i++) {
     if (filter->problem_history[i].category == category) {
-      stats.avg_success_rate += filter->problem_history[i].success_rate;
-      stats.avg_difficulty += filter->problem_history[i].difficulty;
+      // Skip NaN values in calculations
+      if (!isnan(filter->problem_history[i].success_rate)) {
+        stats.avg_success_rate += filter->problem_history[i].success_rate;
+        valid_instances++;
+      }
+
+      if (!isnan(filter->problem_history[i].difficulty)) {
+        stats.avg_difficulty += filter->problem_history[i].difficulty;
+      }
+
       stats.total_instances++;
       if (filter->problem_history[i].timestamp > stats.last_encounter) {
         stats.last_encounter = filter->problem_history[i].timestamp;
@@ -6719,10 +6491,19 @@ CategoryStatistics analyzeCategory(KnowledgeFilter *filter,
     }
   }
 
-  if (stats.total_instances > 0) {
-    stats.avg_success_rate /= stats.total_instances;
-    stats.avg_difficulty /= stats.total_instances;
+  if (valid_instances > 0) {
+    stats.avg_success_rate /= valid_instances;
+    stats.avg_difficulty /=
+        stats.total_instances > 0 ? stats.total_instances : 1;
+  } else {
+    // Default values when no valid instances are found
+    stats.avg_success_rate = 0.5f;
+    stats.avg_difficulty = 0.5f;
   }
+
+  // Ensure values are in valid range
+  stats.avg_success_rate = fmax(0.0f, fmin(1.0f, stats.avg_success_rate));
+  stats.avg_difficulty = fmax(0.0f, fmin(1.0f, stats.avg_difficulty));
 
   return stats;
 }
@@ -6809,6 +6590,7 @@ float *extractFeatureVector(Neuron *neurons, float *input_tensor) {
   return feature_vector;
 }
 
+// Comparison function for memory sorting
 int compareMemoryImportance(const void *a, const void *b) {
   const MemoryEntry *entry_a = (const MemoryEntry *)a;
   const MemoryEntry *entry_b = (const MemoryEntry *)b;
@@ -6832,7 +6614,7 @@ void addToMemoryLevel(MemoryCluster *level, MemoryEntry *entry) {
   }
 }
 
-void strengthenMemory(MemorySystem *memory_system, int index) {
+void strengthenMemory(MemorySystem *memory_system, uint32_t index) {
   if (index >= memory_system->size) {
     return;
   }
@@ -6878,6 +6660,13 @@ void integrateKnowledgeFilter(KnowledgeFilter *filter,
   // Extract feature vector from current network state
   float *current_features = extractFeatureVector(neurons, input_tensor);
 
+  // Check for NaN values in feature vector
+  for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+    if (isnan(current_features[i])) {
+      current_features[i] = 0.0f; // Replace NaN with 0
+    }
+  }
+
   // Categorize current input
   KnowledgeCategory *category = categorizeInput(filter, current_features, 0.7f);
 
@@ -6885,25 +6674,39 @@ void integrateKnowledgeFilter(KnowledgeFilter *filter,
     // Get category statistics including success rate
     CategoryStatistics stats = analyzeCategory(filter, category);
 
-    // Update category confidence based on success rate
-    category->confidence =
-        category->confidence * 0.8f + stats.avg_success_rate * 0.2f;
+    // Ensure stats values are valid
+    if (isnan(stats.avg_success_rate))
+      stats.avg_success_rate = 0.5f;
+    stats.avg_success_rate = fmax(0.0f, fmin(1.0f, stats.avg_success_rate));
 
-    // Update importance based on multiple factors
+    if (isnan(stats.avg_difficulty))
+      stats.avg_difficulty = 0.5f;
+    stats.avg_difficulty = fmax(0.0f, fmin(1.0f, stats.avg_difficulty));
+
+    // Update category confidence with clamping to prevent NaN propagation
+    float new_confidence =
+        category->confidence * 0.8f + stats.avg_success_rate * 0.2f;
+    category->confidence =
+        isnan(new_confidence) ? 0.5f : fmax(0.0f, fmin(1.0f, new_confidence));
+
+    // Update importance based on multiple factors with safety checks
     float usage_factor = (float)category->usage_count / MAX_USAGE_COUNT;
+    usage_factor = fmax(0.0f, fmin(1.0f, usage_factor)); // Clamp to [0,1]
+
     float difficulty_factor = stats.avg_difficulty;
     float success_factor = stats.avg_success_rate;
 
-    category->importance =
+    float new_importance =
         usage_factor * 0.3f + difficulty_factor * 0.4f + success_factor * 0.3f;
+    category->importance =
+        isnan(new_importance) ? 0.5f : fmax(0.0f, fmin(1.0f, new_importance));
 
-    // Normalize importance to [0,1] range
-    category->importance = fmax(0.0f, fmin(1.0f, category->importance));
-
-    // Update feature vector with new information
+    // Update feature vector with new information and check for NaNs
     for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
-      category->feature_vector[i] =
+      float new_value =
           category->feature_vector[i] * 0.9f + current_features[i] * 0.1f;
+      category->feature_vector[i] =
+          isnan(new_value) ? category->feature_vector[i] : new_value;
     }
   }
 
@@ -6915,7 +6718,7 @@ void printCategoryInsights(KnowledgeFilter *filter) {
   printf("%-20s %-12s %-12s %-12s %-12s\n", "Category", "Confidence",
          "Importance", "Usage Count", "Last Access");
 
-  for (int i = 0; i < filter->num_categories; i++) {
+  for (uint32_t i = 0; i < filter->num_categories; i++) {
     KnowledgeCategory *cat = &filter->categories[i];
     char time_str[26];
     ctime_r(&cat->last_accessed, time_str);
@@ -6929,12 +6732,31 @@ void printCategoryInsights(KnowledgeFilter *filter) {
 void updateKnowledgeSystem(Neuron *neurons, float *input_tensor,
                            MemorySystem *memory_system, KnowledgeFilter *filter,
                            float current_performance) {
+  // Check and sanitize current_performance
+  if (isnan(current_performance)) {
+    current_performance = 0.5f; // Default to neutral performance
+  }
+  current_performance = fmax(0.0f, fmin(1.0f, current_performance));
+
+  // Check neurons for NaN values and repair them
+  for (int i = 0; i < MAX_NEURONS; i++) {
+    if (isnan(neurons[i].output)) {
+      neurons[i].output = 0.0f; // Reset NaN neurons
+    }
+  }
 
   // Integrate knowledge filter with current network state
   integrateKnowledgeFilter(filter, memory_system, neurons, input_tensor);
 
   // Extract feature vector for problem instance
   float *feature_vector = extractFeatureVector(neurons, input_tensor);
+
+  // Check for NaN values in feature vector
+  for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+    if (isnan(feature_vector[i])) {
+      feature_vector[i] = 0.0f;
+    }
+  }
 
   // Categorize current input
   KnowledgeCategory *category = categorizeInput(filter, feature_vector, 0.7f);
@@ -6946,14 +6768,23 @@ void updateKnowledgeSystem(Neuron *neurons, float *input_tensor,
              "Network state analysis at performance level %.2f",
              current_performance);
 
-    // Calculate difficulty based on neuron activation patterns
+    // Calculate difficulty based on neuron activation patterns with safety
+    // check
     float difficulty = 0.0f;
+    int active_neurons = 0;
     for (int i = 0; i < MAX_NEURONS; i++) {
       if (neurons[i].output > 0.8f) {
         difficulty += 0.1f;
+        active_neurons++;
       }
     }
-    difficulty = fmin(1.0f, difficulty);
+
+    // Scale difficulty by active neurons to prevent unbounded growth
+    if (active_neurons > 0) {
+      difficulty = fmin(1.0f, difficulty / fmax(10.0f, (float)active_neurons));
+    } else {
+      difficulty = 0.5f; // Default difficulty
+    }
 
     // Record the problem instance
     recordProblemInstance(filter, description, feature_vector, difficulty,
@@ -6963,18 +6794,32 @@ void updateKnowledgeSystem(Neuron *neurons, float *input_tensor,
     category->usage_count++;
     category->last_accessed = time(NULL);
 
-    // Update confidence based on performance
-    category->confidence =
+    // Update confidence based on performance with safety check
+    float new_confidence =
         category->confidence * 0.9f + current_performance * 0.1f;
+    category->confidence = isnan(new_confidence)
+                               ? category->confidence
+                               : fmax(0.0f, fmin(1.0f, new_confidence));
 
     // Update importance based on multiple factors
     CategoryStatistics stats = analyzeCategory(filter, category);
-    float usage_factor = (float)category->usage_count / MAX_USAGE_COUNT;
-    float recency_factor =
-        1.0f / (1.0f + (time(NULL) - stats.last_encounter) / 86400.0f);
 
-    category->importance = usage_factor * 0.3f + stats.avg_difficulty * 0.3f +
+    // Ensure stats are valid
+    if (isnan(stats.avg_difficulty))
+      stats.avg_difficulty = 0.5f;
+
+    float usage_factor =
+        fmin(1.0f, (float)category->usage_count / MAX_USAGE_COUNT);
+    float time_diff = difftime(time(NULL), stats.last_encounter);
+    float recency_factor =
+        (time_diff < 1.0) ? 1.0f : 1.0f / (1.0f + time_diff / 86400.0f);
+
+    float new_importance = usage_factor * 0.3f + stats.avg_difficulty * 0.3f +
                            recency_factor * 0.2f + category->confidence * 0.2f;
+
+    category->importance = isnan(new_importance)
+                               ? category->importance
+                               : fmax(0.0f, fmin(1.0f, new_importance));
   }
 
   free(feature_vector);
@@ -6988,7 +6833,7 @@ void updateKnowledgeSystem(Neuron *neurons, float *input_tensor,
 }
 
 void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
-  for (int i = 0; i < filter->num_categories; i++) {
+  for (uint32_t i = 0; i < filter->num_categories; i++) {
     // Start with moderate values instead of extremes
     filter->categories[i].importance = 0.5f;
     filter->categories[i].confidence = 0.5f;
@@ -7004,7 +6849,7 @@ void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
 
 SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
                                                   const float *weights,
-                                                  const int *connections,
+                                                  const uint *connections,
                                                   size_t max_neurons,
                                                   size_t max_connections) {
   SecurityValidationStatus status = {.critical_violation = false,
@@ -7166,7 +7011,7 @@ MemoryProtection validateMemoryAccess(const void *ptr, size_t size) {
 }
 
 void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
-                                     int *connections,
+                                     uint *connections,
                                      const SecurityValidationStatus *status) {
   // Print violation details to stderr
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
@@ -8548,6 +8393,8 @@ void adjustBehaviorBasedOnAnswers(
   }
   emotionalSystem->memory_index = memory_idx;
 
+  // New adjustments for Imagination System
+
   // Adjust imagination creativity based on cognitive load
   if (metacognition->cognitive_load < 0.4f) {
     // Low cognitive load allows for more creativity
@@ -9836,7 +9683,7 @@ ImaginationScenario createScenario(Neuron *neurons, MemorySystem *memory_system,
 
   // Initialize scenario
   scenario.num_outcomes =
-      fmin(3, MAX_OUTCOMES_PER_SCENARIO); // Default to 3 but respect max limit
+      MIN(3, MAX_OUTCOMES_PER_SCENARIO); // Default to 3 but respect max limit
   scenario.divergence_factor = divergence;
 
   // Random creativity level between 0.5 and 1.0 with proper seeding
@@ -9845,7 +9692,7 @@ ImaginationScenario createScenario(Neuron *neurons, MemorySystem *memory_system,
 
   // Generate base vector from current neural state
   float base_vector[MEMORY_VECTOR_SIZE] = {0};
-  for (int i = 0; i < fmin(max_neurons, MEMORY_VECTOR_SIZE); i++) {
+  for (int i = 0; i < MIN(max_neurons, MEMORY_VECTOR_SIZE); i++) {
     base_vector[i] = neurons[i].output;
   }
 
@@ -9931,12 +9778,12 @@ void simulateScenario(ImaginationScenario *scenario, Neuron *neurons,
   }
 
   // Update scenario outcomes based on simulation results
-  int valid_outcomes = fmin(scenario->num_outcomes, MAX_OUTCOMES_PER_SCENARIO);
+  int valid_outcomes = MIN(scenario->num_outcomes, MAX_OUTCOMES_PER_SCENARIO);
   for (int i = 0; i < valid_outcomes; i++) {
     // Blend simulated output into outcome vectors (more weight for earlier
     // outcomes)
     float blend_factor = 0.3f / (i + 1);
-    for (int j = 0; j < fmin(MEMORY_VECTOR_SIZE, max_neurons); j++) {
+    for (int j = 0; j < MIN(MEMORY_VECTOR_SIZE, max_neurons); j++) {
       scenario->outcomes[i].vector[j] =
           scenario->outcomes[i].vector[j] * (1.0f - blend_factor) +
           sim_neurons[j].output * blend_factor;
@@ -10122,7 +9969,7 @@ float applyImaginationToDecision(ImaginationSystem *imagination,
   float max_prob = 0.0f;
 
   // Use only valid outcomes
-  int valid_outcomes = fmin(scenario->num_outcomes, MAX_OUTCOMES_PER_SCENARIO);
+  int valid_outcomes = MIN(scenario->num_outcomes, MAX_OUTCOMES_PER_SCENARIO);
 
   for (int i = 0; i < valid_outcomes; i++) {
     if (scenario->outcomes[i].probability > max_prob) {
@@ -10132,13 +9979,13 @@ float applyImaginationToDecision(ImaginationSystem *imagination,
   }
 
   // Constrain best_idx to valid range as a safety measure
-  best_idx = fmax(0, fmin(best_idx, valid_outcomes - 1));
+  best_idx = MAX(0, MIN(best_idx, valid_outcomes - 1));
 
   // Apply the most probable outcome to neural state with limited influence
   float influence = 0.2f * imagination->creativity_factor;
   influence = fmax(0.01f, fmin(0.5f, influence)); // Reasonable bounds
 
-  for (int i = 0; i < fmin(max_neurons, MEMORY_VECTOR_SIZE); i++) {
+  for (int i = 0; i < MIN(max_neurons, MEMORY_VECTOR_SIZE); i++) {
     // Blend imagined outcome into neuron states
     neurons[i].state = neurons[i].state * (1.0f - influence) +
                        scenario->outcomes[best_idx].vector[i] * influence;
@@ -12674,20 +12521,32 @@ health_update: {
 }
 
 int main() {
+  id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+  if (!device) {
+    fprintf(stderr, "Failed to create Metal device\n");
+    return -1;
+  }
+
+  id<MTLCommandQueue> commandQueue = [device newCommandQueue];
+  if (!commandQueue) {
+    fprintf(stderr, "Failed to create command queue\n");
+    return -1;
+  }
+
   loadVocabularyFromFile("vocabulary.txt");
+
   // Try to load existing memory system
   MemorySystem *memorySystem = NULL;
   WorkingMemorySystem *working_memory =
       createWorkingMemorySystem(200); // adjust capacity as needed
+
   FILE *mem_file = fopen("memory_system.dat", "rb");
   if (mem_file != NULL) {
     fclose(mem_file);
     memorySystem = loadMemorySystem("memory_system.dat");
     if (memorySystem != NULL) {
       printf("Loaded existing memory system\n");
-
       loadHierarchicalMemory(memorySystem, "hierarchical_memory.dat");
-
       printf("\nMemory System Statistics:\n");
       printf("Total Capacity: %u\n", memorySystem->capacity);
       printf("Short-term memories: %u/%u\n",
@@ -12699,7 +12558,6 @@ int main() {
       printf("Long-term memories: %u/%u\n",
              memorySystem->hierarchy.long_term.size,
              memorySystem->hierarchy.long_term.capacity);
-
       printf("\nMemory Samples:\n");
       if (memorySystem->hierarchy.long_term.size > 0) {
         printf("Long-term memory sample (importance: %.2f)\n",
@@ -12731,6 +12589,7 @@ int main() {
 
   PerformanceMetrics *performance_history =
       (PerformanceMetrics *)malloc(STEPS * sizeof(PerformanceMetrics));
+
   OptimizationState opt_state = {.optimal_batch_size = 1,
                                  .optimal_learning_rate = 0.01f,
                                  .best_execution_time = INFINITY,
@@ -12738,17 +12597,86 @@ int main() {
 
   float *previous_outputs = (float *)malloc(MAX_NEURONS * sizeof(float));
 
-  int reverse_connections[MAX_NEURONS * MAX_CONNECTIONS] = {0};
+  NSError *error = nil;
+  NSString *shaderSource = @"neuron_update.metal";
+  NSString *sourceCode = [NSString stringWithContentsOfFile:shaderSource
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:&error];
+  if (!sourceCode) {
+    fprintf(stderr, "Failed to load shader source: %s\n",
+            [[error localizedDescription] UTF8String]);
+    free(stateHistory);
+    freeMemorySystem(memorySystem);
+    return -1;
+  }
+
+  id<MTLLibrary> library = [device newLibraryWithSource:sourceCode
+                                                options:nil
+                                                  error:&error];
+  if (!library) {
+    fprintf(stderr, "Failed to create shader library: %s\n",
+            [[error localizedDescription] UTF8String]);
+    free(stateHistory);
+    freeMemorySystem(memorySystem);
+    return -1;
+  }
+
+  id<MTLFunction> function = [library newFunctionWithName:@"update_neurons"];
+  id<MTLComputePipelineState> pipelineState =
+      [device newComputePipelineStateWithFunction:function error:&error];
+  if (!pipelineState) {
+    fprintf(stderr, "Failed to create pipeline state: %s\n",
+            [[error localizedDescription] UTF8String]);
+    free(stateHistory);
+    freeMemorySystem(memorySystem);
+    return -1;
+  }
+
+  uint reverse_connections[MAX_NEURONS * MAX_CONNECTIONS] = {0};
   float reverse_weights[MAX_NEURONS * MAX_CONNECTIONS] = {0};
+
+  id<MTLComputePipelineState> reversePipelineState;
+  id<MTLComputePipelineState> replayPipelineState;
+
+  id<MTLFunction> weightFunction =
+      [library newFunctionWithName:@"update_weights"];
+  id<MTLComputePipelineState> weightPipelineState =
+      [device newComputePipelineStateWithFunction:weightFunction error:&error];
+
+  id<MTLFunction> neuronFunction =
+      [library newFunctionWithName:@"process_neurons"];
+  id<MTLComputePipelineState> neuronPipelineState =
+      [device newComputePipelineStateWithFunction:neuronFunction error:nil];
+
+  id<MTLFunction> backwardFunction =
+      [library newFunctionWithName:@"backwardKernel"];
+  id<MTLComputePipelineState> backpropPipelineState =
+      [device newComputePipelineStateWithFunction:backwardFunction
+                                            error:&error];
+
+  id<MTLFunction> reverseFunction =
+      [library newFunctionWithName:@"reverse_process"];
+  reversePipelineState =
+      [device newComputePipelineStateWithFunction:reverseFunction error:&error];
+
+  id<MTLFunction> replayFunction =
+      [library newFunctionWithName:@"memory_replay"];
+  replayPipelineState =
+      [device newComputePipelineStateWithFunction:replayFunction error:&error];
+
+  if (error) {
+    NSLog(@"Error occurred when creating backwardPipelineState: %@", error);
+  }
 
   // Initialize neural network structures
   Neuron neurons[MAX_NEURONS];
-  int connections[MAX_NEURONS * MAX_CONNECTIONS] = {0};
+  uint connections[MAX_NEURONS * MAX_CONNECTIONS] = {0};
   float weights[MAX_NEURONS * MAX_CONNECTIONS] = {0};
+
   // Create constant buffers
-  int max_neurons = MAX_NEURONS;
-  int max_connections = MAX_CONNECTIONS;
-  int input_size = INPUT_SIZE;
+  uint max_neurons = MAX_NEURONS;
+  uint max_connections = MAX_CONNECTIONS;
+  uint input_size = INPUT_SIZE;
   float *input_tensor = (float *)malloc(max_neurons * sizeof(float));
 
   // Initialize neurons from memory or with default values
@@ -12756,16 +12684,13 @@ int main() {
     int lastMemoryIdx = (memorySystem->head - 1 + memorySystem->capacity) %
                         memorySystem->capacity;
     MemoryEntry *lastMemory = &memorySystem->entries[lastMemoryIdx];
-
     printf("\nInitializing neurons from last memory state...\n");
-
     for (int i = 0; i < MAX_NEURONS; i++) {
       neurons[i].state = lastMemory->vector[i];
       neurons[i].output = lastMemory->vector[i + MAX_NEURONS];
       neurons[i].num_connections = MAX_CONNECTIONS;
       neurons[i].layer_id = i % 2;
     }
-
     // Initialize connections and weights
     for (int i = 0; i < MAX_NEURONS; i++) {
       connections[i * MAX_CONNECTIONS] = (i + 1) % MAX_NEURONS;
@@ -12778,18 +12703,68 @@ int main() {
     initializeNeurons(neurons, connections, weights, input_tensor);
   }
 
+  // Create Metal buffers
+  id<MTLBuffer> neuronBuffer =
+      [device newBufferWithBytes:neurons
+                          length:sizeof(neurons)
+                         options:MTLResourceStorageModeShared];
+  id<MTLBuffer> connectionBuffer =
+      [device newBufferWithBytes:connections
+                          length:sizeof(connections)
+                         options:MTLResourceStorageModeShared];
+  id<MTLBuffer> weightBuffer =
+      [device newBufferWithBytes:weights
+                          length:sizeof(weights)
+                         options:MTLResourceStorageModeShared];
+  id<MTLBuffer> inputBuffer =
+      [device newBufferWithBytes:input_tensor
+                          length:sizeof(input_tensor)
+                         options:MTLResourceStorageModeShared];
+
   float learning_rate = 0.01f;
+  id<MTLBuffer> learningRateBuffer =
+      [device newBufferWithBytes:&learning_rate
+                          length:sizeof(float)
+                         options:MTLResourceStorageModeShared];
+  id<MTLBuffer> maxNeuronsBuffer =
+      [device newBufferWithBytes:&max_neurons
+                          length:sizeof(uint)
+                         options:MTLResourceStorageModeShared];
+  id<MTLBuffer> maxConnectionsBuffer =
+      [device newBufferWithBytes:&max_connections
+                          length:sizeof(uint)
+                         options:MTLResourceStorageModeShared];
+  id<MTLBuffer> inputSizeBuffer =
+      [device newBufferWithBytes:&input_size
+                          length:sizeof(uint)
+                         options:MTLResourceStorageModeShared];
+
   for (int i = 0; i < MAX_NEURONS; i++) {
     // Mirror forward connections with reverse direction
     reverse_connections[i * MAX_CONNECTIONS] =
         (i - 1 + MAX_NEURONS) % MAX_NEURONS;
     reverse_weights[i * MAX_CONNECTIONS] = weights[i * MAX_CONNECTIONS + 1];
-
     reverse_connections[i * MAX_CONNECTIONS + 1] = (i + 2) % MAX_NEURONS;
     reverse_weights[i * MAX_CONNECTIONS + 1] = -0.3f;
   }
+
+  // Create Metal buffers for reverse pathways
+  id<MTLBuffer> reverseConnectionBuffer =
+      [device newBufferWithBytes:reverse_connections
+                          length:sizeof(reverse_connections)
+                         options:MTLResourceStorageModeShared];
+  id<MTLBuffer> reverseWeightBuffer =
+      [device newBufferWithBytes:reverse_weights
+                          length:sizeof(reverse_weights)
+                         options:MTLResourceStorageModeShared];
+
   // Initialize weights
   initializeWeights(weights, MAX_NEURONS, MAX_CONNECTIONS, input_tensor);
+  id<MTLBuffer> recurrentWeightBuffer =
+      [device newBufferWithBytes:weights
+                          length:sizeof(weights)
+                         options:MTLResourceStorageModeShared];
+
   DynamicParameters params = initDynamicParameters();
   SystemParameters *system_params =
       loadSystemParameters("system_parameters.dat");
@@ -12797,17 +12772,13 @@ int main() {
     opt_state = system_params->opt_state;
     params = system_params->dynamic_params;
   }
+
   float target_outputs[MAX_NEURONS];
   const char *text_input =
       "Apple, banana, cherry, date, and elderberry are fruits.";
   initializeEmbeddings("custom_embeddings.txt");
 
   int network_regions = 2; // Assuming 2 layers
-  MetaController *metaController = loadMetaController("metacontroller.dat");
-  if (metaController == NULL) {
-    metaController = initializeMetaController(2); // 2 regions
-    printf("Initialized new MetaController\n");
-  }
 
   IntrinsicMotivation *motivation = loadIntrinsicMotivation("motivation.dat");
   if (motivation == NULL) {
@@ -12818,7 +12789,7 @@ int main() {
   NetworkPerformanceMetrics *performanceMetrics =
       loadNetworkPerformanceMetrics("performance_metrics.dat");
   if (performanceMetrics == NULL) {
-    performanceMetrics = initializePerformanceMetrics(2); // 2 regions
+    performanceMetrics = initializePerformanceMetrics(network_regions);
     printf("Initialized new NetworkPerformanceMetrics\n");
   }
 
@@ -12836,8 +12807,7 @@ int main() {
     printf("Initialized new SelfIdentitySystem\n");
   }
 
-  KnowledgeFilter *knowledge_filter =
-      loadKnowledgeFilter("knowledge_filter.dat");
+  KnowledgeFilter *knowledge_filter = NULL;
   if (knowledge_filter == NULL) {
     knowledge_filter = initializeKnowledgeFilter(100);
     printf("Initialized new KnowledgeFilter\n");
@@ -12850,15 +12820,18 @@ int main() {
     printf("Initialized new MetacognitionMetrics\n");
   }
 
+  initializeKnowledgeMetrics(knowledge_filter);
+
   MetaLearningState *meta_learning_state =
-      loadMetaLearningState("meta_learning.dat");
+      loadMetaLearningState("meta_learning_state.dat");
   if (meta_learning_state == NULL) {
     meta_learning_state = initializeMetaLearningState(4);
     printf("Initialized new MetaLearningState\n");
   }
 
-  // Initialize remaining systems
-  SocialSystem *social_system = social_system = initializeSocialSystem(100, 50);
+  MetaController *metaController = metaController =
+      initializeMetaController(network_regions);
+  SocialSystem *social_system = initializeSocialSystem(100, 50);
   GoalSystem *goalSystem = initializeGoalSystem(10);
   GlobalContextManager *contextManager =
       initializeGlobalContextManager(MAX_NEURONS);
@@ -12868,7 +12841,7 @@ int main() {
   NeuronSpecializationSystem *specialization_system =
       initializeSpecializationSystem(0.6f);
   MoralCompass *moralCompass = initializeMoralCompass(5);
-  initializeKnowledgeMetrics(knowledge_filter);
+
   addSymbol(0, "What is the current task?");
   addSymbol(1, "What is the current error rate?");
   addSymbol(2, "What is the current learning rate?");
@@ -12888,7 +12861,7 @@ int main() {
          moralCompass->num_principles);
   printf("Initial ethical alignment: %.2f\n", moralCompass->overall_alignment);
 
-  // Main training loop
+  // Main simulation loop
   printf("\nStarting training with loaded memory state...\n");
   for (int step = 0; step < STEPS; step++) {
     double step_start_time = getCurrentTime();
@@ -12899,7 +12872,7 @@ int main() {
     // Store previous outputs for error calculation
     float *previous_outputs = (float *)malloc(max_neurons * sizeof(float));
     for (int i = 0; i < max_neurons; i++) {
-      previous_outputs[i] = neurons[i].output;
+      previous_outputs[i] = ((Neuron *)neuronBuffer.contents)[i].output;
     }
 
     // Get last timestamp for continuity
@@ -12910,8 +12883,7 @@ int main() {
                             memorySystem->capacity]
                   .timestamp
             : 0;
-
-    // Retrieve the most relevant memory
+    // Retrieve the most relevant memory (if any)
     MemoryEntry *relevantMemory = retrieveMemory(memorySystem);
 
     initPredictiveCodingParams(max_neurons);
@@ -12921,11 +12893,13 @@ int main() {
                              (step > 0) ? &stateHistory[step - 1] : NULL,
                              max_neurons);
 
-    // Prepare input tensor
+    // Dynamically sized input tensor
     float *input_tensor = (float *)malloc(max_neurons * sizeof(float));
     memcpy(input_tensor, predictive_inputs, max_neurons * sizeof(float));
     generateInputTensor(input_tensor, step, text_input, relevantMemory,
                         system_params);
+
+    memcpy(inputBuffer.contents, input_tensor, max_neurons * sizeof(float));
 
     if (step % 10 == 0) { // Periodic memory maintenance
       decayMemorySystem(memorySystem);
@@ -12939,16 +12913,57 @@ int main() {
              memorySystem->hierarchy.long_term.size);
     }
 
-    int activation_type = ACTIVATION_TANH;
+    // Forward pass: Compute neuron outputs
+    id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+    processNeurons(neurons, max_neurons, weights, connections, max_connections,
+                   1.5f);
 
-    // Forward pass using CPU implementation
-    updateNeuronsOnCPU(neurons, weights, connections, max_neurons,
-                       max_connections, input_tensor, input_size,
-                       activation_type);
+    uint activation_type = ACTIVATION_TANH; // Default to tanh
 
+    // Create a Metal buffer for the activation type
+    id<MTLBuffer> activationTypeBuffer =
+        [device newBufferWithBytes:&activation_type
+                            length:sizeof(uint)
+                           options:MTLResourceStorageModeShared];
+
+    id<MTLComputeCommandEncoder> forwardEncoder =
+        [commandBuffer computeCommandEncoder];
+
+    [forwardEncoder setComputePipelineState:pipelineState];
+    [forwardEncoder setBuffer:neuronBuffer offset:0 atIndex:0];
+    [forwardEncoder setBuffer:weightBuffer offset:0 atIndex:1];
+    [forwardEncoder setBuffer:connectionBuffer offset:0 atIndex:2];
+    [forwardEncoder setBuffer:inputBuffer offset:0 atIndex:3];
+    [forwardEncoder setBuffer:maxNeuronsBuffer offset:0 atIndex:4];
+    [forwardEncoder setBuffer:maxConnectionsBuffer offset:0 atIndex:5];
+    [forwardEncoder setBuffer:recurrentWeightBuffer offset:0 atIndex:6];
+    [forwardEncoder setBuffer:activationTypeBuffer offset:0 atIndex:7];
+
+    // Create buffers for max neurons and max connections dynamically
+    id<MTLBuffer> maxNeuronsBuffer =
+        [device newBufferWithBytes:&max_neurons
+                            length:sizeof(uint)
+                           options:MTLResourceStorageModeShared];
+    id<MTLBuffer> maxConnectionsBuffer =
+        [device newBufferWithBytes:&max_connections
+                            length:sizeof(uint)
+                           options:MTLResourceStorageModeShared];
+
+    MTLSize gridSize = MTLSizeMake(max_neurons, 1, 1);
+    MTLSize threadGroupSize = MTLSizeMake(1, 1, 1);
+    [forwardEncoder dispatchThreads:gridSize
+              threadsPerThreadgroup:threadGroupSize];
+    [forwardEncoder endEncoding];
     computePredictionErrors(neurons, input_tensor, max_neurons);
 
-    // Generate target outputs
+    activation_type = ACTIVATION_RELU;
+    // Update the buffer with the new value
+    memcpy(activationTypeBuffer.contents, &activation_type, sizeof(uint));
+
+    id<MTLComputePipelineState> weightPipelineState =
+        [device newComputePipelineStateWithFunction:weightFunction
+                                              error:&error];
+
     float *target_outputs = (float *)malloc(max_neurons * sizeof(float));
     target_outputs =
         generatePotentialTargets(max_neurons, previous_outputs, stateHistory,
@@ -12963,7 +12978,6 @@ int main() {
       updateEmbeddings(word_feedback, tokens[i]);
     }
 
-    // Decision path selection
     selectOptimalDecisionPath(neurons, weights, connections, input_tensor,
                               MAX_NEURONS, previous_outputs, stateHistory, step,
                               relevantMemory, params);
@@ -12995,36 +13009,18 @@ int main() {
       }
     }
 
-    // Update performance metrics
     computeRegionPerformanceMetrics(performanceMetrics, neurons, target_outputs,
                                     MAX_NEURONS);
 
-    // Update meta-controller
+    // Update meta-controller priorities based on performance
     updateMetaControllerPriorities(metaController, performanceMetrics,
                                    metacognition);
+
+    // Apply meta-controller adaptations to network
     applyMetaControllerAdaptations(neurons, weights, metaController,
                                    MAX_NEURONS);
 
-    SecurityValidationStatus secStatus = validateCriticalSecurity(
-        neurons, weights, connections, max_neurons, max_connections);
-
-    if (secStatus.critical_violation) {
-      handleCriticalSecurityViolation(neurons, weights, connections,
-                                      &secStatus);
-    }
-
-    integrateKnowledgeFilter(knowledge_filter, memorySystem, neurons,
-                             input_tensor);
-    void updateKnowledgeSystem(
-        Neuron * neurons, float *input_tensor, MemorySystem *memory_system,
-        KnowledgeFilter *filter, float current_performance);
-
-    // Add periodic insights printing
-    if (step % 50 == 0) {
-      printCategoryInsights(knowledge_filter);
-    }
-
-    // Meta-controller logging
+    // Periodically log meta-control insights
     if (step % 20 == 0) {
       printf("\nMeta-Controller Insights (Step %d):\n", step);
       for (int i = 0; i < network_regions; i++) {
@@ -13037,64 +13033,225 @@ int main() {
                performanceMetrics->region_error_rates[i]);
       }
     }
+
+    // Dynamically sized output errors
     float *outputErrors = (float *)malloc(max_neurons * sizeof(float));
+    id<MTLBuffer> outputErrorsBuffer =
+        [device newBufferWithBytes:outputErrors
+                            length:max_neurons * sizeof(float)
+                           options:MTLResourceStorageModeShared];
 
-    float beta1 = 0.9f; // Exponential decay rate for the first moment estimate
-    float beta2 =
-        0.999f; // Exponential decay rate for the second moment estimate
-    float epsilon = 1e-8f;        // Small constant to avoid division by zero
-    float learning_rate = 0.001f; // Learning rate for gradient descent
+    // Create a Metal buffer for the target_outputs array
+    id<MTLBuffer> targetOutputsBuffer =
+        [device newBufferWithBytes:target_outputs
+                            length:max_neurons * sizeof(float)
+                           options:MTLResourceStorageModeShared];
 
-    // Moment buffers for Adam optimizer (initialize with zeros)
-    float *m =
-        (float *)calloc(max_connections, sizeof(float)); // First moment (m)
-    float *v =
-        (float *)calloc(max_connections, sizeof(float)); // Second moment (v)
+    // Gradient buffer sized dynamically
+    id<MTLBuffer> gradientBuffer = [device
+        newBufferWithLength:(max_neurons * max_connections * sizeof(float))
+                    options:MTLResourceStorageModeShared];
+    id<MTLBuffer> memoryBuffer =
+        [device newBufferWithBytes:memorySystem->entries
+                            length:memorySystem->capacity * sizeof(MemoryEntry)
+                           options:MTLResourceStorageModeShared];
 
-    int t = 1;
+    // Adam Optimizer Parameters
+    float beta1 = 0.9f, beta2 = 0.999f, epsilon = 1e-8f;
+    uint t = 1;                      // Adam time step counter
+    uint timeSteps = NUM_TIME_STEPS; // Number of unrolled time steps
 
-    backpropagationOnCPU(
-        neurons,         // Pointer to the array of neurons
-        weights,         // Pointer to the array of weights
-        connections,     // Pointer to the array of connections
-        max_neurons,     // Maximum number of neurons
-        max_connections, // Maximum number of connections
-        target_outputs,  // Pointer to the array of target outputs
-        outputErrors,    // Pointer to the array to store output errors
-        learning_rate    // Learning rate for weight updates
-    );
+    // First Moment Buffer (m) - Initialized to zero
+    id<MTLBuffer> mBuffer =
+        [device newBufferWithLength:sizeof(float) * max_connections
+                            options:MTLResourceStorageModeShared];
+    memset(mBuffer.contents, 0, sizeof(float) * max_connections);
 
-    // Update weights using CPU implementation
-    updateWeightsOnCPU(weights, neurons, connections, learning_rate,
-                       max_neurons, max_connections);
+    // Second Moment Buffer (v) - Initialized to zero
+    id<MTLBuffer> vBuffer =
+        [device newBufferWithLength:sizeof(float) * max_connections
+                            options:MTLResourceStorageModeShared];
+    memset(vBuffer.contents, 0, sizeof(float) * max_connections);
 
-    activation_type = ACTIVATION_RELU;
-    processNeuronsOnCPU(neurons, weights, connections, max_neurons,
-                        max_connections, input_tensor, input_size,
-                        activation_type);
-    // Reverse process using CPU implementation
-    reverseProcessOnCPU(neurons, reverse_weights, reverse_connections,
-                        max_neurons, max_connections);
+    // Adam beta1, beta2, and epsilon Buffers
+    id<MTLBuffer> beta1Buffer =
+        [device newBufferWithBytes:&beta1
+                            length:sizeof(float)
+                           options:MTLResourceStorageModeShared];
 
-    // Memory replay every 5 steps
+    id<MTLBuffer> beta2Buffer =
+        [device newBufferWithBytes:&beta2
+                            length:sizeof(float)
+                           options:MTLResourceStorageModeShared];
+
+    id<MTLBuffer> epsilonBuffer =
+        [device newBufferWithBytes:&epsilon
+                            length:sizeof(float)
+                           options:MTLResourceStorageModeShared];
+
+    // Learning Rate Buffer
+    float learningRate = 0.001f;
+    id<MTLBuffer> learningRateBuffer =
+        [device newBufferWithBytes:&learningRate
+                            length:sizeof(float)
+                           options:MTLResourceStorageModeShared];
+
+    // Time Steps Buffer (for BPTT)
+    id<MTLBuffer> timeStepsBuffer =
+        [device newBufferWithBytes:&timeSteps
+                            length:sizeof(uint)
+                           options:MTLResourceStorageModeShared];
+
+    // Adam Time Step Counter Buffer (atomic_uint)
+    id<MTLBuffer> tBuffer =
+        [device newBufferWithBytes:&t
+                            length:sizeof(uint)
+                           options:MTLResourceStorageModeShared];
+
+    // Compute loss
+    Neuron *updatedNeurons = (Neuron *)neuronBuffer.contents;
+
+    SecurityValidationStatus secStatus = validateCriticalSecurity(
+        updatedNeurons, weights, connections, max_neurons, max_connections);
+
+    if (secStatus.critical_violation) {
+      handleCriticalSecurityViolation(updatedNeurons, weights, connections,
+                                      &secStatus);
+    }
+
+    void updateKnowledgeSystem(
+        Neuron * neurons, float *input_tensor, MemorySystem *memory_system,
+        KnowledgeFilter *filter, float current_performance);
+
+    // Add periodic insights printing
+    if (step % 50 == 0) {
+      printCategoryInsights(knowledge_filter);
+    }
+
+    // Backward pass: Compute gradients
+    id<MTLComputeCommandEncoder> backwardEncoder =
+        [commandBuffer computeCommandEncoder];
+
+    [backwardEncoder setComputePipelineState:backpropPipelineState];
+
+    [backwardEncoder setBuffer:neuronBuffer offset:0 atIndex:0];
+    [backwardEncoder setBuffer:weightBuffer offset:0 atIndex:1];
+    [backwardEncoder setBuffer:connectionBuffer offset:0 atIndex:2];
+    [backwardEncoder setBuffer:maxNeuronsBuffer offset:0 atIndex:3];
+    [backwardEncoder setBuffer:maxConnectionsBuffer offset:0 atIndex:4];
+    [backwardEncoder setBuffer:targetOutputsBuffer offset:0 atIndex:5];
+    [backwardEncoder setBuffer:outputErrorsBuffer offset:0 atIndex:6];
+    [backwardEncoder setBuffer:mBuffer
+                        offset:0
+                       atIndex:7]; // First moment (Adam)
+    [backwardEncoder setBuffer:vBuffer
+                        offset:0
+                       atIndex:8]; // Second moment (Adam)
+    [backwardEncoder setBuffer:beta1Buffer offset:0 atIndex:9];  // Adam beta1
+    [backwardEncoder setBuffer:beta2Buffer offset:0 atIndex:10]; // Adam beta2
+    [backwardEncoder setBuffer:epsilonBuffer
+                        offset:0
+                       atIndex:11]; // Adam epsilon
+    [backwardEncoder setBuffer:learningRateBuffer
+                        offset:0
+                       atIndex:12]; // Learning rate
+
+    [backwardEncoder setBuffer:timeStepsBuffer
+                        offset:0
+                       atIndex:13]; // Number of time steps
+    [backwardEncoder setBuffer:tBuffer
+                        offset:0
+                       atIndex:14]; // Adam time step counter (atomic)
+
+    // Dispatch threads
+    [backwardEncoder dispatchThreads:gridSize
+               threadsPerThreadgroup:threadGroupSize];
+
+    // End encoding
+    [backwardEncoder endEncoding];
+
+    id<MTLComputeCommandEncoder> weightEncoder =
+        [commandBuffer computeCommandEncoder];
+    [weightEncoder setComputePipelineState:weightPipelineState];
+    [weightEncoder setBuffer:weightBuffer offset:0 atIndex:0];
+    [weightEncoder setBuffer:neuronBuffer offset:0 atIndex:1];
+    [weightEncoder setBuffer:connectionBuffer offset:0 atIndex:2];
+    [weightEncoder setBuffer:learningRateBuffer offset:0 atIndex:3];
+    [weightEncoder setBuffer:maxNeuronsBuffer offset:0 atIndex:4];
+    [weightEncoder setBuffer:maxConnectionsBuffer offset:0 atIndex:5];
+
+    NSUInteger threadExecutionWidth = neuronPipelineState.threadExecutionWidth;
+
+    MTLSize weightGridSize = MTLSizeMake(max_neurons * max_connections, 1, 1);
+    MTLSize weightThreadGroupSize = MTLSizeMake(threadExecutionWidth, 1, 1);
+    [weightEncoder dispatchThreads:weightGridSize
+             threadsPerThreadgroup:weightThreadGroupSize];
+    [weightEncoder endEncoding];
+
+    id<MTLComputeCommandEncoder> neuronEncoder =
+        [commandBuffer computeCommandEncoder];
+    [neuronEncoder setComputePipelineState:neuronPipelineState];
+    [neuronEncoder setBuffer:neuronBuffer offset:0 atIndex:0];
+    [neuronEncoder setBuffer:weightBuffer offset:0 atIndex:1];
+    [neuronEncoder setBuffer:connectionBuffer offset:0 atIndex:2];
+    [neuronEncoder setBuffer:maxNeuronsBuffer offset:0 atIndex:3];
+    [neuronEncoder setBuffer:maxConnectionsBuffer offset:0 atIndex:4];
+    [neuronEncoder setBuffer:inputBuffer offset:0 atIndex:5];
+    [neuronEncoder setBuffer:inputSizeBuffer offset:0 atIndex:6];
+    [neuronEncoder setBuffer:recurrentWeightBuffer offset:0 atIndex:7];
+    [neuronEncoder setBuffer:activationTypeBuffer offset:0 atIndex:8];
+
+    MTLSize neuronGridSize = MTLSizeMake(max_neurons, 1, 1);
+    MTLSize neuronThreadGroupSize = MTLSizeMake(threadExecutionWidth, 1, 1);
+    [neuronEncoder dispatchThreads:neuronGridSize
+             threadsPerThreadgroup:neuronThreadGroupSize];
+    [neuronEncoder endEncoding];
+
+    id<MTLComputeCommandEncoder> reverseEncoder =
+        [commandBuffer computeCommandEncoder];
+    [reverseEncoder setComputePipelineState:reversePipelineState];
+    [reverseEncoder setBuffer:neuronBuffer offset:0 atIndex:0];
+    [reverseEncoder setBuffer:reverseWeightBuffer offset:0 atIndex:1];
+    [reverseEncoder setBuffer:reverseConnectionBuffer offset:0 atIndex:2];
+    [reverseEncoder setBuffer:maxNeuronsBuffer offset:0 atIndex:3];
+    [reverseEncoder setBuffer:maxConnectionsBuffer offset:0 atIndex:4];
+    [reverseEncoder dispatchThreads:gridSize
+              threadsPerThreadgroup:threadGroupSize];
+    [reverseEncoder endEncoding];
+
+    // Memory replay mechanism every 5 steps
     if (step % 5 == 0 && memorySystem->size > 10) {
-      memoryReplayOnCPU(neurons, weights, connections, memorySystem->entries,
-                        memorySystem->capacity, max_neurons, max_connections);
+      id<MTLComputeCommandEncoder> replayEncoder =
+          [commandBuffer computeCommandEncoder];
+      [replayEncoder setComputePipelineState:replayPipelineState];
+      [replayEncoder setBuffer:neuronBuffer offset:0 atIndex:0];
+      [replayEncoder setBuffer:weightBuffer offset:0 atIndex:1];
+      [replayEncoder setBuffer:connectionBuffer offset:0 atIndex:2];
+      [replayEncoder setBuffer:memoryBuffer offset:0 atIndex:3];
+      [replayEncoder dispatchThreads:gridSize
+               threadsPerThreadgroup:threadGroupSize];
+      [replayEncoder endEncoding];
       printf("\nMemory Replay at step %d:", step);
       printReplayStatistics(memorySystem);
     }
 
-    // Compute loss
-    float loss = computeMSELoss(neurons, target_outputs, max_neurons);
-    printf("Loss: %f\n", loss);
+    [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
 
-    verifyNetworkState(neurons, &current_prompt);
+    // Compute the loss between the actual outputs and the target outputs
+    float loss = computeMSELoss(updatedNeurons, target_outputs, max_neurons);
+    NSLog(@"Loss: %f", loss);
+
+    // Read back results
+    updatedNeurons = (Neuron *)neuronBuffer.contents;
+    verifyNetworkState(updatedNeurons, &current_prompt);
 
     // Update global context based on current network state
-    updateGlobalContext(contextManager, neurons, max_neurons, input_tensor);
+    updateGlobalContext(contextManager, updatedNeurons, max_neurons,
+                        input_tensor);
 
     // Integrate context into network processing
-    integrateGlobalContext(contextManager, neurons, max_neurons, weights,
+    integrateGlobalContext(contextManager, updatedNeurons, max_neurons, weights,
                            max_connections);
 
     DynamicContextFeedback feedback = {.adaptation_rate = 0.01f,
@@ -13119,11 +13276,12 @@ int main() {
         (float *)calloc(max_neurons * max_neurons, sizeof(float));
 
     // Update global context based on current network state
-    updateGlobalContext(contextManager, neurons, max_neurons, input_tensor);
+    updateGlobalContext(contextManager, updatedNeurons, max_neurons,
+                        input_tensor);
 
     // Calculate outcome metrics for feedback
     float current_outcome =
-        computeOutcomeMetric(neurons, target_outputs, max_neurons);
+        computeOutcomeMetric(updatedNeurons, target_outputs, max_neurons);
 
     // Store outcome and input in history
     int history_idx = step % adaptation.history_length;
@@ -13162,8 +13320,8 @@ int main() {
         (feedback.current_index + 1) % feedback.history_size;
 
     // Apply updated context weights to network processing
-    applyDynamicContext(neurons, feedback.context_weights, contextManager,
-                        max_neurons);
+    applyDynamicContext(updatedNeurons, feedback.context_weights,
+                        contextManager, max_neurons);
 
     // Decay historical feedback influence
     for (int i = 0; i < feedback.history_size; i++) {
@@ -13171,7 +13329,7 @@ int main() {
     }
 
     // Integrate context into network processing with dynamic weights
-    integrateGlobalContext(contextManager, neurons, max_neurons, weights,
+    integrateGlobalContext(contextManager, updatedNeurons, max_neurons, weights,
                            max_connections);
 
     // Print context adaptation metrics periodically
@@ -13194,15 +13352,15 @@ int main() {
         {0.11, 0.12, 0.13, 0.14, 0.15}, // row 3
     };
 
-    integrateReflectionSystem(neurons, memorySystem, stateHistory, step,
+    integrateReflectionSystem(updatedNeurons, memorySystem, stateHistory, step,
                               weights, connections, reflection_params);
 
     // Update memory system with new outputs
-    addMemory(memorySystem, working_memory, neurons, input_tensor,
+    addMemory(memorySystem, working_memory, updatedNeurons, input_tensor,
               lastTimestamp + step + 1, feature_projection_matrix);
 
     // Update identity system
-    updateIdentity(identity_system, neurons, max_neurons, memorySystem,
+    updateIdentity(identity_system, updatedNeurons, max_neurons, memorySystem,
                    input_tensor);
 
     // Periodically verify identity consistency
@@ -13248,8 +13406,8 @@ int main() {
     }
 
     // Update state history
-    captureNetworkState(neurons, input_tensor, &stateHistory[step], weights,
-                        step);
+    captureNetworkState(updatedNeurons, input_tensor, &stateHistory[step],
+                        weights, step);
     stateHistory[step].current_memory =
         memorySystem
             ->entries[(memorySystem->head - 1 + memorySystem->capacity) %
@@ -13257,9 +13415,8 @@ int main() {
 
     // Print progress
     printf("\nStep %d (Timestamp: %u):\n", step, lastTimestamp + step + 1);
-    printNetworkStates(neurons, input_tensor, step);
+    printNetworkStates(updatedNeurons, input_tensor, step);
 
-    // Task verification logging
     if (step % 10 == 0) {
       printf("\nTask Verification (Step %d):\n", step);
       printf("Description: %s\n", current_prompt.task_description);
@@ -13275,14 +13432,14 @@ int main() {
       }
     }
 
-    // Memory verification
     if (relevantMemory != NULL) {
       PromptVerification memoryVerification = {.instruction =
                                                    "Verify memory integration",
                                                .confidence = 0.0f,
                                                .verified = false};
 
-      float memory_coherence = assessMemoryCoherence(relevantMemory, neurons);
+      float memory_coherence =
+          assessMemoryCoherence(relevantMemory, updatedNeurons);
       sprintf(memoryVerification.reasoning,
               "Memory coherence: %.2f%% - Integration quality: %s",
               memory_coherence * 100.0f,
@@ -13299,19 +13456,20 @@ int main() {
              memorySystem->capacity);
     }
 
-    // Memory consolidation
-    if (step % 10 == 0) {
+    if (step % 10 == 0) { // Consolidate every 10 steps
       consolidateMemory(memorySystem);
     }
 
     // Update weights dynamically
-    updateWeights(weights, neurons, connections, learning_rate);
+    updateWeights(weights, updatedNeurons, connections, learning_rate);
 
+    // Update performance metrics
     performance_history[step].execution_time =
         getCurrentTime() - step_start_time;
-    performance_history[step].average_output = computeAverageOutput(neurons);
+    performance_history[step].average_output =
+        computeAverageOutput(updatedNeurons);
     performance_history[step].error_rate =
-        computeErrorRate(neurons, previous_outputs);
+        computeErrorRate(updatedNeurons, previous_outputs);
     performance_history[step].batch_size = opt_state.optimal_batch_size;
     performance_history[step].learning_rate = opt_state.optimal_learning_rate;
 
@@ -13420,23 +13578,9 @@ int main() {
       printf("Performance score: %.4f\n", opt_state.best_performance_score);
     }
 
-    if (step > 0) {
-      float perf_delta = performance_history[step].average_output -
-                         performance_history[step - 1].average_output;
-      float novelty = computeNovelty(neurons, *stateHistory, step);
-
-      updateImaginationCreativity(imagination_system, perf_delta, novelty);
-
-      if (step % 20 == 0) {
-        printf("\nImagination Creativity: %.2f, Coherence Threshold: %.2f\n",
-               imagination_system->creativity_factor,
-               imagination_system->coherence_threshold);
-      }
-    }
-
     float *previous_states = (float *)malloc(max_neurons * sizeof(float));
     for (int i = 0; i < max_neurons; i++) {
-      previous_states[i] = neurons[i].state;
+      previous_states[i] = updatedNeurons[i].state;
     }
 
     if (system_params != NULL) {
@@ -13450,7 +13594,7 @@ int main() {
       system_params->timestamp = time(NULL);
     }
 
-    float stability = measureNetworkStability(neurons, previous_states);
+    float stability = measureNetworkStability(updatedNeurons, previous_states);
     float performance_delta =
         performance_history[step].average_output -
         (step > 0 ? performance_history[step - 1].average_output : 0);
@@ -13484,14 +13628,26 @@ int main() {
     updateDynamicParameters(&params, performance_delta, stability,
                             performance_history[step].error_rate);
 
-    float novelty = computeNovelty(neurons, *stateHistory, step);
+    float novelty = computeNovelty(updatedNeurons, *stateHistory, step);
+    if (step > 0) {
+      float perf_delta = performance_history[step].average_output -
+                         performance_history[step - 1].average_output;
+      updateImaginationCreativity(imagination_system, perf_delta, novelty);
+
+      if (step % 20 == 0) {
+        printf("\nImagination Creativity: %.2f, Coherence Threshold: %.2f\n",
+               imagination_system->creativity_factor,
+               imagination_system->coherence_threshold);
+      }
+    }
     float task_difficulty = estimateTaskDifficulty(
         current_prompt, performance_history[step].error_rate);
 
     updateMotivationSystem(motivation, performance_delta, novelty,
                            task_difficulty);
 
-    updateGoalSystem(goalSystem, neurons, max_neurons, target_outputs,
+    // Update goals and generate rewards
+    updateGoalSystem(goalSystem, updatedNeurons, max_neurons, target_outputs,
                      &learning_rate);
 
     // Modify exploration vs exploitation based on motivation
@@ -13519,12 +13675,12 @@ int main() {
     }
 
     // Adapt network with dynamic parameters
-    adaptNetworkDynamic(neurons, weights, &params, performance_delta,
+    adaptNetworkDynamic(updatedNeurons, weights, &params, performance_delta,
                         input_tensor);
 
-    selectOptimalMetaDecisionPath(neurons, weights, connections, input_tensor,
-                                  max_neurons, meta_learning_state,
-                                  metacognition);
+    selectOptimalMetaDecisionPath(updatedNeurons, weights, connections,
+                                  input_tensor, max_neurons,
+                                  meta_learning_state, metacognition);
 
     // Optional: Print adaptation parameters periodically
     if (step % 10 == 0) {
@@ -13566,6 +13722,7 @@ int main() {
       }
     }
 
+    // Use optimized parameters
     learning_rate = opt_state.optimal_learning_rate;
     int question_to_ask = 0;
     if (performance_history[step].error_rate > loss) {
@@ -13629,6 +13786,7 @@ int main() {
     detectEmotionalTriggers(emotional_system, neurons, target_outputs,
                             max_neurons, lastTimestamp);
 
+    // Apply emotional processing to neurons
     applyEmotionalProcessing(emotional_system, neurons, max_neurons,
                              input_tensor, learning_rate, params.plasticity);
 
@@ -13712,13 +13870,39 @@ int main() {
 
       // Process batch
       for (int i = b; i < batch_end; i++) {
-        updateNeuronStates(neurons, max_neurons, weights, 1.5f);
+        updateNeuronStates(&((Neuron *)neuronBuffer.contents)[i], max_neurons,
+                           weights, 1.5f);
       }
     }
     float total_error = 0.0f;
     for (int i = 0; i < max_neurons; i++) {
       float error = fabs(neurons[i].output - target_outputs[i]);
       total_error += error;
+    }
+
+    if (total_error > 0.5f && rand() % 10 == 0) {
+      printf("\nUsing imagination for problem-solving (high error: %.2f)\n",
+             total_error);
+
+      // Create specialized problem-solving scenario with higher divergence
+      ImaginationScenario problem_scenario =
+          createScenario(neurons, memorySystem, max_neurons, 0.6f);
+      simulateScenario(&problem_scenario, neurons, input_tensor, max_neurons,
+                       15);
+
+      // Blend all outcomes for a comprehensive solution
+      float blended_solution[MEMORY_VECTOR_SIZE] = {0};
+      blendImaginedOutcomes(problem_scenario.outcomes,
+                            problem_scenario.num_outcomes, blended_solution);
+
+      // Apply blended solution with stronger influence during difficult
+      // problems
+      for (int i = 0; i < max_neurons && i < MEMORY_VECTOR_SIZE; i++) {
+        neurons[i].state = neurons[i].state * 0.7f + blended_solution[i] * 0.3f;
+        input_tensor[i] = input_tensor[i] * 0.8f + blended_solution[i] * 0.2f;
+      }
+
+      printf("Applied blended imagination solution to difficult problem\n");
     }
 
     if (step % 30 == 0 && imagination_system->num_scenarios > 0) {
@@ -13752,7 +13936,6 @@ int main() {
     if (step % 10 == 0) {
       consolidateToLongTermMemory(working_memory, memorySystem, step);
     }
-
     updateBidirectionalWeights(weights, reverse_weights, neurons, connections,
                                reverse_connections, learning_rate);
 
@@ -13783,6 +13966,7 @@ int main() {
                                MAX_NEURONS, input_tensor, target_outputs,
                                stateHistory, step);
     }
+
     if (step % 15 == 0) {
       // Generate search query
       char *query = generateSearchQuery(neurons, max_neurons);
@@ -13831,6 +14015,7 @@ int main() {
       integrateWebSearch(neurons, input_tensor, max_neurons, memorySystem,
                          step);
     }
+
     for (int i = 0; i < 5; i++) {
       recordDecisionOutcome(moralCompass, i, decision_vector[i] >= 0.7f);
     }
@@ -13872,7 +14057,7 @@ int main() {
       }
     }
     systemFallbackCheck(
-        neurons, connections, weights, reverse_connections, reverse_weights,
+        neurons, (int *)connections, weights, (int *)reverse_connections, reverse_weights,
         memorySystem, stateHistory, performance_history, input_tensor,
         target_outputs, previous_outputs, system_params, working_memory,
         metaController, performanceMetrics, motivation, reflection_params,
@@ -13881,9 +14066,9 @@ int main() {
         imagination_system, specialization_system, moralCompass, step,
         max_neurons, max_connections, input_size);
 
-    printf("Average Error: %f", average_error);
+    NSLog(@"Average Error: %f", average_error);
     double throughput = STEPS / performance_history[step].execution_time;
-    printf("Throughput: %f steps/s", throughput);
+    NSLog(@"Throughput: %f steps/s", throughput);
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
     printf("Memory Usage Benchmark:\n");
