@@ -13,7 +13,7 @@ constant float LEARNING_RATE = 0.01f;
 constant float WEIGHT_DECAY = 0.1f;
 constant float MIN_WEIGHT = -1.0f;
 constant float MAX_WEIGHT = 1.0f;
-constant uint MAX_NEURONS = 1024;      // Adjust as needed
+constant uint MAX_NEURONS = 1024;      // Adjust as needed no idea why i made it so big
 constant uint MAX_CONNECTIONS = 16;    // Adjust as needed
 constant uint ACTIVATION_TANH = 0;
 constant uint ACTIVATION_RELU = 1;
@@ -22,7 +22,6 @@ constant uint ACTIVATION_LEAKY_RELU =  3;
 constant uint ACTIVATION_SWISH = 4;
 
 
-// Define MemoryEntry structure
 struct MemoryEntry {
     float vector[MAX_NEURONS * 2]; // Stores neuron states and outputs
     float importance;              // Importance of the memory
