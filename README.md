@@ -164,16 +164,8 @@ To compile the code, run the following command in the root directory of the proj
 
 #### arch64 MacOS
 
-For metal version
-
 ```sh
 clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -lcurl -o neural_web neural_web.m
-```
-
-For cpu but macOS version
-
-```sh
-clang  -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -lcurl -o neural_web neural_web.c
 ```
 
 #### 64/86 unix
