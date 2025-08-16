@@ -1,9 +1,11 @@
 #include <ctype.h>
 #include <curl/curl.h>
+#include <errno.h>
 #include <float.h>
 #include <immintrin.h>
 #include <json-c/json.h>
 #include <math.h>
+#include <pybind11/stl.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -13,11 +15,9 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
-#include <errno.h>
-#include <pybind11/stl.h>
 
 #define MAX_NEURONS 8
-#define MAX_CONNECTIONS 2
+#define MAX_CONNECTIONS 6
 #define STEPS 120
 #define INPUT_SIZE 6            // Size of the input tensor
 #define MEMORY_BUFFER_SIZE 1000 // Size of circular memory buffer
@@ -68,6 +68,11 @@
 #define MAX_SPECIALIZATIONS 8
 #define MAX_SPECIALIZED_NEURONS 64
 #define MAX_OUTCOMES_PER_SCENARIO 10
+#define SPARSE_DENSITY                                                         \
+  0.05f // Only 5% of dimensions active (like cortical columns)
+#define NUM_SEMANTIC_LAYERS 4 // Hierarchical representation layers
+#define CONTEXT_WINDOW 8      // Context for dynamic embeddings
+#define HASH_BUCKETS 1024     // For efficient similarity SearchResults
 
 typedef struct {
   float state;
@@ -672,6 +677,20 @@ typedef struct {
   float forgetting_factor; // Rate at which old interactions lose relevance
 } SocialSystem;
 
+typedef struct {
+  int *active_dims;                        // Indices of active dimensions
+  float *values;                           // Values for active dimensions only
+  int num_active;                          // Number of active dimensions
+  float norm;                              // Cached L2 norm for efficiency
+  int semantic_layer[NUM_SEMANTIC_LAYERS]; // Hierarchical features
+} SparseEmbedding;
+
+typedef struct {
+  char context_hash[32]; // Hash of recent context
+  SparseEmbedding embedding;
+  float recency; // How recently this was accessed
+} ContextEmbedding;
+
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
 int num_symbols = 0;
@@ -781,19 +800,49 @@ float computeImportance(float *memory_vector) {
   }
   return importance / MEMORY_VECTOR_SIZE;
 }
-// Find the least important memory in a given array of memories
-int findLeastImportantMemory(MemoryEntry *entries, unsigned int size) {
-  int least_important_idx = 0;
-  float lowest_importance = entries[0].importance;
 
-  for (unsigned int i = 1; i < size; i++) {
-    if (entries[i].importance < lowest_importance) {
-      lowest_importance = entries[i].importance;
-      least_important_idx = i;
+int *findLeastImportantMemory(MemoryEntry *entries, unsigned int size,
+                              unsigned int count, unsigned int *result_count) {
+  if (count == 0 || size == 0) {
+    *result_count = 0;
+    return NULL;
+  }
+
+  // Don't return more than available
+  count = (count > size) ? size : count;
+  *result_count = count;
+
+  // Create array of indices with their importance values
+  typedef struct {
+    int index;
+    float importance;
+  } IndexPair;
+
+  IndexPair *pairs = new IndexPair[size];
+  for (unsigned int i = 0; i < size; i++) {
+    pairs[i].index = i;
+    pairs[i].importance = entries[i].importance;
+  }
+
+  // Sort by importance (ascending - least important first)
+  for (unsigned int i = 0; i < size - 1; i++) {
+    for (unsigned int j = i + 1; j < size; j++) {
+      if (pairs[i].importance > pairs[j].importance) {
+        IndexPair temp = pairs[i];
+        pairs[i] = pairs[j];
+        pairs[j] = temp;
+      }
     }
   }
 
-  return least_important_idx;
+  // Extract the least important indices
+  int *result = new int[count];
+  for (unsigned int i = 0; i < count; i++) {
+    result[i] = pairs[i].index;
+  }
+
+  free(pairs);
+  return result;
 }
 
 MemoryEntry abstractMemory(MemoryEntry *original) {
@@ -882,29 +931,31 @@ void addWeightedVector(float *target, const float *source, float weight,
   }
 }
 
-WorkingMemorySystem* createWorkingMemorySystem(unsigned int capacity) {
-    WorkingMemorySystem* system = new WorkingMemorySystem();
+WorkingMemorySystem *createWorkingMemorySystem(unsigned int capacity) {
+  WorkingMemorySystem *system = new WorkingMemorySystem();
 
-    // Initialize focused attention component
-    system->focus.capacity = static_cast<unsigned int>(capacity * 0.2f); // 20%
-    system->focus.entries = new WorkingMemoryEntry[system->focus.capacity];
-    system->focus.size = 0;
-    system->focus.attention_threshold = 0.8f;
+  // Initialize focused attention component
+  system->focus.capacity = static_cast<unsigned int>(capacity * 0.2f); // 20%
+  system->focus.entries = new WorkingMemoryEntry[system->focus.capacity];
+  system->focus.size = 0;
+  system->focus.attention_threshold = 0.8f;
 
-    // Initialize active working memory
-    system->active.capacity = static_cast<unsigned int>(capacity * 0.8f); // 80%
-    system->active.entries = new WorkingMemoryEntry[system->active.capacity];
-    system->active.size = 0;
-    system->active.activation_decay = 0.95f;
+  // Initialize active working memory
+  system->active.capacity = static_cast<unsigned int>(capacity * 0.8f); // 80%
+  system->active.entries = new WorkingMemoryEntry[system->active.capacity];
+  system->active.size = 0;
+  system->active.activation_decay = 0.95f;
 
-    // Initialize dynamic clustering
-    system->clusters.num_clusters = 5;
-    system->clusters.clusters = new SemanticCluster[system->clusters.num_clusters];
+  // Initialize dynamic clustering
+  system->clusters.num_clusters = 5;
+  system->clusters.clusters =
+      new SemanticCluster[system->clusters.num_clusters];
 
-    // Initialize global context
-    system->global_context = new float[CONTEXT_VECTOR_SIZE](); // Value-initialized to 0
+  // Initialize global context
+  system->global_context =
+      new float[CONTEXT_VECTOR_SIZE](); // Value-initialized to 0
 
-    return system;
+  return system;
 }
 
 float clampValue(float value) {
@@ -1000,7 +1051,7 @@ void updateSemanticClusters(WorkingMemorySystem *system,
     return; // No clusters to update
   }
 
-  float *similarities = new float [system->clusters.num_clusters];
+  float *similarities = new float[system->clusters.num_clusters];
 
   // Calculate similarities to existing clusters
   for (unsigned int i = 0; i < system->clusters.num_clusters; i++) {
@@ -1047,23 +1098,6 @@ void updateSemanticClusters(WorkingMemorySystem *system,
   updateClusterCoherence(cluster);
 
   free(similarities);
-}
-
-// Find the least active memory in a given array
-int findLeastActiveMemory(const WorkingMemoryEntry *entries,
-                          unsigned int size) {
-  int least_active_idx = 0;
-  float lowest_activation = computeActivation(&entries[0]);
-
-  for (unsigned int i = 1; i < size; i++) {
-    float activation = computeActivation(&entries[i]);
-    if (activation < lowest_activation) {
-      lowest_activation = activation;
-      least_active_idx = i;
-    }
-  }
-
-  return least_active_idx;
 }
 
 // Compute attention weight for a memory entry
@@ -1129,28 +1163,31 @@ void addMemory(
   entry.timestamp = timestamp;
   WorkingMemoryEntry enhanced;
 
-  // Handle Working Memory System first
   if (entry.importance > working_memory->focus.attention_threshold) {
     // Add to focused attention
     if (working_memory->focus.size < working_memory->focus.capacity) {
-      enhanced.features = new float (FEATURE_VECTOR_SIZE);
+      enhanced.features = new float[FEATURE_VECTOR_SIZE];
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = new float (CONTEXT_VECTOR_SIZE);
+
+      enhanced.context_vector = new float[CONTEXT_VECTOR_SIZE];
       memcpy(enhanced.context_vector, working_memory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
+
       working_memory->focus.entries[working_memory->focus.size++] = enhanced;
       updateSemanticClusters(working_memory, &enhanced);
     }
   } else {
     // Add to active memory
     if (working_memory->active.size < working_memory->active.capacity) {
-      enhanced.features = new float (FEATURE_VECTOR_SIZE);
+      enhanced.features = new float[FEATURE_VECTOR_SIZE];
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = new float (CONTEXT_VECTOR_SIZE);
+
+      enhanced.context_vector = new float[CONTEXT_VECTOR_SIZE];
       memcpy(enhanced.context_vector, working_memory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
+
       working_memory->active.entries[working_memory->active.size++] = enhanced;
       updateSemanticClusters(working_memory, &enhanced);
     }
@@ -1159,17 +1196,25 @@ void addMemory(
   // Update global context
   updateContext(working_memory);
 
-  // Then handle original hierarchical storage
+  // Then handle original hierarchical storage - NOW WITH BATCH REPLACEMENT
   if (entry.importance >= system->hierarchy.long_term.importance_threshold) {
     if (system->hierarchy.long_term.size <
         system->hierarchy.long_term.capacity) {
       system->hierarchy.long_term.entries[system->hierarchy.long_term.size++] =
           entry;
     } else {
-      int least_important_idx =
-          findLeastImportantMemory(system->hierarchy.long_term.entries,
-                                   system->hierarchy.long_term.size);
-      system->hierarchy.long_term.entries[least_important_idx] = entry;
+      // Find multiple least important memories and replace the worst one
+      unsigned int replace_count;
+      int *least_important = findLeastImportantMemory(
+          system->hierarchy.long_term.entries, system->hierarchy.long_term.size,
+          5, // Get 5 least important
+          &replace_count);
+
+      if (least_important && replace_count > 0) {
+        // Replace the absolute worst (first in sorted array)
+        system->hierarchy.long_term.entries[least_important[0]] = entry;
+        free(least_important);
+      }
     }
   } else if (entry.importance >=
              system->hierarchy.medium_term.importance_threshold) {
@@ -1178,7 +1223,25 @@ void addMemory(
       system->hierarchy.medium_term
           .entries[system->hierarchy.medium_term.size++] = entry;
     } else {
-      consolidateToHigherLevel(system);
+      // Try to replace least important in medium term first
+      unsigned int replace_count;
+      int *least_important =
+          findLeastImportantMemory(system->hierarchy.medium_term.entries,
+                                   system->hierarchy.medium_term.size,
+                                   3, // Get 3 least important
+                                   &replace_count);
+
+      if (least_important && replace_count > 0) {
+        // Check if new entry is more important than the worst existing one
+        if (entry.importance >
+            system->hierarchy.medium_term.entries[least_important[0]]
+                .importance) {
+          system->hierarchy.medium_term.entries[least_important[0]] = entry;
+        }
+        free(least_important);
+      } else {
+        consolidateToHigherLevel(system);
+      }
     }
   } else {
     if (system->hierarchy.short_term.size <
@@ -1186,7 +1249,21 @@ void addMemory(
       system->hierarchy.short_term
           .entries[system->hierarchy.short_term.size++] = entry;
     } else {
-      consolidateToMediumTerm(system);
+      // Replace least important in short term or consolidate
+      unsigned int replace_count;
+      int *least_important =
+          findLeastImportantMemory(system->hierarchy.short_term.entries,
+                                   system->hierarchy.short_term.size,
+                                   5, // Get 5 least important
+                                   &replace_count);
+
+      if (least_important && replace_count > 0) {
+        // Always replace the worst one in short term
+        system->hierarchy.short_term.entries[least_important[0]] = entry;
+        free(least_important);
+      } else {
+        consolidateToMediumTerm(system);
+      }
     }
   }
 
@@ -1541,19 +1618,33 @@ void swap(char *a, char *b) {
 }
 
 bool isWordMeaningful(const char *word) {
+  // Check if the word is in the vocabulary
   for (int i = 0; i < vocab_size; i++) {
     if (strcmp(vocabulary[i].word, word) == 0) {
       return true;
     }
   }
 
-  // Check word length
   size_t len = strlen(word);
-  if (len < 3 || len > 20) {
+
+  // Check word length: meaningful words should be within a reasonable length
+  if (len < 2 || len > 30) {
     return false;
   }
 
-  // Check for at least one vowel
+  // Check if all characters are letters or hyphens or apostrophes
+  bool valid_chars = true;
+  for (size_t i = 0; i < len; i++) {
+    if (!isalpha(word[i]) && word[i] != '-' && word[i] != '\'') {
+      valid_chars = false;
+      break;
+    }
+  }
+  if (!valid_chars) {
+    return false;
+  }
+
+  // Check for at least one vowel (or other meaningful characters)
   bool has_vowel = false;
   for (size_t i = 0; i < len; i++) {
     if (strchr("aeiouAEIOU", word[i]) != NULL) {
@@ -1561,20 +1652,37 @@ bool isWordMeaningful(const char *word) {
       break;
     }
   }
+
+  // If no vowels, check if it's a valid abbreviation or acronym
   if (!has_vowel) {
-    return false;
+    bool is_acronym = true;
+    for (size_t i = 0; i < len; i++) {
+      if (!isupper(word[i])) {
+        is_acronym = false;
+        break;
+      }
+    }
+    if (is_acronym) {
+      return true;
+    }
   }
 
   // Check for common prefixes/suffixes
-  const char *prefixes[] = {"un", "re", "pre", "in", "dis"};
-  const char *suffixes[] = {"ing", "tion", "ment", "ness", "able"};
+  const char *prefixes[] = {"un",   "re",   "pre",   "in",  "dis",
+                            "mis",  "over", "under", "sub", "post",
+                            "anti", "de",   "en",    "co",  "non"};
+  const char *suffixes[] = {"ing",  "tion", "ment", "ness", "able",
+                            "ible", "er",   "est",  "ful",  "less",
+                            "ly",   "ed",   "s",    "es",   "ies"};
 
+  // Check prefixes
   for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
     if (strncmp(word, prefixes[i], strlen(prefixes[i])) == 0) {
       return true;
     }
   }
 
+  // Check suffixes
   for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
     if (strlen(word) >= strlen(suffixes[i]) &&
         strcmp(word + strlen(word) - strlen(suffixes[i]), suffixes[i]) == 0) {
@@ -1582,7 +1690,7 @@ bool isWordMeaningful(const char *word) {
     }
   }
 
-  // Check for proper nouns
+  // Check for proper nouns (capitalized first letter)
   if (isupper(word[0])) {
     return true;
   }
@@ -1685,10 +1793,20 @@ void tokenizeString(const char *input, char **tokens, int *num_tokens) {
   }
 }
 
-// Word embeddings (randomly initialized)
 float embeddings[vocab_size][EMBEDDING_SIZE];
+SparseEmbedding word_embeddings[vocab_size];
+ContextEmbedding context_cache[vocab_size * 4];
+float similarity_hash[HASH_BUCKETS][vocab_size];
+float semantic_weights[NUM_SEMANTIC_LAYERS][EMBEDDING_SIZE];
 
-// Function to calculate letter-based weight for a word
+unsigned int hash_token(const char *token) {
+  unsigned int hash = 5381;
+  for (int i = 0; token[i] != '\0'; i++) {
+    hash = ((hash << 5) + hash) + token[i];
+  }
+  return hash % HASH_BUCKETS;
+}
+
 float computeLetterWeight(const char *word) {
   float weight_sum = 0.0f;
   int length = strlen(word);
@@ -1699,7 +1817,7 @@ float computeLetterWeight(const char *word) {
       weight_sum += letter_weights[word[i] - 'A'];
     }
   }
-  return (length > 0) ? (weight_sum / length) : 0.0f; // Normalize by length
+  return (length > 0) ? (weight_sum / length) : 0.0f;
 }
 
 void initializeVocabularyWeights() {
@@ -1714,7 +1832,6 @@ void importPretrainedEmbeddings(const char *embedding_file) {
   if (!file) {
     fprintf(stderr, "Error: Could not open embedding file: %s\n",
             embedding_file);
-
     // Fall back to random initialization if file can't be opened
     printf("Falling back to random initialization...\n");
     for (int i = 0; i < vocab_size; i++) {
@@ -1729,14 +1846,11 @@ void importPretrainedEmbeddings(const char *embedding_file) {
     }
     return;
   }
-
   printf("Loading pre-trained word embeddings from %s...\n", embedding_file);
-
   // Initialize vocab_found array to track which words were found in the
   // pre-trained file
   bool vocab_found[vocab_size];
   memset(vocab_found, 0, vocab_size * sizeof(bool));
-
   // Read header (if GloVe or Word2Vec format)
   char line[10000]; // Buffer for reading lines (embeddings can be large)
   if (fgets(line, sizeof(line), file) != NULL) {
@@ -1758,14 +1872,12 @@ void importPretrainedEmbeddings(const char *embedding_file) {
       rewind(file);
     }
   }
-
   // Process each line of the embedding file
   int loaded_count = 0;
   while (fgets(line, sizeof(line), file) != NULL) {
     char *word = strtok(line, " \t");
     if (!word)
       continue;
-
     // Find this word in our vocabulary
     int vocab_idx = -1;
     for (int i = 0; i < vocab_size; i++) {
@@ -1774,15 +1886,12 @@ void importPretrainedEmbeddings(const char *embedding_file) {
         break;
       }
     }
-
     // Skip this word if not in our vocabulary
     if (vocab_idx == -1)
       continue;
-
     // Mark as found
     vocab_found[vocab_idx] = true;
     loaded_count++;
-
     // Parse the embedding values
     float *current_embedding = embeddings[vocab_idx];
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
@@ -1795,24 +1904,20 @@ void importPretrainedEmbeddings(const char *embedding_file) {
       }
     }
   }
-
   fclose(file);
   printf(
       "Successfully loaded %d/%d vocabulary words from pretrained embeddings\n",
       loaded_count, vocab_size);
-
   // For words not found in the pre-trained file, initialize with random values
   // and try to infer from similar words in our vocabulary that were found
   for (int i = 0; i < vocab_size; i++) {
     if (!vocab_found[i]) {
       printf("Word '%s' not found in pretrained embeddings, generating...\n",
              vocabulary[i].word);
-
       // Check if we can find words in the same category that were loaded
       bool found_category_match = false;
       float category_vector[EMBEDDING_SIZE] = {0};
       int category_matches = 0;
-
       for (int j = 0; j < vocab_size; j++) {
         if (i != j && vocab_found[j] &&
             strcmp(vocabulary[i].category, vocabulary[j].category) == 0) {
@@ -1824,7 +1929,6 @@ void importPretrainedEmbeddings(const char *embedding_file) {
           found_category_match = true;
         }
       }
-
       if (found_category_match) {
         // Use average of category embeddings with random noise
         for (int k = 0; k < EMBEDDING_SIZE; k++) {
@@ -1845,7 +1949,6 @@ void importPretrainedEmbeddings(const char *embedding_file) {
       }
     }
   }
-
   // Apply custom modifiers for all words based on vocabulary attributes
   for (int i = 0; i < vocab_size; i++) {
     // Apply category-specific modifiers to certain dimensions
@@ -1862,19 +1965,16 @@ void importPretrainedEmbeddings(const char *embedding_file) {
         embeddings[i][j] += 0.2f; // Boost emotion-specific dimensions
       }
     }
-
     // Incorporate letter-weight in specific dimensions
     float letter_weight = vocabulary[i].letter_weight;
     for (int j = 30; j < 40; j++) {
       embeddings[i][j] += letter_weight * 0.1f;
     }
-
     // Incorporate semantic weight in specific dimensions
     float semantic_weight = vocabulary[i].semantic_weight;
     for (int j = 40; j < 50; j++) {
       embeddings[i][j] += semantic_weight * 0.1f;
     }
-
     // Use connections information to modify embedding
     if (vocabulary[i].connects_to) {
       // Find the connected word in vocabulary
@@ -1892,7 +1992,6 @@ void importPretrainedEmbeddings(const char *embedding_file) {
       }
     }
   }
-
   // Final L2 normalization for all embeddings (industry standard)
   for (int i = 0; i < vocab_size; i++) {
     float norm = 0.0f;
@@ -1900,7 +1999,6 @@ void importPretrainedEmbeddings(const char *embedding_file) {
       norm += embeddings[i][j] * embeddings[i][j];
     }
     norm = sqrt(norm);
-
     // Prevent division by zero
     if (norm > 1e-8) {
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
@@ -1908,67 +2006,312 @@ void importPretrainedEmbeddings(const char *embedding_file) {
       }
     }
   }
-
   printf("Embedding initialization completed with custom modifiers applied\n");
 }
 
-void initializeEmbeddings(const char *embedding_file) {
-  // Start with pre-trained embeddings (industry standard)
-  importPretrainedEmbeddings(embedding_file);
+void initializeSparseEmbedding(SparseEmbedding *emb, int word_idx) {
+  int target_active = (int)(EMBEDDING_SIZE * SPARSE_DENSITY);
+  emb->active_dims = malloc(target_active * sizeof(int));
+  emb->values = malloc(target_active * sizeof(float));
+  emb->num_active = target_active;
+  emb->norm = 0.0f;
 
-  // Apply custom initialization on top of pre-trained vectors
-  for (int i = 0; i < vocab_size; i++) {
+  // Select active dimensions using semantic and phonetic criteria
+  int *candidates = malloc(EMBEDDING_SIZE * sizeof(int));
+  float *scores = malloc(EMBEDDING_SIZE * sizeof(float));
 
-    // Category encoding (first 10 dimensions)
-    if (strcmp(vocabulary[i].category, "fruit") == 0) {
-      for (int j = 0; j < 10; j++) {
-        embeddings[i][j] += 0.2f; // Boost fruit-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "action") == 0) {
-      for (int j = 10; j < 20; j++) {
-        embeddings[i][j] += 0.3f; // Boost action-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
-      for (int j = 20; j < 30; j++) {
-        embeddings[i][j] += 0.5f; // Boost emotion-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "object") == 0) {
-      for (int j = 30; j < 40; j++) {
-        embeddings[i][j] += 0.1f; // Boost object-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "place") == 0) {
-      for (int j = 40; j < 50; j++) {
-        embeddings[i][j] += 0.2f; // Boost place-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "time") == 0) {
-      for (int j = 50; j < 60; j++) {
-        embeddings[i][j] += 0.3f; // Boost time-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "person") == 0) {
-      for (int j = 60; j < 70; j++) {
-        embeddings[i][j] += 0.4f; // Boost person-specific dimensions
+  // Score each dimension based on word characteristics
+  const char *word = vocabulary[word_idx].word;
+  float word_length_factor = log(strlen(word) + 1) / log(10);
+
+  for (int i = 0; i < EMBEDDING_SIZE; i++) {
+    candidates[i] = i;
+    scores[i] = 0.0f;
+
+    // Phonetic scoring (letter-based)
+    for (int j = 0; word[j]; j++) {
+      if (word[j] >= 'a' && word[j] <= 'z') {
+        scores[i] += letter_weights[word[j] - 'a'] * sin(i * 0.1f + j);
       }
     }
 
-    // Incorporate letter-weight in specific dimensions
+    // Semantic category scoring
+    int category_hash = 0;
+    for (int j = 0; vocabulary[word_idx].category[j]; j++) {
+      category_hash += vocabulary[word_idx].category[j] * (j + 1);
+    }
+    scores[i] += sin(category_hash * 0.001f + i * 0.05f) * word_length_factor;
+
+    // Add noise for uniqueness
+    scores[i] += ((float)rand() / RAND_MAX - 0.5f) * 0.1f;
+  }
+
+  // Select top dimensions (winner-take-all like in cortex)
+  for (int i = 0; i < EMBEDDING_SIZE - 1; i++) {
+    for (int j = i + 1; j < EMBEDDING_SIZE; j++) {
+      if (scores[j] > scores[i]) {
+        float temp_score = scores[i];
+        scores[i] = scores[j];
+        scores[j] = temp_score;
+
+        int temp_idx = candidates[i];
+        candidates[i] = candidates[j];
+        candidates[j] = temp_idx;
+      }
+    }
+  }
+
+  // Assign values to active dimensions
+  for (int i = 0; i < target_active; i++) {
+    emb->active_dims[i] = candidates[i];
+
+    // Use hierarchical semantic layers
+    float value = 0.0f;
+    for (int layer = 0; layer < NUM_SEMANTIC_LAYERS; layer++) {
+      int layer_contrib = (word_idx * 17 + candidates[i] * 23 + layer) % 1000;
+      value +=
+          semantic_weights[layer][candidates[i]] * sin(layer_contrib * 0.01f);
+      emb->semantic_layer[layer] = layer_contrib % EMBEDDING_SIZE;
+    }
+
+    // Normalize and store
+    emb->values[i] = tanh(value * vocabulary[word_idx].semantic_weight);
+    emb->norm += emb->values[i] * emb->values[i];
+  }
+
+  emb->norm = sqrt(emb->norm);
+
+  // Normalize values
+  if (emb->norm > 1e-8f) {
+    for (int i = 0; i < emb->num_active; i++) {
+      emb->values[i] /= emb->norm;
+    }
+    emb->norm = 1.0f;
+  }
+
+  free(candidates);
+  free(scores);
+}
+
+float sparseCosineSimilarity(const SparseEmbedding *a,
+                             const SparseEmbedding *b) {
+  if (a->norm < 1e-8f || b->norm < 1e-8f)
+    return 0.0f;
+
+  float dot_product = 0.0f;
+  int i = 0, j = 0;
+
+  // Merge-like algorithm for sparse vectors
+  while (i < a->num_active && j < b->num_active) {
+    if (a->active_dims[i] == b->active_dims[j]) {
+      dot_product += a->values[i] * b->values[j];
+      i++;
+      j++;
+    } else if (a->active_dims[i] < b->active_dims[j]) {
+      i++;
+    } else {
+      j++;
+    }
+  }
+
+  // Both are normalized, so we can just return dot product
+  return dot_product;
+}
+
+void computeContextHash(char *hash, const char **context_words, int num_words) {
+  unsigned int hash_val = 5381; // djb2 hash
+
+  for (int i = 0; i < num_words; i++) {
+    for (int j = 0; context_words[i][j]; j++) {
+      hash_val = ((hash_val << 5) + hash_val) + context_words[i][j];
+    }
+    hash_val = ((hash_val << 5) + hash_val) + i; // Position matters
+  }
+
+  snprintf(hash, 32, "%u", hash_val);
+}
+
+SparseEmbedding *getContextualEmbedding(const char *word, const char **context,
+                                        int context_len) {
+  int word_idx = -1;
+  for (int i = 0; i < vocab_size; i++) {
+    if (strcmp(word, vocabulary[i].word) == 0) {
+      word_idx = i;
+      break;
+    }
+  }
+
+  if (word_idx == -1)
+    return NULL;
+
+  char context_hash[32];
+  computeContextHash(context_hash, context, context_len);
+
+  int cache_start = word_idx * 4;
+  for (int i = 0; i < 4; i++) {
+    if (strcmp(context_cache[cache_start + i].context_hash, context_hash) ==
+        0) {
+      context_cache[cache_start + i].recency = 1.0f;
+      return &context_cache[cache_start + i].embedding;
+    }
+  }
+
+  int cache_idx = cache_start;
+  float min_recency = 1.0f;
+
+  for (int i = 1; i < 4; i++) {
+    if (context_cache[cache_start + i].recency < min_recency) {
+      min_recency = context_cache[cache_start + i].recency;
+      cache_idx = cache_start + i;
+    }
+  }
+
+  if (context_cache[cache_idx].embedding.active_dims) {
+    free(context_cache[cache_idx].embedding.active_dims);
+    free(context_cache[cache_idx].embedding.values);
+  }
+
+  SparseEmbedding *base = &word_embeddings[word_idx];
+  SparseEmbedding *contextual = &context_cache[cache_idx].embedding;
+
+  contextual->num_active = base->num_active;
+  contextual->active_dims = malloc(contextual->num_active * sizeof(int));
+  contextual->values = malloc(contextual->num_active * sizeof(float));
+
+  memcpy(contextual->active_dims, base->active_dims,
+         base->num_active * sizeof(int));
+  memcpy(contextual->values, base->values, base->num_active * sizeof(float));
+  memcpy(contextual->semantic_layer, base->semantic_layer,
+         NUM_SEMANTIC_LAYERS * sizeof(int));
+
+  for (int c = 0; c < context_len && c < CONTEXT_WINDOW; c++) {
+    int context_word_idx = -1;
+    for (int i = 0; i < vocab_size; i++) {
+      if (strcmp(context[c], vocabulary[i].word) == 0) {
+        context_word_idx = i;
+        break;
+      }
+    }
+
+    if (context_word_idx != -1) {
+      SparseEmbedding *context_emb = &word_embeddings[context_word_idx];
+      float context_strength = 0.1f / (c + 1);
+
+      for (int i = 0; i < contextual->num_active; i++) {
+        for (int j = 0; j < context_emb->num_active; j++) {
+          if (contextual->active_dims[i] == context_emb->active_dims[j]) {
+            contextual->values[i] += context_emb->values[j] * context_strength;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  contextual->norm = 0.0f;
+  for (int i = 0; i < contextual->num_active; i++) {
+    contextual->norm += contextual->values[i] * contextual->values[i];
+  }
+  contextual->norm = sqrt(contextual->norm);
+
+  if (contextual->norm > 1e-8f) {
+    for (int i = 0; i < contextual->num_active; i++) {
+      contextual->values[i] /= contextual->norm;
+    }
+    contextual->norm = 1.0f;
+  }
+
+  strcpy(context_cache[cache_idx].context_hash, context_hash);
+  context_cache[cache_idx].recency = 1.0f;
+
+  return contextual;
+}
+
+void initializeBrainInspiredEmbeddings(const char *pretrained_file) {
+  printf("Initializing brain-inspired sparse embedding system...\n");
+
+  for (int layer = 0; layer < NUM_SEMANTIC_LAYERS; layer++) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      float freq = 0.01f * (layer + 1);
+      semantic_weights[layer][i] = sin(i * freq) * exp(-layer * 0.1f);
+    }
+  }
+
+  for (int i = 0; i < vocab_size; i++) {
+    initializeSparseEmbedding(&word_embeddings[i], i);
+  }
+
+  memset(context_cache, 0, sizeof(context_cache));
+
+  for (int i = 0; i < vocab_size; i++) {
+    for (int bucket = 0; bucket < HASH_BUCKETS; bucket++) {
+      similarity_hash[bucket][i] = 0.0f;
+
+      for (int j = 0; j < word_embeddings[i].num_active; j++) {
+        int dim = word_embeddings[i].active_dims[j];
+        if ((dim * 17 + bucket * 23) % 2) {
+          similarity_hash[bucket][i] += word_embeddings[i].values[j];
+        }
+      }
+    }
+  }
+
+  printf("Brain-inspired embedding system initialized with %d sparse vectors\n",
+         vocab_size);
+  printf("Average sparsity: %.1f%% (%.0f active dims per word)\n",
+         SPARSE_DENSITY * 100, EMBEDDING_SIZE * SPARSE_DENSITY);
+}
+
+void initializeEmbeddings(const char *embedding_file) {
+  importPretrainedEmbeddings(embedding_file);
+  initializeBrainInspiredEmbeddings(embedding_file);
+
+  for (int i = 0; i < vocab_size; i++) {
+    if (strcmp(vocabulary[i].category, "fruit") == 0) {
+      for (int j = 0; j < 10; j++) {
+        embeddings[i][j] += 0.2f;
+      }
+    } else if (strcmp(vocabulary[i].category, "action") == 0) {
+      for (int j = 10; j < 20; j++) {
+        embeddings[i][j] += 0.3f;
+      }
+    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
+      for (int j = 20; j < 30; j++) {
+        embeddings[i][j] += 0.5f;
+      }
+    } else if (strcmp(vocabulary[i].category, "object") == 0) {
+      for (int j = 30; j < 40; j++) {
+        embeddings[i][j] += 0.1f;
+      }
+    } else if (strcmp(vocabulary[i].category, "place") == 0) {
+      for (int j = 40; j < 50; j++) {
+        embeddings[i][j] += 0.2f;
+      }
+    } else if (strcmp(vocabulary[i].category, "time") == 0) {
+      for (int j = 50; j < 60; j++) {
+        embeddings[i][j] += 0.3f;
+      }
+    } else if (strcmp(vocabulary[i].category, "person") == 0) {
+      for (int j = 60; j < 70; j++) {
+        embeddings[i][j] += 0.4f;
+      }
+    }
+
     float letter_weight = vocabulary[i].letter_weight;
     for (int j = 30; j < 40; j++) {
       embeddings[i][j] += letter_weight * 0.1f;
     }
 
-    // Incorporate semantic weight in specific dimensions
     float semantic_weight = vocabulary[i].semantic_weight;
     for (int j = 40; j < 50; j++) {
       embeddings[i][j] += semantic_weight * 0.1f;
     }
 
-    // Re-normalize the embedding after modifications
     float norm = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       norm += embeddings[i][j] * embeddings[i][j];
     }
     norm = sqrt(norm);
-
     if (norm > 1e-8) {
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
         embeddings[i][j] /= norm;
@@ -1977,11 +2320,11 @@ void initializeEmbeddings(const char *embedding_file) {
   }
 }
 
-float *getWordEmbedding(const char *word) {
+float *getWordEmbedding(const char *word, const char **context,
+                        int context_len) {
   static float contextual_embedding[EMBEDDING_SIZE];
-
-  // Find the word in vocabulary
   int word_index = -1;
+
   for (int i = 0; i < vocab_size; i++) {
     if (strcmp(word, vocabulary[i].word) == 0) {
       word_index = i;
@@ -1990,51 +2333,53 @@ float *getWordEmbedding(const char *word) {
   }
 
   if (word_index == -1) {
-    // Word not found — fallback to subword tokenization
     memset(contextual_embedding, 0, EMBEDDING_SIZE * sizeof(float));
 
-    char *subword_tokens[INPUT_SIZE];
-    int num_subwords = 0;
-
-    tokenizeString(word, subword_tokens, &num_subwords); // Greedy vocab match
-
-    if (num_subwords == 0) {
-      size_t len = strlen(word);
-      for (size_t i = 0; i < len; i++) {
-        for (size_t n = 1; n <= 3 && i + n <= len; n++) {
-          unsigned int hash = 0;
-          for (size_t j = i; j < i + n; j++) {
-            hash = hash * 101 + word[j];
-          }
-
-          for (int j = 0; j < EMBEDDING_SIZE / 10; j++) {
-            int idx = (hash + j) % EMBEDDING_SIZE;
-            contextual_embedding[idx] +=
-                letter_weights[(word[i] - 'a') % 26] / (float)len;
-          }
-        }
+    SparseEmbedding *sparse_emb =
+        getContextualEmbedding(word, context, context_len);
+    if (sparse_emb) {
+      for (int i = 0; i < sparse_emb->num_active; i++) {
+        contextual_embedding[sparse_emb->active_dims[i]] =
+            sparse_emb->values[i];
       }
     } else {
-      // Subwords found in vocab — average their embeddings
-      for (int i = 0; i < num_subwords; i++) {
-        for (int k = 0; k < vocab_size; k++) {
-          if (strcmp(subword_tokens[i], vocabulary[k].word) == 0) {
-            for (int j = 0; j < EMBEDDING_SIZE; j++) {
-              contextual_embedding[j] += embeddings[k][j];
+      char *subword_tokens[INPUT_SIZE];
+      int num_subwords = 0;
+      tokenizeString(word, subword_tokens, &num_subwords);
+
+      if (num_subwords == 0) {
+        size_t len = strlen(word);
+        for (size_t i = 0; i < len; i++) {
+          for (size_t n = 1; n <= 3 && i + n <= len; n++) {
+            unsigned int hash = 0;
+            for (size_t j = i; j < i + n; j++) {
+              hash = hash * 101 + word[j];
             }
-            break;
+            for (int j = 0; j < EMBEDDING_SIZE / 10; j++) {
+              int idx = (hash + j) % EMBEDDING_SIZE;
+              contextual_embedding[idx] +=
+                  letter_weights[(word[i] - 'a') % 26] / (float)len;
+            }
           }
         }
-        free(subword_tokens[i]); // Clean up strdup
-      }
-
-      // Average the embeddings
-      for (int j = 0; j < EMBEDDING_SIZE; j++) {
-        contextual_embedding[j] /= (float)num_subwords;
+      } else {
+        for (int i = 0; i < num_subwords; i++) {
+          for (int k = 0; k < vocab_size; k++) {
+            if (strcmp(subword_tokens[i], vocabulary[k].word) == 0) {
+              for (int j = 0; j < EMBEDDING_SIZE; j++) {
+                contextual_embedding[j] += embeddings[k][j];
+              }
+              break;
+            }
+          }
+          free(subword_tokens[i]);
+        }
+        for (int j = 0; j < EMBEDDING_SIZE; j++) {
+          contextual_embedding[j] /= (float)num_subwords;
+        }
       }
     }
 
-    // Normalize
     float norm = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       norm += contextual_embedding[j] * contextual_embedding[j];
@@ -2045,18 +2390,26 @@ float *getWordEmbedding(const char *word) {
         contextual_embedding[j] /= norm;
       }
     }
-
   } else {
-    // Standard embedding found in vocabulary
     memcpy(contextual_embedding, embeddings[word_index],
            sizeof(float) * EMBEDDING_SIZE);
+
+    if (context_len > 0) {
+      SparseEmbedding *context_emb =
+          getContextualEmbedding(word, context, context_len);
+      if (context_emb) {
+        for (int i = 0; i < context_emb->num_active; i++) {
+          int dim = context_emb->active_dims[i];
+          contextual_embedding[dim] += context_emb->values[i] * 0.1f;
+        }
+      }
+    }
 
     float complexity_factor =
         strlen(vocabulary[word_index].description) / 50.0f;
     float scaling_factor = (vocabulary[word_index].semantic_weight +
                             vocabulary[word_index].letter_weight) *
                            (1.0f + complexity_factor);
-
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       contextual_embedding[j] *= scaling_factor;
     }
@@ -2080,16 +2433,14 @@ void updateEmbeddings(float *feedback, const char *word) {
   for (int i = 0; i < vocab_size; i++) {
     if (strcmp(word, vocabulary[i].word) == 0) {
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
-        embeddings[i][j] += feedback[j]; // Adjust embedding based on feedback
-        embeddings[i][j] =
-            fmaxf(0.0f, fminf(1.0f, embeddings[i][j])); // Clamp to [0, 1]
+        embeddings[i][j] += feedback[j];
+        embeddings[i][j] = fmaxf(0.0f, fminf(1.0f, embeddings[i][j]));
       }
       break;
     }
   }
 }
 
-// Additional utility to find words by category or semantic similarity
 void findWordsByCategory(const char *category) {
   printf("Words in category '%s':\n", category);
   for (int i = 0; i < vocab_size; i++) {
@@ -2099,7 +2450,7 @@ void findWordsByCategory(const char *category) {
     }
   }
 }
-// Compute cosine similarity between two vectors
+
 float cosineSimilarity(float *vec1, float *vec2, int size) {
   float dot = 0.0f, norm1 = 0.0f, norm2 = 0.0f;
   for (int i = 0; i < size; i++) {
@@ -2116,7 +2467,6 @@ void computeAttentionWeights(float *attention_weights, int step, int num_tokens,
   // Initialize attention scores
   float attention_scores[INPUT_SIZE] = {0};
 
-  // Calculate attention query vector (simplified version)
   float query[EMBEDDING_SIZE] = {0};
   if (relevantMemory) {
     // Use memory as query
@@ -2194,7 +2544,12 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
   float category_weights[INPUT_SIZE] = {0};
 
   for (int i = 0; i < num_tokens; i++) {
-    token_embeddings[i] = getWordEmbedding(tokens[i]);
+    const char *token_ptrs[num_tokens];
+    for (int i = 0; i < num_tokens; i++) {
+      token_ptrs[i] = tokens[i]; // for example if each tokens[i] is a char[6],
+                                 // decays to char*
+    }
+    token_embeddings[i] = getWordEmbedding(tokens[i], token_ptrs, num_tokens);
     letter_weights[i] = computeLetterWeight(tokens[i]);
 
     for (int j = 0; j < vocab_size; j++) {
@@ -3540,22 +3895,22 @@ void computeRegionPerformanceMetrics(NetworkPerformanceMetrics *metrics,
   }
 }
 
-MetaController* initializeMetaController(int num_regions) {
-    MetaController* controller = new MetaController();
+MetaController *initializeMetaController(int num_regions) {
+  MetaController *controller = new MetaController();
 
-    controller->meta_learning_rate = 0.01;
-    controller->exploration_factor = 0.1;
-    controller->num_regions = num_regions;
+  controller->meta_learning_rate = 0.01;
+  controller->exploration_factor = 0.1;
+  controller->num_regions = num_regions;
 
-    controller->region_importance_scores = new float[num_regions]();
-    controller->learning_efficiency_history = new float[num_regions]();
+  controller->region_importance_scores = new float[num_regions]();
+  controller->learning_efficiency_history = new float[num_regions]();
 
-    // Initialize with equal importance
-    for (int i = 0; i < num_regions; ++i) {
-        controller->region_importance_scores[i] = 1.0f / num_regions;
-    }
+  // Initialize with equal importance
+  for (int i = 0; i < num_regions; ++i) {
+    controller->region_importance_scores[i] = 1.0f / num_regions;
+  }
 
-    return controller;
+  return controller;
 }
 
 void printReplayStatistics(MemorySystem *memorySystem) {
@@ -3726,12 +4081,10 @@ void addNewNeuron(Neuron *neurons, int *connections, float *weights,
     return;
 
   // Create a new neuron with default initialization
-  Neuron new_neuron = {
-      .state = 0.0f,
-      .output = 0.0f,
-      .num_connections = MAX_CONNECTIONS,
-      .layer_id = (unsigned int)(*num_neurons) % 2
-  };
+  Neuron new_neuron = {.state = 0.0f,
+                       .output = 0.0f,
+                       .num_connections = MAX_CONNECTIONS,
+                       .layer_id = (unsigned int)(*num_neurons) % 2};
 
   // Add the new neuron
   neurons[*num_neurons] = new_neuron;
@@ -4147,22 +4500,6 @@ void applyDecisionPath(DecisionPath path, Neuron *neurons, float *weights,
       connections[i] = path.connections[i];
     }
   }
-}
-
-// Free resources
-void cleanupDecisionPath(DecisionPath *path) {
-  free(path->states);
-  free(path->weights);
-  free(path->connections);
-}
-
-void cleanupMetaLearningState(MetaLearningState *state) {
-  free(state->priority_weights);
-  free(state);
-}
-
-void cleanupMetacognitionMetrics(MetacognitionMetrics *metacog) {
-  free(metacog);
 }
 
 float evaluatePathQuality(DecisionPath path, MetaLearningState *meta_state,
@@ -7711,10 +8048,8 @@ void addQuestionAndAnswerToMemory(
     float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE]) {
   // Create a memory entry for the question and answer
   MemoryEntry entry;
-  entry.timestamp =
-      getCurrentTime(); // Assuming a function to get the current timestamp
-  entry.importance = computeImportanceFromText(
-      question, answer); // Assuming a function to compute importance from text
+  entry.timestamp = getCurrentTime();
+  entry.importance = computeImportanceFromText(question, answer);
 
   // Convert the question and answer into a memory vector
   computeMemoryVectorFromText(entry.vector, question, answer);
@@ -7724,10 +8059,10 @@ void addQuestionAndAnswerToMemory(
     // Add to focused attention
     if (workingMemory->focus.size < workingMemory->focus.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = new float (FEATURE_VECTOR_SIZE);
+      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = new float (CONTEXT_VECTOR_SIZE);
+      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->focus.entries[workingMemory->focus.size++] = enhanced;
@@ -7737,10 +8072,10 @@ void addQuestionAndAnswerToMemory(
     // Add to active memory
     if (workingMemory->active.size < workingMemory->active.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = new float (FEATURE_VECTOR_SIZE);
+      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = new float (CONTEXT_VECTOR_SIZE);
+      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->active.entries[workingMemory->active.size++] = enhanced;
@@ -7751,7 +8086,8 @@ void addQuestionAndAnswerToMemory(
   // Update global context
   updateContext(workingMemory);
 
-  // Then handle original hierarchical storage
+  // Then handle original hierarchical storage - NOW WITH INTELLIGENT
+  // REPLACEMENT
   if (entry.importance >=
       memorySystem->hierarchy.long_term.importance_threshold) {
     if (memorySystem->hierarchy.long_term.size <
@@ -7759,10 +8095,25 @@ void addQuestionAndAnswerToMemory(
       memorySystem->hierarchy.long_term
           .entries[memorySystem->hierarchy.long_term.size++] = entry;
     } else {
-      int least_important_idx =
+      // Find multiple least important and replace strategically
+      unsigned int replace_count;
+      int *least_important =
           findLeastImportantMemory(memorySystem->hierarchy.long_term.entries,
-                                   memorySystem->hierarchy.long_term.size);
-      memorySystem->hierarchy.long_term.entries[least_important_idx] = entry;
+                                   memorySystem->hierarchy.long_term.size,
+                                   10, // Get 10 least important for Q&A context
+                                   &replace_count);
+
+      if (least_important && replace_count > 0) {
+        // For Q&A, be more selective - only replace if significantly better
+        float worst_importance =
+            memorySystem->hierarchy.long_term.entries[least_important[0]]
+                .importance;
+        if (entry.importance >
+            worst_importance * 1.2f) { // 20% better threshold
+          memorySystem->hierarchy.long_term.entries[least_important[0]] = entry;
+        }
+        free(least_important);
+      }
     }
   } else if (entry.importance >=
              memorySystem->hierarchy.medium_term.importance_threshold) {
@@ -7771,7 +8122,41 @@ void addQuestionAndAnswerToMemory(
       memorySystem->hierarchy.medium_term
           .entries[memorySystem->hierarchy.medium_term.size++] = entry;
     } else {
-      consolidateToHigherLevel(memorySystem);
+      // Smarter replacement for Q&A in medium term
+      unsigned int replace_count;
+      int *least_important =
+          findLeastImportantMemory(memorySystem->hierarchy.medium_term.entries,
+                                   memorySystem->hierarchy.medium_term.size,
+                                   7, // Get 7 candidates
+                                   &replace_count);
+
+      if (least_important && replace_count > 0) {
+        // Look for old, low-importance entries to replace
+        int best_replacement = -1;
+        float best_score = -1.0f;
+
+        for (unsigned int i = 0; i < replace_count; i++) {
+          int idx = least_important[i];
+          MemoryEntry *candidate =
+              &memorySystem->hierarchy.medium_term.entries[idx];
+          unsigned int age = entry.timestamp - candidate->timestamp;
+
+          // Score combines low importance and high age
+          float score =
+              (1.0f / (candidate->importance + 0.1f)) + (age * 0.001f);
+          if (score > best_score) {
+            best_score = score;
+            best_replacement = idx;
+          }
+        }
+
+        if (best_replacement >= 0) {
+          memorySystem->hierarchy.medium_term.entries[best_replacement] = entry;
+        }
+        free(least_important);
+      } else {
+        consolidateToHigherLevel(memorySystem);
+      }
     }
   } else {
     if (memorySystem->hierarchy.short_term.size <
@@ -7779,7 +8164,35 @@ void addQuestionAndAnswerToMemory(
       memorySystem->hierarchy.short_term
           .entries[memorySystem->hierarchy.short_term.size++] = entry;
     } else {
-      consolidateToMediumTerm(memorySystem);
+      // For short term Q&A, more aggressive replacement
+      unsigned int replace_count;
+      int *least_important = findLeastImportantMemory(
+          memorySystem->hierarchy.short_term.entries,
+          memorySystem->hierarchy.short_term.size,
+          memorySystem->hierarchy.short_term.size / 3, // Get bottom third
+          &replace_count);
+
+      if (least_important && replace_count > 0) {
+        // Replace oldest among the least important
+        int oldest_idx = least_important[0];
+        unsigned int oldest_time =
+            memorySystem->hierarchy.short_term.entries[oldest_idx].timestamp;
+
+        for (unsigned int i = 1; i < replace_count; i++) {
+          int idx = least_important[i];
+          if (memorySystem->hierarchy.short_term.entries[idx].timestamp <
+              oldest_time) {
+            oldest_time =
+                memorySystem->hierarchy.short_term.entries[idx].timestamp;
+            oldest_idx = idx;
+          }
+        }
+
+        memorySystem->hierarchy.short_term.entries[oldest_idx] = entry;
+        free(least_important);
+      } else {
+        consolidateToMediumTerm(memorySystem);
+      }
     }
   }
 
@@ -7960,7 +8373,6 @@ void askQuestion(
         }
       }
 
-      // Get emotion name (assuming you have a function or array for this)
       char emotion_name[32] = "unknown";
       getEmotionName(dominant_emotion, emotion_name);
 
@@ -8968,10 +9380,10 @@ void addToWorkingMemory(
     // Add to focused attention
     if (working_memory->focus.size < working_memory->focus.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = new float (FEATURE_VECTOR_SIZE);
+      enhanced.features = new float(FEATURE_VECTOR_SIZE);
       extractSemanticFeatures((float *)entry->vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = new float (CONTEXT_VECTOR_SIZE);
+      enhanced.context_vector = new float(CONTEXT_VECTOR_SIZE);
       memcpy(enhanced.context_vector, working_memory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       working_memory->focus.entries[working_memory->focus.size++] = enhanced;
@@ -11338,7 +11750,6 @@ void saveKnowledgeFilter(KnowledgeFilter *filter, const char *filename) {
   fwrite(&filter->num_problems, sizeof(uint32_t), 1, fp);
   fwrite(&filter->problem_capacity, sizeof(uint32_t), 1, fp);
 
-  // Write categories (note: this assumes KnowledgeCategory has a fixed size)
   fwrite(filter->categories, sizeof(KnowledgeCategory), filter->num_categories,
          fp);
 
@@ -12601,240 +13012,243 @@ health_update: {
 }
 }
 
-
 namespace py = pybind11;
 
 PYBIND11_MODULE(neural_web, m) {
-    // Memory System
-    auto memory = m.def_submodule("memory", "Memory System Functions");
-    memory.def("loadVocabularyFromFile", &loadVocabularyFromFile);
-    memory.def("createWorkingMemorySystem", &createWorkingMemorySystem);
-    memory.def("loadMemorySystem", &loadMemorySystem);
-    memory.def("loadHierarchicalMemory", &loadHierarchicalMemory);
-    memory.def("decayMemorySystem", &decayMemorySystem);
-    memory.def("mergeSimilarMemories", &mergeSimilarMemories);
-    memory.def("retrieveMemory", &retrieveMemory);
-    memory.def("addMemory", &addMemory);
-    memory.def("consolidateMemory", &consolidateMemory);
-    memory.def("memoryReplayOnCPU", &memoryReplayOnCPU);
-    memory.def("printReplayStatistics", &printReplayStatistics);
-    memory.def("saveMemorySystem", &saveMemorySystem);
-    memory.def("saveHierarchicalMemory", &saveHierarchicalMemory);
-    memory.def("freeMemorySystem", &freeMemorySystem);
-    memory.def("checkMemoryCluster", &checkMemoryCluster);
-    memory.def("validateMemoryRegionDetailed", &validateMemoryRegionDetailed);
+  // Memory System
+  auto memory = m.def_submodule("memory", "Memory System Functions");
+  memory.def("loadVocabularyFromFile", &loadVocabularyFromFile);
+  memory.def("createWorkingMemorySystem", &createWorkingMemorySystem);
+  memory.def("loadMemorySystem", &loadMemorySystem);
+  memory.def("loadHierarchicalMemory", &loadHierarchicalMemory);
+  memory.def("decayMemorySystem", &decayMemorySystem);
+  memory.def("mergeSimilarMemories", &mergeSimilarMemories);
+  memory.def("retrieveMemory", &retrieveMemory);
+  memory.def("addMemory", &addMemory);
+  memory.def("consolidateMemory", &consolidateMemory);
+  memory.def("memoryReplayOnCPU", &memoryReplayOnCPU);
+  memory.def("printReplayStatistics", &printReplayStatistics);
+  memory.def("saveMemorySystem", &saveMemorySystem);
+  memory.def("saveHierarchicalMemory", &saveHierarchicalMemory);
+  memory.def("freeMemorySystem", &freeMemorySystem);
+  memory.def("checkMemoryCluster", &checkMemoryCluster);
+  memory.def("validateMemoryRegionDetailed", &validateMemoryRegionDetailed);
 
-    // Neural Network
-    auto nn = m.def_submodule("neural", "Neural Network Functions");
-    nn.def("initializeNeurons", &initializeNeurons);
-    nn.def("initializeWeights", &initializeWeights);
-    nn.def("updateNeuronsOnCPU", &updateNeuronsOnCPU);
-    nn.def("computePredictionErrors", &computePredictionErrors);
-    nn.def("backpropagationOnCPU", &backpropagationOnCPU);
-    nn.def("updateWeightsOnCPU", &updateWeightsOnCPU);
-    nn.def("processNeuronsOnCPU", &processNeuronsOnCPU);
-    nn.def("reverseProcessOnCPU", &reverseProcessOnCPU);
-    nn.def("captureNetworkState", &captureNetworkState);
-    nn.def("verifyNetworkState", &verifyNetworkState);
-    nn.def("updateNeuronStates", &updateNeuronStates);
-    nn.def("advancedNeuronManagement", &advancedNeuronManagement);
+  // Neural Network
+  auto nn = m.def_submodule("neural", "Neural Network Functions");
+  nn.def("initializeNeurons", &initializeNeurons);
+  nn.def("initializeWeights", &initializeWeights);
+  nn.def("updateNeuronsOnCPU", &updateNeuronsOnCPU);
+  nn.def("computePredictionErrors", &computePredictionErrors);
+  nn.def("backpropagationOnCPU", &backpropagationOnCPU);
+  nn.def("updateWeightsOnCPU", &updateWeightsOnCPU);
+  nn.def("processNeuronsOnCPU", &processNeuronsOnCPU);
+  nn.def("reverseProcessOnCPU", &reverseProcessOnCPU);
+  nn.def("captureNetworkState", &captureNetworkState);
+  nn.def("verifyNetworkState", &verifyNetworkState);
+  nn.def("updateNeuronStates", &updateNeuronStates);
+  nn.def("advancedNeuronManagement", &advancedNeuronManagement);
 
-    // Performance
-    auto perf = m.def_submodule("performance", "Performance Functions");
-    perf.def("computeMSELoss", &computeMSELoss);
-    perf.def("optimizeParameters", &optimizeParameters);
-    perf.def("computeAverageOutput", &computeAverageOutput);
-    perf.def("computeErrorRate", &computeErrorRate);
-    perf.def("analyzeNetworkPerformance", &analyzeNetworkPerformance);
-    perf.def("generatePerformanceGraph", &generatePerformanceGraph);
-    perf.def("validatePerformanceMetrics", &validatePerformanceMetrics);
+  // Performance
+  auto perf = m.def_submodule("performance", "Performance Functions");
+  perf.def("computeMSELoss", &computeMSELoss);
+  perf.def("optimizeParameters", &optimizeParameters);
+  perf.def("computeAverageOutput", &computeAverageOutput);
+  perf.def("computeErrorRate", &computeErrorRate);
+  perf.def("analyzeNetworkPerformance", &analyzeNetworkPerformance);
+  perf.def("generatePerformanceGraph", &generatePerformanceGraph);
+  perf.def("validatePerformanceMetrics", &validatePerformanceMetrics);
 
-    // Dynamic Parameters
-    auto dyn = m.def_submodule("dynamic", "Dynamic Context Functions");
-    dyn.def("initDynamicParameters", &initDynamicParameters);
-    dyn.def("updateDynamicParameters", &updateDynamicParameters);
-    dyn.def("updateGlobalContext", &updateGlobalContext);
-    dyn.def("integrateGlobalContext", &integrateGlobalContext);
-    dyn.def("applyDynamicContext", &applyDynamicContext);
-    dyn.def("validateContextManager", &validateContextManager);
+  // Dynamic Parameters
+  auto dyn = m.def_submodule("dynamic", "Dynamic Context Functions");
+  dyn.def("initDynamicParameters", &initDynamicParameters);
+  dyn.def("updateDynamicParameters", &updateDynamicParameters);
+  dyn.def("updateGlobalContext", &updateGlobalContext);
+  dyn.def("integrateGlobalContext", &integrateGlobalContext);
+  dyn.def("applyDynamicContext", &applyDynamicContext);
+  dyn.def("validateContextManager", &validateContextManager);
 
-    // Imagination System
-    auto imagination = m.def_submodule("imagination", "Imagination System Functions");
-    imagination.def("initializeImaginationSystem", &initializeImaginationSystem);
-    imagination.def("applyImaginationToDecision", &applyImaginationToDecision);
-    imagination.def("simulateScenario", &simulateScenario);
-    imagination.def("evaluateScenarioPlausibility", &evaluateScenarioPlausibility);
-    imagination.def("updateImaginationCreativity", &updateImaginationCreativity);
-    imagination.def("freeImaginationSystem", &freeImaginationSystem);
-    imagination.def("validateImaginationSystem", &validateImaginationSystem);
+  // Imagination System
+  auto imagination =
+      m.def_submodule("imagination", "Imagination System Functions");
+  imagination.def("initializeImaginationSystem", &initializeImaginationSystem);
+  imagination.def("applyImaginationToDecision", &applyImaginationToDecision);
+  imagination.def("simulateScenario", &simulateScenario);
+  imagination.def("evaluateScenarioPlausibility",
+                  &evaluateScenarioPlausibility);
+  imagination.def("updateImaginationCreativity", &updateImaginationCreativity);
+  imagination.def("freeImaginationSystem", &freeImaginationSystem);
+  imagination.def("validateImaginationSystem", &validateImaginationSystem);
 
-    // Emotional + Social
-    auto affect = m.def_submodule("affect", "Emotion & Social Functions");
-    affect.def("initializeEmotionalSystem", &initializeEmotionalSystem);
-    affect.def("detectEmotionalTriggers", &detectEmotionalTriggers);
-    affect.def("applyEmotionalProcessing", &applyEmotionalProcessing);
-    affect.def("printEmotionalState", &printEmotionalState);
-    affect.def("freeEmotionalSystem", &freeEmotionalSystem);
-    affect.def("initializeSocialSystem", &initializeSocialSystem);
-    affect.def("updateEmpathy", &updateEmpathy);
-    affect.def("predictBehavior", &predictBehavior);
-    affect.def("updatePersonModel", &updatePersonModel);
-    affect.def("applySocialInfluence", &applySocialInfluence);
-    affect.def("generateSocialFeedback", &generateSocialFeedback);
-    affect.def("negotiateOutcome", &negotiateOutcome);
-    affect.def("recordSocialInteraction", &recordSocialInteraction);
-    affect.def("freeSocialSystem", &freeSocialSystem);
-    affect.def("validateSocialSystem", &validateSocialSystem);
-    affect.def("validateEmotionalSystem", &validateEmotionalSystem);
+  // Emotional + Social
+  auto affect = m.def_submodule("affect", "Emotion & Social Functions");
+  affect.def("initializeEmotionalSystem", &initializeEmotionalSystem);
+  affect.def("detectEmotionalTriggers", &detectEmotionalTriggers);
+  affect.def("applyEmotionalProcessing", &applyEmotionalProcessing);
+  affect.def("printEmotionalState", &printEmotionalState);
+  affect.def("freeEmotionalSystem", &freeEmotionalSystem);
+  affect.def("initializeSocialSystem", &initializeSocialSystem);
+  affect.def("updateEmpathy", &updateEmpathy);
+  affect.def("predictBehavior", &predictBehavior);
+  affect.def("updatePersonModel", &updatePersonModel);
+  affect.def("applySocialInfluence", &applySocialInfluence);
+  affect.def("generateSocialFeedback", &generateSocialFeedback);
+  affect.def("negotiateOutcome", &negotiateOutcome);
+  affect.def("recordSocialInteraction", &recordSocialInteraction);
+  affect.def("freeSocialSystem", &freeSocialSystem);
+  affect.def("validateSocialSystem", &validateSocialSystem);
+  affect.def("validateEmotionalSystem", &validateEmotionalSystem);
 
-    // Moral System
-    auto moral = m.def_submodule("moral", "Moral/Ethical Functions");
-    moral.def("initializeMoralCompass", &initializeMoralCompass);
-    moral.def("evaluateDecisionEthics", &evaluateDecisionEthics);
-    moral.def("applyEthicalConstraints", &applyEthicalConstraints);
-    moral.def("recordDecisionOutcome", &recordDecisionOutcome);
-    moral.def("resolveEthicalDilemma", &resolveEthicalDilemma);
-    moral.def("adaptEthicalFramework", &adaptEthicalFramework);
-    moral.def("generateEthicalReflection", &generateEthicalReflection);
-    moral.def("freeMoralCompass", &freeMoralCompass);
-    moral.def("validateMoralCompass", &validateMoralCompass);
+  // Moral System
+  auto moral = m.def_submodule("moral", "Moral/Ethical Functions");
+  moral.def("initializeMoralCompass", &initializeMoralCompass);
+  moral.def("evaluateDecisionEthics", &evaluateDecisionEthics);
+  moral.def("applyEthicalConstraints", &applyEthicalConstraints);
+  moral.def("recordDecisionOutcome", &recordDecisionOutcome);
+  moral.def("resolveEthicalDilemma", &resolveEthicalDilemma);
+  moral.def("adaptEthicalFramework", &adaptEthicalFramework);
+  moral.def("generateEthicalReflection", &generateEthicalReflection);
+  moral.def("freeMoralCompass", &freeMoralCompass);
+  moral.def("validateMoralCompass", &validateMoralCompass);
 
-    // Specialization
-    auto spec = m.def_submodule("specialization", "Specialization System");
-    spec.def("initializeSpecializationSystem", &initializeSpecializationSystem);
-    spec.def("detectSpecializations", &detectSpecializations);
-    spec.def("applySpecializations", &applySpecializations);
-    spec.def("updateSpecializationImportance", &updateSpecializationImportance);
-    spec.def("evaluateSpecializationEffectiveness", &evaluateSpecializationEffectiveness);
-    spec.def("printSpecializationStats", &printSpecializationStats);
-    spec.def("freeSpecializationSystem", &freeSpecializationSystem);
-    spec.def("validateSpecializationSystem", &validateSpecializationSystem);
+  // Specialization
+  auto spec = m.def_submodule("specialization", "Specialization System");
+  spec.def("initializeSpecializationSystem", &initializeSpecializationSystem);
+  spec.def("detectSpecializations", &detectSpecializations);
+  spec.def("applySpecializations", &applySpecializations);
+  spec.def("updateSpecializationImportance", &updateSpecializationImportance);
+  spec.def("evaluateSpecializationEffectiveness",
+           &evaluateSpecializationEffectiveness);
+  spec.def("printSpecializationStats", &printSpecializationStats);
+  spec.def("freeSpecializationSystem", &freeSpecializationSystem);
+  spec.def("validateSpecializationSystem", &validateSpecializationSystem);
 
-    // Motivation and Goals
-    auto motivation = m.def_submodule("motivation", "Motivation and Goals");
-    motivation.def("initializeMotivationSystem", &initializeMotivationSystem);
-    motivation.def("updateMotivationSystem", &updateMotivationSystem);
-    motivation.def("initializeGoalSystem", &initializeGoalSystem);
-    motivation.def("addGoal", &addGoal);
-    motivation.def("updateGoalSystem", &updateGoalSystem);
-    motivation.def("validateMotivationSystem", &validateMotivationSystem);
-    motivation.def("validateGoalSystem", &validateGoalSystem);
+  // Motivation and Goals
+  auto motivation = m.def_submodule("motivation", "Motivation and Goals");
+  motivation.def("initializeMotivationSystem", &initializeMotivationSystem);
+  motivation.def("updateMotivationSystem", &updateMotivationSystem);
+  motivation.def("initializeGoalSystem", &initializeGoalSystem);
+  motivation.def("addGoal", &addGoal);
+  motivation.def("updateGoalSystem", &updateGoalSystem);
+  motivation.def("validateMotivationSystem", &validateMotivationSystem);
+  motivation.def("validateGoalSystem", &validateGoalSystem);
 
-    // Knowledge
-    auto knowledge = m.def_submodule("knowledge", "Knowledge & Metacognition");
-    knowledge.def("initializeKnowledgeFilter", &initializeKnowledgeFilter);
-    knowledge.def("initializeKnowledgeMetrics", &initializeKnowledgeMetrics);
-    knowledge.def("integrateKnowledgeFilter", &integrateKnowledgeFilter);
-    knowledge.def("updateKnowledgeSystem", &updateKnowledgeSystem);
-    knowledge.def("printCategoryInsights", &printCategoryInsights);
-    knowledge.def("initializeMetacognitionMetrics", &initializeMetacognitionMetrics);
-    knowledge.def("validateKnowledgeFilter", &validateKnowledgeFilter);
-    knowledge.def("validateMetacognition", &validateMetacognition);
+  // Knowledge
+  auto knowledge = m.def_submodule("knowledge", "Knowledge & Metacognition");
+  knowledge.def("initializeKnowledgeFilter", &initializeKnowledgeFilter);
+  knowledge.def("initializeKnowledgeMetrics", &initializeKnowledgeMetrics);
+  knowledge.def("integrateKnowledgeFilter", &integrateKnowledgeFilter);
+  knowledge.def("updateKnowledgeSystem", &updateKnowledgeSystem);
+  knowledge.def("printCategoryInsights", &printCategoryInsights);
+  knowledge.def("initializeMetacognitionMetrics",
+                &initializeMetacognitionMetrics);
+  knowledge.def("validateKnowledgeFilter", &validateKnowledgeFilter);
+  knowledge.def("validateMetacognition", &validateMetacognition);
 
-    // Reflection
-    auto self = m.def_submodule("identity", "Self Identity and Reflection");
-    self.def("initializeReflectionParameters", &initializeReflectionParameters);
-    self.def("integrateReflectionSystem", &integrateReflectionSystem);
-    self.def("initializeSelfIdentity", &initializeSelfIdentity);
-    self.def("updateIdentity", &updateIdentity);
-    self.def("verifyIdentity", &verifyIdentity);
-    self.def("analyzeIdentitySystem", &analyzeIdentitySystem);
-    self.def("createIdentityBackup", &createIdentityBackup);
-    self.def("restoreIdentityFromBackup", &restoreIdentityFromBackup);
-    self.def("freeIdentityBackup", &freeIdentityBackup);
-    self.def("generateIdentityReflection", &generateIdentityReflection);
-    self.def("validateIdentitySystem", &validateIdentitySystem);
-    self.def("validateReflectionParameters", &validateReflectionParameters);
+  // Reflection
+  auto self = m.def_submodule("identity", "Self Identity and Reflection");
+  self.def("initializeReflectionParameters", &initializeReflectionParameters);
+  self.def("integrateReflectionSystem", &integrateReflectionSystem);
+  self.def("initializeSelfIdentity", &initializeSelfIdentity);
+  self.def("updateIdentity", &updateIdentity);
+  self.def("verifyIdentity", &verifyIdentity);
+  self.def("analyzeIdentitySystem", &analyzeIdentitySystem);
+  self.def("createIdentityBackup", &createIdentityBackup);
+  self.def("restoreIdentityFromBackup", &restoreIdentityFromBackup);
+  self.def("freeIdentityBackup", &freeIdentityBackup);
+  self.def("generateIdentityReflection", &generateIdentityReflection);
+  self.def("validateIdentitySystem", &validateIdentitySystem);
+  self.def("validateReflectionParameters", &validateReflectionParameters);
 
-    // Meta Control
-    auto meta = m.def_submodule("meta", "Meta Control & Learning");
-    meta.def("initializeMetaController", &initializeMetaController);
-    meta.def("updateMetaControllerPriorities", &updateMetaControllerPriorities);
-    meta.def("applyMetaControllerAdaptations", &applyMetaControllerAdaptations);
-    meta.def("initializeMetaLearningState", &initializeMetaLearningState);
-    meta.def("selectOptimalMetaDecisionPath", &selectOptimalMetaDecisionPath);
-    meta.def("validateMetaController", &validateMetaController);
-    meta.def("validateMetaLearning", &validateMetaLearning);
+  // Meta Control
+  auto meta = m.def_submodule("meta", "Meta Control & Learning");
+  meta.def("initializeMetaController", &initializeMetaController);
+  meta.def("updateMetaControllerPriorities", &updateMetaControllerPriorities);
+  meta.def("applyMetaControllerAdaptations", &applyMetaControllerAdaptations);
+  meta.def("initializeMetaLearningState", &initializeMetaLearningState);
+  meta.def("selectOptimalMetaDecisionPath", &selectOptimalMetaDecisionPath);
+  meta.def("validateMetaController", &validateMetaController);
+  meta.def("validateMetaLearning", &validateMetaLearning);
 
-    // Utility
-    auto util = m.def_submodule("util", "Utility Functions");
-    util.def("getCurrentTime", &getCurrentTime);
-    util.def("generateTaskPrompt", &generateTaskPrompt);
-    util.def("initPredictiveCodingParams", &initPredictiveCodingParams);
-    util.def("generatePredictiveInputs", &generatePredictiveInputs);
-    util.def("generateInputTensor", &generateInputTensor);
-    util.def("computeGradientFeedback", &computeGradientFeedback);
-    util.def("tokenizeString", &tokenizeString);
-    util.def("updateEmbeddings", &updateEmbeddings);
-    util.def("selectOptimalDecisionPath", &selectOptimalDecisionPath);
-    util.def("computeRegionPerformanceMetrics", &computeRegionPerformanceMetrics);
-    util.def("validateCriticalSecurity", &validateCriticalSecurity);
-    util.def("handleCriticalSecurityViolation", &handleCriticalSecurityViolation);
-    util.def("generatePotentialTargets", &generatePotentialTargets);
-    util.def("computeOutcomeMetric", &computeOutcomeMetric);
-    util.def("updateCorrelationMatrix", &updateCorrelationMatrix);
-    util.def("computeFeedbackSignal", &computeFeedbackSignal);
-    util.def("computeAverageFeedback", &computeAverageFeedback);
-    util.def("computeMinWeight", &computeMinWeight);
-    util.def("computeMaxWeight", &computeMaxWeight);
-    util.def("computeAverageCorrelation", &computeAverageCorrelation);
-    util.def("measureNetworkStability", &measureNetworkStability);
-    util.def("estimateTaskDifficulty", &estimateTaskDifficulty);
-    util.def("askQuestion", &askQuestion);
-    util.def("adjustBehaviorBasedOnAnswers", &adjustBehaviorBasedOnAnswers);
-    util.def("transformOutputsToText", &transformOutputsToText);
-    util.def("findSimilarMemoriesInCluster", &findSimilarMemoriesInCluster);
-    util.def("addToDirectMemory", &addToDirectMemory);
-    util.def("consolidateToLongTermMemory", &consolidateToLongTermMemory);
-    util.def("updateBidirectionalWeights", &updateBidirectionalWeights);
-    util.def("generateSearchQuery", &generateSearchQuery);
-    util.def("performWebSearch", &performWebSearch);
-    util.def("convertSearchResultsToInput", &convertSearchResultsToInput);
-    util.def("storeSearchResultsWithMetadata", &storeSearchResultsWithMetadata);
-    util.def("enhanceDecisionMakingWithSearch", &enhanceDecisionMakingWithSearch);
-    util.def("integrateWebSearch", &integrateWebSearch);
-    util.def("saveNetworkStates", &saveNetworkStates);
+  // Utility
+  auto util = m.def_submodule("util", "Utility Functions");
+  util.def("getCurrentTime", &getCurrentTime);
+  util.def("generateTaskPrompt", &generateTaskPrompt);
+  util.def("initPredictiveCodingParams", &initPredictiveCodingParams);
+  util.def("generatePredictiveInputs", &generatePredictiveInputs);
+  util.def("generateInputTensor", &generateInputTensor);
+  util.def("computeGradientFeedback", &computeGradientFeedback);
+  util.def("tokenizeString", &tokenizeString);
+  util.def("updateEmbeddings", &updateEmbeddings);
+  util.def("selectOptimalDecisionPath", &selectOptimalDecisionPath);
+  util.def("computeRegionPerformanceMetrics", &computeRegionPerformanceMetrics);
+  util.def("validateCriticalSecurity", &validateCriticalSecurity);
+  util.def("handleCriticalSecurityViolation", &handleCriticalSecurityViolation);
+  util.def("generatePotentialTargets", &generatePotentialTargets);
+  util.def("computeOutcomeMetric", &computeOutcomeMetric);
+  util.def("updateCorrelationMatrix", &updateCorrelationMatrix);
+  util.def("computeFeedbackSignal", &computeFeedbackSignal);
+  util.def("computeAverageFeedback", &computeAverageFeedback);
+  util.def("computeMinWeight", &computeMinWeight);
+  util.def("computeMaxWeight", &computeMaxWeight);
+  util.def("computeAverageCorrelation", &computeAverageCorrelation);
+  util.def("measureNetworkStability", &measureNetworkStability);
+  util.def("estimateTaskDifficulty", &estimateTaskDifficulty);
+  util.def("askQuestion", &askQuestion);
+  util.def("adjustBehaviorBasedOnAnswers", &adjustBehaviorBasedOnAnswers);
+  util.def("transformOutputsToText", &transformOutputsToText);
+  util.def("findSimilarMemoriesInCluster", &findSimilarMemoriesInCluster);
+  util.def("addToDirectMemory", &addToDirectMemory);
+  util.def("consolidateToLongTermMemory", &consolidateToLongTermMemory);
+  util.def("updateBidirectionalWeights", &updateBidirectionalWeights);
+  util.def("generateSearchQuery", &generateSearchQuery);
+  util.def("performWebSearch", &performWebSearch);
+  util.def("convertSearchResultsToInput", &convertSearchResultsToInput);
+  util.def("storeSearchResultsWithMetadata", &storeSearchResultsWithMetadata);
+  util.def("enhanceDecisionMakingWithSearch", &enhanceDecisionMakingWithSearch);
+  util.def("integrateWebSearch", &integrateWebSearch);
+  util.def("saveNetworkStates", &saveNetworkStates);
 
-    // System
-    auto sys = m.def_submodule("system", "System Save/Load");
-    sys.def("saveSystemParameters", &saveSystemParameters);
-    sys.def("loadSystemParameters", &loadSystemParameters);
-    sys.def("initializeEmbeddings", &initializeEmbeddings);
-    sys.def("addSymbol", &addSymbol);
-    sys.def("addQuestion", &addQuestion);
-    sys.def("assessMemoryCoherence", &assessMemoryCoherence);
-    sys.def("computeNovelty", &computeNovelty);
-    sys.def("addRandomNoise", &addRandomNoise);
-    sys.def("integrateWorkingMemory", &integrateWorkingMemory);
-    sys.def("saveMetaController", &saveMetaController);
-    sys.def("loadMetaController", &loadMetaController);
-    sys.def("saveIntrinsicMotivation", &saveIntrinsicMotivation);
-    sys.def("loadIntrinsicMotivation", &loadIntrinsicMotivation);
-    sys.def("saveNetworkPerformanceMetrics", &saveNetworkPerformanceMetrics);
-    sys.def("loadNetworkPerformanceMetrics", &loadNetworkPerformanceMetrics);
-    sys.def("saveReflectionParameters", &saveReflectionParameters);
-    sys.def("loadReflectionParameters", &loadReflectionParameters);
-    sys.def("saveSelfIdentitySystem", &saveSelfIdentitySystem);
-    sys.def("loadSelfIdentitySystem", &loadSelfIdentitySystem);
-    sys.def("saveKnowledgeFilter", &saveKnowledgeFilter);
-    sys.def("loadKnowledgeFilter", &loadKnowledgeFilter);
-    sys.def("saveMetacognitionMetrics", &saveMetacognitionMetrics);
-    sys.def("loadMetacognitionMetrics", &loadMetacognitionMetrics);
-    sys.def("saveMetaLearningState", &saveMetaLearningState);
-    sys.def("loadMetaLearningState", &loadMetaLearningState);
+  // System
+  auto sys = m.def_submodule("system", "System Save/Load");
+  sys.def("saveSystemParameters", &saveSystemParameters);
+  sys.def("loadSystemParameters", &loadSystemParameters);
+  sys.def("initializeEmbeddings", &initializeEmbeddings);
+  sys.def("addSymbol", &addSymbol);
+  sys.def("addQuestion", &addQuestion);
+  sys.def("assessMemoryCoherence", &assessMemoryCoherence);
+  sys.def("computeNovelty", &computeNovelty);
+  sys.def("addRandomNoise", &addRandomNoise);
+  sys.def("integrateWorkingMemory", &integrateWorkingMemory);
+  sys.def("saveMetaController", &saveMetaController);
+  sys.def("loadMetaController", &loadMetaController);
+  sys.def("saveIntrinsicMotivation", &saveIntrinsicMotivation);
+  sys.def("loadIntrinsicMotivation", &loadIntrinsicMotivation);
+  sys.def("saveNetworkPerformanceMetrics", &saveNetworkPerformanceMetrics);
+  sys.def("loadNetworkPerformanceMetrics", &loadNetworkPerformanceMetrics);
+  sys.def("saveReflectionParameters", &saveReflectionParameters);
+  sys.def("loadReflectionParameters", &loadReflectionParameters);
+  sys.def("saveSelfIdentitySystem", &saveSelfIdentitySystem);
+  sys.def("loadSelfIdentitySystem", &loadSelfIdentitySystem);
+  sys.def("saveKnowledgeFilter", &saveKnowledgeFilter);
+  sys.def("loadKnowledgeFilter", &loadKnowledgeFilter);
+  sys.def("saveMetacognitionMetrics", &saveMetacognitionMetrics);
+  sys.def("loadMetacognitionMetrics", &loadMetacognitionMetrics);
+  sys.def("saveMetaLearningState", &saveMetaLearningState);
+  sys.def("loadMetaLearningState", &loadMetaLearningState);
 
-    // Additional utility functions
-    util.def("isValidMemoryRegion", &isValidMemoryRegion);
-    util.def("validateMemoryBlock", &validateMemoryBlock);
-    util.def("initializeSegfaultProtection", &initializeSegfaultProtection);
-    util.def("checkMemoryUsage", &checkMemoryUsage);
-    util.def("logSystemState", &logSystemState);
-    util.def("saveEmergencyBackup", &saveEmergencyBackup);
-    util.def("stabilizeSystem", &stabilizeSystem);
-    util.def("attemptSystemRecovery", &attemptSystemRecovery);
-    util.def("setupEnhancedSignalHandlers", &setupEnhancedSignalHandlers);
-    util.def("initializeSystemHealthMonitor", &initializeSystemHealthMonitor);
-    util.def("updateHealthMetrics", &updateHealthMetrics);
-    util.def("printSystemHealthReport", &printSystemHealthReport);
-    util.def("systemFallbackCheck", &systemFallbackCheck);
+  // Additional utility functions
+  util.def("isValidMemoryRegion", &isValidMemoryRegion);
+  util.def("validateMemoryBlock", &validateMemoryBlock);
+  util.def("initializeSegfaultProtection", &initializeSegfaultProtection);
+  util.def("checkMemoryUsage", &checkMemoryUsage);
+  util.def("logSystemState", &logSystemState);
+  util.def("saveEmergencyBackup", &saveEmergencyBackup);
+  util.def("stabilizeSystem", &stabilizeSystem);
+  util.def("attemptSystemRecovery", &attemptSystemRecovery);
+  util.def("setupEnhancedSignalHandlers", &setupEnhancedSignalHandlers);
+  util.def("initializeSystemHealthMonitor", &initializeSystemHealthMonitor);
+  util.def("updateHealthMetrics", &updateHealthMetrics);
+  util.def("printSystemHealthReport", &printSystemHealthReport);
+  util.def("systemFallbackCheck", &systemFallbackCheck);
 }
