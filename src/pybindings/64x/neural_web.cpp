@@ -15,6 +15,8 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 
 #define MAX_NEURONS 8
 #define MAX_CONNECTIONS 6
