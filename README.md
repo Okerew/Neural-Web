@@ -54,7 +54,7 @@ osxiec - https://github.com/Okerew/osxiec
 
 <img src="https://github.com/Okerew/Neural-Web/blob/main/security_logs.png">
 
-When using the metacognition functionality make sure to use this piece of code, because if you don't you risk the model corrupting the whole directory and potentially crashing your computer, if you ever see that on the first run of the model there is a memory error it means that the model is already able to replicate it and you should delete the model executable + the files it uses so `rm memory_system.dat hierarchical_memory.dat performance_data.dat system_parameters.dat`, make sure to delete those files because if you only recompile the neural web it will definitely replicate the memory issue, though if you have the piece of code below it won't be able to do any damage so make sure to use it.
+When using the metacognition functionality make sure to use this piece of code, because if you don't you risk the model corrupting the whole directory and potentially crashing your computer, if you ever see that on the first run of the model there is a memory error it means that the model is already able to replicate it and you should delete the model executable + the files it uses so `rm memory_system.dat hierarchical_memory.dat performance_data.dat system_parameters.dat`, make sure to delete those files because if you only recompile the neural web it will definitely replicate the memory issue, though if you have the piece of code below it won't be able to do any damage so make sure to use it. 
 
 ```c
 
@@ -69,6 +69,9 @@ if (secStatus.critical_violation) {
 
 change updatedNeurons to neurons if using any other version than metal not only in this function but all the functions you use, that you copy from here.
 
+## Library Installation 
+You can either install the python package from releases only unix 64x support or you can compile the neural web the one you want and then install it with the install.sh script. This will allow you to use the neural web as a library either from python or C/C++
+
 ## Building the Neural Web
 
 ### Recommended way (build with docker or pull from docker hub only neural web 64 cpu version though)
@@ -76,7 +79,8 @@ change updatedNeurons to neurons if using any other version than metal not only 
 Find the correct version you want to build by downloading the whole repo `git clone https://github.com/Okerew/Neural-Web.git` and navigating to the correct version you want to build.
 
 #### Firstly
-Start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
+
+If you seriosly want to do it like I did start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
 
 #### Than to build do
 
