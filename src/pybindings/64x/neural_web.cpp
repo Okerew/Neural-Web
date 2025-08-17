@@ -5,7 +5,7 @@
 #include <immintrin.h>
 #include <json-c/json.h>
 #include <math.h>
-#include <pybind11/stl.h>
+#include <pybind11/pybind11.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -13,14 +13,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <time.h>
-#include <unistd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
 
 #define MAX_NEURONS 8
 #define MAX_CONNECTIONS 6
-#define STEPS 120
+#define STEPS 100
 #define INPUT_SIZE 6            // Size of the input tensor
 #define MEMORY_BUFFER_SIZE 1000 // Size of circular memory buffer
 #define MEMORY_VECTOR_SIZE (2 * MAX_NEURONS + INPUT_SIZE)
@@ -34,25 +34,29 @@
 #define EMBEDDING_SIZE 16         // Size of word embeddings
 #define WEIGHT_DECAY 0.95f        // Weight decay factor
 #define MAX_SIMULATIONS 10        // Number of simulation runs
-#define MIN_WEIGHT -1.0f
-#define MAX_WEIGHT 1.0f
 #define DECAY_RATE 0.8f
-#define CONNECTION_WEIGHT 0.2f
 #define INPUT_WEIGHT 0.1f
+#define CONNECTION_WEIGHT 0.2f
 #define ACTIVATION_SCALE 1.5f
 #define ACTIVATION_BIAS 0.1f
 #define MIN_ACTIVATION -1.0f
 #define MAX_ACTIVATION 1.0f
+#define LEARNING_RATE 0.01f
+#define MIN_WEIGHT -1.0f
+#define MAX_WEIGHT 1.0f
+#define MAX_SIMULATIONS 10 // Number of simulation runs
+#define NUM_TIME_STEPS 20
 #define FEATURE_VECTOR_SIZE 128
 #define CONTEXT_VECTOR_SIZE 256
 #define CLAMP_MIN -1e6f // Min value for feature or coherence
 #define CLAMP_MAX 1e6f  // Max value for feature or coherence
 #define PATTERN_SIZE 3
 #define EXPERIENCE_VECTOR_SIZE 256
-#define MAX_USAGE_COUNT 1000 // Maximum usage count for normalization
 #define HISTORY_LENGTH 10
 #define NUM_PATHS 5
 #define MAX_DECISION_STEPS 20
+#define arc4random() rand()
+#define MAX_USAGE_COUNT 1000 // Maximum usage count for normalization
 #define MAX_SYMBOLS 100
 #define MAX_QUESTIONS 10
 #define VOCAB_SIZE 100
@@ -259,24 +263,24 @@ typedef struct ContextNode {
   char *name;
   float importance;
   float *state_vector;
-  int vector_size;
+  uint32_t vector_size;
   struct ContextNode **children;
-  int num_children;
-  int max_children;
+  uint32_t num_children;
+  uint32_t max_children;
   struct ContextNode *parent;
   float temporal_relevance;
-  int last_updated;
+  uint64_t last_updated;
 } ContextNode;
 
 typedef struct GlobalContextManager {
   ContextNode *root;
-  int total_nodes;
+  uint32_t total_nodes;
   float *global_context_vector;
-  int vector_size;
+  uint32_t vector_size;
   float decay_rate;
   float update_threshold;
-  int max_depth;
-  int max_children_per_node;
+  uint32_t max_depth;
+  uint32_t max_children_per_node;
 } GlobalContextManager;
 
 typedef struct {
@@ -567,7 +571,6 @@ typedef struct {
   float long_term_impact; // Long-term consequence rating
 } DecisionImpact;
 
-// Main moral compass system
 typedef struct {
   EthicalPrinciple *principles; // Array of ethical principles
   int num_principles;           // Number of principles
@@ -697,6 +700,287 @@ InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
 int num_symbols = 0;
 int num_questions = 0;
+
+static inline float fast_tanh(float x) {
+  float x2 = x * x;
+  float a = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
+  float b = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
+  return fmax(fmin(a / b, MAX_ACTIVATION), MIN_ACTIVATION);
+}
+
+// ReLU activation function
+static inline float relu(float x) { return fmax(0.0f, x); }
+
+// Sigmoid activation function
+static inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
+
+// Leaky ReLU activation function
+static inline float leaky_relu(float x, float alpha) {
+  return x > 0.0f ? x : alpha * x;
+}
+
+// Swish activation function (x * sigmoid(x))
+static inline float swish(float x) { return x * sigmoid(x); }
+
+static inline float activation_function(float x, float scale, float bias,
+                                        unsigned int activation_type) {
+  // Apply scale and bias
+  float scaled = x * scale + bias;
+
+  // Select activation function based on type
+  float base_activation;
+  switch (activation_type) {
+  case ACTIVATION_RELU:
+    base_activation = relu(scaled);
+    break;
+  case ACTIVATION_SIGMOID:
+    base_activation = sigmoid(scaled);
+    break;
+  case ACTIVATION_LEAKY_RELU:
+    base_activation = leaky_relu(scaled, 0.01f);
+    break;
+  case ACTIVATION_SWISH:
+    base_activation = swish(scaled);
+    break;
+  case ACTIVATION_TANH:
+  default:
+    base_activation = fast_tanh(scaled);
+    break;
+  }
+
+  // Add nonlinearity for more dynamic response for tanh and sigmoid only
+  if (activation_type == ACTIVATION_TANH ||
+      activation_type == ACTIVATION_SIGMOID) {
+    float sign_val = base_activation >= 0 ? 1.0f : -1.0f;
+    float abs_val = fabsf(base_activation);
+    return sign_val * powf(abs_val, 1.1f);
+  } else {
+    return base_activation;
+  }
+}
+
+// Generate random value based on seed and input value
+float generate_random(int seed, float value) {
+  float x = sinf(seed * 12.9898f + value * 78.233f) * 43758.5453f;
+  return x - floorf(x);
+}
+
+void updateNeuronsOnCPU(Neuron *neurons, const float *weights,
+                        const int *connections, int max_neurons,
+                        int max_connections, const float *input_tensor,
+                        int input_size, const unsigned int activation_type) {
+  for (int id = 0; id < max_neurons; id++) {
+    // Load neuron data into thread-local storage
+    float current_state = neurons[id].state;
+    float current_output = neurons[id].output;
+    int num_conn = neurons[id].num_connections;
+    int layer = neurons[id].layer_id;
+
+    // Calculate weighted sum of inputs from connected neurons
+    float weighted_sum = 0.0f;
+
+    // Process connections
+    for (int i = 0; i < num_conn; i++) {
+      int conn_idx = id * max_connections + i;
+      int target = connections[conn_idx];
+
+      // Add weight scaling based on layer depth
+      float depth_scale = 1.0f / (1.0f + layer);
+      float connection_strength = weights[conn_idx] * depth_scale;
+
+      // Combine state and output influences
+      weighted_sum += neurons[target].state * connection_strength * 0.6f +
+                      neurons[target].output * connection_strength * 0.4f;
+    }
+
+    // Calculate input influence with temporal dynamics
+    float input_influence = input_tensor[id % input_size];
+    float temporal_factor =
+        1.0f / (1.0f + id % 4); // Creates wave-like temporal patterns
+
+    // Update state with multiple influences
+    float new_state = current_state * DECAY_RATE +
+                      weighted_sum * CONNECTION_WEIGHT +
+                      input_influence * INPUT_WEIGHT * temporal_factor;
+
+    // Add recurrent connection influence
+    float recurrent_influence = current_output * weights[id];
+    new_state += recurrent_influence * 0.15f;
+
+    // Apply activation function with dynamic scaling
+    float dynamic_scale =
+        ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
+    float new_output = activation_function(new_state, dynamic_scale,
+                                           ACTIVATION_BIAS, activation_type);
+
+    // Add slight randomization for variability
+    float random_val = generate_random(id, new_state);
+    new_output += random_val * 0.01f;
+
+    // Ensure outputs stay within valid range
+    new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
+
+    // Write back results
+    neurons[id].state = new_state;
+    neurons[id].output = new_output;
+  }
+}
+
+void updateWeightsOnCPU(float *weights, const Neuron *neurons,
+                        const int *connections, const float learning_rate,
+                        const int max_neurons, const int max_connections) {
+  const float momentum = 0.9f;
+
+  for (int id = 0; id < max_neurons * max_connections; id++) {
+    int neuron_idx = id / max_connections;
+    int conn_idx = id % max_connections;
+
+    if (conn_idx >= neurons[neuron_idx].num_connections)
+      continue;
+
+    int target_idx = connections[id];
+
+    // Modified Hebbian learning with normalization
+    float pre_activation = neurons[neuron_idx].state;
+    float post_activation = neurons[target_idx].output;
+    float current_weight = weights[id];
+
+    // Calculate weight update
+    float hebbian_term = pre_activation * post_activation;
+    float normalization_term = current_weight * WEIGHT_DECAY;
+    float delta_w = learning_rate * (hebbian_term - normalization_term);
+
+    // Update weight with momentum
+    float new_weight = current_weight + delta_w;
+    new_weight = momentum * current_weight + (1.0f - momentum) * new_weight;
+
+    // Clip weights
+    weights[id] = fmin(fmax(new_weight, MIN_WEIGHT), MAX_WEIGHT);
+  }
+}
+
+void backpropagationOnCPU(const Neuron *neurons, float *weights,
+                          const int *connections, const int max_neurons,
+                          const int max_connections,
+                          const float *target_outputs, float *output_errors,
+                          const float learning_rate) {
+  for (int id = 0; id < max_neurons; id++) {
+    // Compute output error for the current neuron
+    float predicted_output = neurons[id].output;
+    float target_output = target_outputs[id];
+
+    // Compute the error between predicted and target output
+    float error = predicted_output - target_output;
+    output_errors[id] = error;
+
+    float activation_gradient = predicted_output * (1.0f - predicted_output);
+
+    // Calculate weight updates for all connections to this neuron
+    for (int i = 0; i < max_connections; i++) {
+      int conn_idx = id * max_connections + i;
+      int connected_neuron = connections[conn_idx];
+
+      if (connected_neuron >= max_neurons)
+        continue;
+
+      // Calculate gradient for this weight (backpropagation)
+      float input_gradient =
+          neurons[connected_neuron].output * error * activation_gradient;
+
+      // Update weight using learning rate (gradient descent)
+      weights[conn_idx] -= learning_rate * input_gradient;
+    }
+  }
+}
+
+void reverseProcessOnCPU(Neuron *neurons, float *reverse_weights,
+                         int *reverse_connections, int max_neurons,
+                         int max_connections) {
+  for (int id = 0; id < max_neurons; id++) {
+    float sum = 0.0f;
+    for (int c = 0; c < max_connections; c++) {
+      int conn_idx = id * max_connections + c;
+      int source_neuron = reverse_connections[conn_idx];
+      sum += neurons[source_neuron].output * reverse_weights[conn_idx];
+    }
+    neurons[id].state += 0.1f * sum;
+  }
+}
+
+void memoryReplayOnCPU(Neuron *neurons, float *weights, int *connections,
+                       MemoryEntry *memories, int memory_capacity,
+                       int max_neurons, int max_connections) {
+  for (int id = 0; id < memory_capacity; id++) {
+    MemoryEntry memory = memories[id];
+
+    for (int i = 0; i < max_neurons; i++) {
+      for (int j = 0; j < max_connections; j++) {
+        int conn_idx = i * max_connections + j;
+        int target_neuron = connections[conn_idx];
+
+        float weight_delta = 0.01f * memory.importance * neurons[i].output *
+                             memory.vector[target_neuron];
+        weights[conn_idx] += weight_delta;
+      }
+    }
+  }
+}
+
+void processNeuronsOnCPU(Neuron *neurons, const float *weights,
+                         const int *connections, const int max_neurons,
+                         const int max_connections, const float *input_tensor,
+                         const int input_size,
+                         const unsigned int activation_type) {
+  for (int id = 0; id < max_neurons; id++) {
+    float current_state = neurons[id].state;
+    float current_output = neurons[id].output;
+    int num_conn = neurons[id].num_connections;
+    int layer = neurons[id].layer_id;
+
+    // Calculate weighted sum
+    float weighted_sum = 0.0f;
+    for (int i = 0; i < num_conn; i++) {
+      int conn_idx = id * max_connections + i;
+      int target = connections[conn_idx];
+
+      float depth_scale = 1.0f / (1.0f + layer);
+      float connection_strength = weights[conn_idx] * depth_scale;
+
+      weighted_sum += neurons[target].state * connection_strength * 0.6f +
+                      neurons[target].output * connection_strength * 0.4f;
+    }
+
+    // Input processing with temporal dynamics
+    float input_influence = input_tensor[id % input_size];
+    float temporal_factor = 1.0f / (1.0f + id % 4);
+
+    // State update with multiple influences
+    float new_state = current_state * DECAY_RATE +
+                      weighted_sum * CONNECTION_WEIGHT +
+                      input_influence * INPUT_WEIGHT * temporal_factor;
+
+    // Add recurrent influence
+    float recurrent_influence = current_output * weights[id];
+    new_state += recurrent_influence * 0.15f;
+
+    // Dynamic activation
+    float dynamic_scale =
+        ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
+    float new_output = activation_function(new_state, dynamic_scale,
+                                           ACTIVATION_BIAS, activation_type);
+
+    // Add controlled randomization
+    float random_val = generate_random(id, new_state);
+    new_output += random_val * 0.01f;
+
+    // Clamp output
+    new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
+
+    // Store results
+    neurons[id].state = new_state;
+    neurons[id].output = new_output;
+  }
+}
 
 DynamicParameters initDynamicParameters() {
   DynamicParameters params = {.input_noise_scale = 0.1f,
@@ -934,28 +1218,31 @@ void addWeightedVector(float *target, const float *source, float weight,
 }
 
 WorkingMemorySystem *createWorkingMemorySystem(unsigned int capacity) {
-  WorkingMemorySystem *system = new WorkingMemorySystem();
+  WorkingMemorySystem *system =
+      (WorkingMemorySystem *)malloc(sizeof(WorkingMemorySystem));
 
   // Initialize focused attention component
-  system->focus.capacity = static_cast<unsigned int>(capacity * 0.2f); // 20%
-  system->focus.entries = new WorkingMemoryEntry[system->focus.capacity];
+  system->focus.capacity = capacity * 0.2; // 20% for focused attention
+  system->focus.entries = new WorkingMemoryEntry[sizeof(
+      WorkingMemoryEntry)]; // Use 'new' instead of malloc
   system->focus.size = 0;
   system->focus.attention_threshold = 0.8f;
 
   // Initialize active working memory
-  system->active.capacity = static_cast<unsigned int>(capacity * 0.8f); // 80%
-  system->active.entries = new WorkingMemoryEntry[system->active.capacity];
+  system->active.capacity = capacity * 0.8; // 80% for active memory
+  system->active.entries = new WorkingMemoryEntry[sizeof(
+      WorkingMemoryEntry)]; // Use 'new' instead of malloc
   system->active.size = 0;
   system->active.activation_decay = 0.95f;
 
   // Initialize dynamic clustering
-  system->clusters.num_clusters = 5;
+  system->clusters.num_clusters = 5; // Start with 5 clusters
   system->clusters.clusters =
-      new SemanticCluster[system->clusters.num_clusters];
+      static_cast<SemanticCluster *>(malloc(sizeof(SemanticCluster)));
 
   // Initialize global context
   system->global_context =
-      new float[CONTEXT_VECTOR_SIZE](); // Value-initialized to 0
+      new float[256](); // Use 'new' and initialize with zeroes
 
   return system;
 }
@@ -1053,7 +1340,8 @@ void updateSemanticClusters(WorkingMemorySystem *system,
     return; // No clusters to update
   }
 
-  float *similarities = new float[system->clusters.num_clusters];
+  float *similarities = static_cast<float *>(
+      malloc(system->clusters.num_clusters * sizeof(float)));
 
   // Calculate similarities to existing clusters
   for (unsigned int i = 0; i < system->clusters.num_clusters; i++) {
@@ -2013,14 +2301,14 @@ void importPretrainedEmbeddings(const char *embedding_file) {
 
 void initializeSparseEmbedding(SparseEmbedding *emb, int word_idx) {
   int target_active = (int)(EMBEDDING_SIZE * SPARSE_DENSITY);
-  emb->active_dims = malloc(target_active * sizeof(int));
-  emb->values = malloc(target_active * sizeof(float));
+  emb->active_dims = (int *)malloc(target_active * sizeof(int));
+  emb->values = (float *)malloc(target_active * sizeof(float));
   emb->num_active = target_active;
   emb->norm = 0.0f;
 
   // Select active dimensions using semantic and phonetic criteria
-  int *candidates = malloc(EMBEDDING_SIZE * sizeof(int));
-  float *scores = malloc(EMBEDDING_SIZE * sizeof(float));
+  int *candidates = (int *)malloc(EMBEDDING_SIZE * sizeof(int));
+  float *scores = (float *)malloc(EMBEDDING_SIZE * sizeof(float));
 
   // Score each dimension based on word characteristics
   const char *word = vocabulary[word_idx].word;
@@ -2177,8 +2465,8 @@ SparseEmbedding *getContextualEmbedding(const char *word, const char **context,
   SparseEmbedding *contextual = &context_cache[cache_idx].embedding;
 
   contextual->num_active = base->num_active;
-  contextual->active_dims = malloc(contextual->num_active * sizeof(int));
-  contextual->values = malloc(contextual->num_active * sizeof(float));
+  contextual->active_dims = (int *)malloc(contextual->num_active * sizeof(int));
+  contextual->values = (float *)malloc(contextual->num_active * sizeof(float));
 
   memcpy(contextual->active_dims, base->active_dims,
          base->num_active * sizeof(int));
@@ -2646,7 +2934,6 @@ void generateInputTensor(float *input_tensor, int step, const char *text_input,
     input_tensor[i] = fmaxf(0.0f, fminf(1.0f, input_tensor[i]));
   }
 }
-
 void captureNetworkState(Neuron *neurons, float *input_tensor,
                          NetworkStateSnapshot *snapshot, float *weights,
                          int step) {
@@ -2695,14 +2982,12 @@ MemoryEntry *retrieveMemory(MemorySystem *system) {
   MemoryEntry *most_relevant = NULL;
   float highest_importance = 0.0f;
 
-  // Search short-term if still nothing found
-  if (!most_relevant) {
-    for (unsigned int i = 0; i < system->hierarchy.short_term.size; i++) {
-      if (system->hierarchy.short_term.entries[i].importance >
-          highest_importance) {
-        highest_importance = system->hierarchy.short_term.entries[i].importance;
-        most_relevant = &system->hierarchy.short_term.entries[i];
-      }
+  // Search long-term memory first
+  for (unsigned int i = 0; i < system->hierarchy.long_term.size; i++) {
+    if (system->hierarchy.long_term.entries[i].importance >
+        highest_importance) {
+      highest_importance = system->hierarchy.long_term.entries[i].importance;
+      most_relevant = &system->hierarchy.long_term.entries[i];
     }
   }
 
@@ -2718,12 +3003,14 @@ MemoryEntry *retrieveMemory(MemorySystem *system) {
     }
   }
 
-  // Search long-term memory first
-  for (unsigned int i = 0; i < system->hierarchy.long_term.size; i++) {
-    if (system->hierarchy.long_term.entries[i].importance >
-        highest_importance) {
-      highest_importance = system->hierarchy.long_term.entries[i].importance;
-      most_relevant = &system->hierarchy.long_term.entries[i];
+  // Search short-term if still nothing found
+  if (!most_relevant) {
+    for (unsigned int i = 0; i < system->hierarchy.short_term.size; i++) {
+      if (system->hierarchy.short_term.entries[i].importance >
+          highest_importance) {
+        highest_importance = system->hierarchy.short_term.entries[i].importance;
+        most_relevant = &system->hierarchy.short_term.entries[i];
+      }
     }
   }
 
@@ -2944,7 +3231,6 @@ void processNeurons(Neuron *neurons, int num_neurons, float *weights,
     }
   }
 }
-
 // Function to measure execution time
 double getCurrentTime() {
   struct timespec ts;
@@ -3359,7 +3645,9 @@ PatternMatch *findSimilarMemoriesInCluster(MemoryCluster *cluster,
                                            float *target_vector,
                                            float similarity_threshold,
                                            int *num_matches) {
-  PatternMatch *matches = new PatternMatch[cluster->size];
+  PatternMatch *matches =
+      new PatternMatch[cluster->size *
+                       sizeof(PatternMatch)]; // Use 'new' instead of malloc
   *num_matches = 0;
 
   for (unsigned int i = 0; i < cluster->size; i++) {
@@ -3625,8 +3913,9 @@ void updateWorkingMemory(WorkingMemorySystem *working_memory, Neuron *neurons,
               &working_memory->focus.entries[working_memory->focus.size++];
 
           // Allocate and zero-init to prevent garbage values
-          entry->features = new float(FEATURE_VECTOR_SIZE);
-          entry->context_vector = new float(CONTEXT_VECTOR_SIZE);
+          entry->features = (float *)calloc(FEATURE_VECTOR_SIZE, sizeof(float));
+          entry->context_vector =
+              (float *)calloc(CONTEXT_VECTOR_SIZE, sizeof(float));
 
           entry->depth = 0;
           entry->abstraction_level =
@@ -3858,11 +4147,13 @@ void transformOutputsToText(float *outputs, int size, char *outputText,
 }
 
 NetworkPerformanceMetrics *initializePerformanceMetrics(int num_regions) {
-  NetworkPerformanceMetrics *metrics = new NetworkPerformanceMetrics;
+  NetworkPerformanceMetrics *metrics =
+      new NetworkPerformanceMetrics(); // Use 'new' instead of malloc
   metrics->num_regions = num_regions;
-  metrics->region_performance_scores = new float(num_regions);
-  metrics->region_error_rates = new float(num_regions);
-  metrics->region_output_variance = new float(num_regions);
+  metrics->region_performance_scores = new float[num_regions];
+  metrics->region_error_rates = new float[num_regions];
+  metrics->region_output_variance = new float[num_regions];
+
   return metrics;
 }
 
@@ -3898,17 +4189,16 @@ void computeRegionPerformanceMetrics(NetworkPerformanceMetrics *metrics,
 }
 
 MetaController *initializeMetaController(int num_regions) {
-  MetaController *controller = new MetaController();
-
+  MetaController *controller =
+      static_cast<MetaController *>(malloc(sizeof(MetaController)));
   controller->meta_learning_rate = 0.01;
   controller->exploration_factor = 0.1;
   controller->num_regions = num_regions;
-
-  controller->region_importance_scores = new float[num_regions]();
-  controller->learning_efficiency_history = new float[num_regions]();
+  controller->region_importance_scores = new float[num_regions];
+  controller->learning_efficiency_history = new float[num_regions];
 
   // Initialize with equal importance
-  for (int i = 0; i < num_regions; ++i) {
+  for (int i = 0; i < num_regions; i++) {
     controller->region_importance_scores[i] = 1.0f / num_regions;
   }
 
@@ -4083,10 +4373,13 @@ void addNewNeuron(Neuron *neurons, int *connections, float *weights,
     return;
 
   // Create a new neuron with default initialization
-  Neuron new_neuron = {.state = 0.0f,
-                       .output = 0.0f,
-                       .num_connections = MAX_CONNECTIONS,
-                       .layer_id = (unsigned int)(*num_neurons) % 2};
+  Neuron new_neuron = {
+      .state = 0.0f,
+      .output = 0.0f,
+      .num_connections = MAX_CONNECTIONS,
+      .layer_id =
+          static_cast<unsigned int>(*num_neurons) % 2 // Alternate layers
+  };
 
   // Add the new neuron
   neurons[*num_neurons] = new_neuron;
@@ -4177,7 +4470,7 @@ void advancedNeuronManagement(Neuron *neurons, int *connections, float *weights,
                               float *input_tensor, float *target_outputs,
                               NetworkStateSnapshot *stateHistory,
                               int current_step) {
-  NeuronPerformanceMetric *metrics = new NeuronPerformanceMetric[*num_neurons];
+  NeuronPerformanceMetric *metrics = new NeuronPerformanceMetric;
 
   computeNeuronPerformanceMetrics(neurons, target_outputs, connections, weights,
                                   metrics, *num_neurons, stateHistory,
@@ -4305,7 +4598,7 @@ void selectOptimalDecisionPath(Neuron *neurons, float *weights,
 }
 
 MetacognitionMetrics *initializeMetacognitionMetrics() {
-  MetacognitionMetrics *metacog = new MetacognitionMetrics();
+  MetacognitionMetrics *metacog = new MetacognitionMetrics;
   if (!metacog)
     return NULL;
 
@@ -4325,7 +4618,7 @@ MetacognitionMetrics *initializeMetacognitionMetrics() {
 
 // Initialize meta learning state
 MetaLearningState *initializeMetaLearningState(int num_regions) {
-  MetaLearningState *state = new MetaLearningState();
+  MetaLearningState *state = new MetaLearningState;
   if (!state)
     return NULL;
 
@@ -4335,7 +4628,7 @@ MetaLearningState *initializeMetaLearningState(int num_regions) {
   state->current_phase = 0;
 
   // Allocate and initialize priority weights
-  state->priority_weights = new float(num_regions);
+  state->priority_weights = new float[num_regions * sizeof(float)];
   if (!state->priority_weights) {
     free(state);
     return NULL;
@@ -4436,9 +4729,9 @@ DecisionPath generateDecisionPath(Neuron *neurons, float *weights,
   DecisionPath path;
 
   // Allocate memory for path components
-  path.states = new float[max_neurons * MAX_DECISION_STEPS];
-  path.weights = new float[max_neurons * MAX_CONNECTIONS];
-  path.connections = new int[max_neurons * MAX_CONNECTIONS];
+  path.states = new float[max_neurons * MAX_DECISION_STEPS * sizeof(float)];
+  path.weights = new float[sizeof(float) * max_neurons * MAX_CONNECTIONS];
+  path.connections = new int[sizeof(int) * max_neurons * MAX_CONNECTIONS];
   path.num_steps = 0;
   path.score = 0.0f;
 
@@ -4762,289 +5055,7 @@ void selectOptimalMetaDecisionPath(Neuron *neurons, float *weights,
                     metacog->confidence_level);
 }
 
-static inline float fast_tanh(float x) {
-  float x2 = x * x;
-  float a = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
-  float b = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
-  return fmax(fmin(a / b, MAX_ACTIVATION), MIN_ACTIVATION);
-}
-
-// ReLU activation function
-static inline float relu(float x) { return fmax(0.0f, x); }
-
-// Sigmoid activation function
-static inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
-
-// Leaky ReLU activation function
-static inline float leaky_relu(float x, float alpha) {
-  return x > 0.0f ? x : alpha * x;
-}
-
-// Swish activation function (x * sigmoid(x))
-static inline float swish(float x) { return x * sigmoid(x); }
-
-// Activation function with configurable response curve and type
-static inline float activation_function(float x, float scale, float bias,
-                                        unsigned int activation_type) {
-  // Apply scale and bias
-  float scaled = x * scale + bias;
-
-  // Select activation function based on type
-  float base_activation;
-  switch (activation_type) {
-  case ACTIVATION_RELU:
-    base_activation = relu(scaled);
-    break;
-  case ACTIVATION_SIGMOID:
-    base_activation = sigmoid(scaled);
-    break;
-  case ACTIVATION_LEAKY_RELU:
-    base_activation = leaky_relu(scaled, 0.01f);
-    break;
-  case ACTIVATION_SWISH:
-    base_activation = swish(scaled);
-    break;
-  case ACTIVATION_TANH:
-  default:
-    base_activation = fast_tanh(scaled);
-    break;
-  }
-
-  // Add nonlinearity for more dynamic response for tanh and sigmoid only
-  if (activation_type == ACTIVATION_TANH ||
-      activation_type == ACTIVATION_SIGMOID) {
-    float sign_val = base_activation >= 0 ? 1.0f : -1.0f;
-    float abs_val = fabsf(base_activation);
-    return sign_val * powf(abs_val, 1.1f);
-  } else {
-    return base_activation;
-  }
-}
-
-// Generate random value based on seed and input value
-float generate_random(int seed, float value) {
-  float x = sinf(seed * 12.9898f + value * 78.233f) * 43758.5453f;
-  return x - floorf(x);
-}
-
-void updateNeuronsOnCPU(Neuron *neurons, const float *weights,
-                        const int *connections, int max_neurons,
-                        int max_connections, const float *input_tensor,
-                        int input_size, const unsigned int activation_type) {
-  for (int id = 0; id < max_neurons; id++) {
-    // Load neuron data into thread-local storage
-    float current_state = neurons[id].state;
-    float current_output = neurons[id].output;
-    int num_conn = neurons[id].num_connections;
-    int layer = neurons[id].layer_id;
-
-    // Calculate weighted sum of inputs from connected neurons
-    float weighted_sum = 0.0f;
-
-    // Process connections
-    for (int i = 0; i < num_conn; i++) {
-      int conn_idx = id * max_connections + i;
-      int target = connections[conn_idx];
-
-      // Add weight scaling based on layer depth
-      float depth_scale = 1.0f / (1.0f + layer);
-      float connection_strength = weights[conn_idx] * depth_scale;
-
-      // Combine state and output influences
-      weighted_sum += neurons[target].state * connection_strength * 0.6f +
-                      neurons[target].output * connection_strength * 0.4f;
-    }
-
-    // Calculate input influence with temporal dynamics
-    float input_influence = input_tensor[id % input_size];
-    float temporal_factor =
-        1.0f / (1.0f + id % 4); // Creates wave-like temporal patterns
-
-    // Update state with multiple influences
-    float new_state = current_state * DECAY_RATE +
-                      weighted_sum * CONNECTION_WEIGHT +
-                      input_influence * INPUT_WEIGHT * temporal_factor;
-
-    // Add recurrent connection influence
-    float recurrent_influence = current_output * weights[id];
-    new_state += recurrent_influence * 0.15f;
-
-    // Apply activation function with dynamic scaling
-    float dynamic_scale =
-        ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-    float new_output = activation_function(new_state, dynamic_scale,
-                                           ACTIVATION_BIAS, activation_type);
-
-    // Add slight randomization for variability
-    float random_val = generate_random(id, new_state);
-    new_output += random_val * 0.01f;
-
-    // Ensure outputs stay within valid range
-    new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
-
-    // Write back results
-    neurons[id].state = new_state;
-    neurons[id].output = new_output;
-  }
-}
-
-void updateWeightsOnCPU(float *weights, const Neuron *neurons,
-                        const int *connections, const float learning_rate,
-                        const int max_neurons, const int max_connections) {
-  const float momentum = 0.9f;
-
-  for (int id = 0; id < max_neurons * max_connections; id++) {
-    int neuron_idx = id / max_connections;
-    int conn_idx = id % max_connections;
-
-    if (conn_idx >= neurons[neuron_idx].num_connections)
-      continue;
-
-    int target_idx = connections[id];
-
-    // Modified Hebbian learning with normalization
-    float pre_activation = neurons[neuron_idx].state;
-    float post_activation = neurons[target_idx].output;
-    float current_weight = weights[id];
-
-    // Calculate weight update
-    float hebbian_term = pre_activation * post_activation;
-    float normalization_term = current_weight * WEIGHT_DECAY;
-    float delta_w = learning_rate * (hebbian_term - normalization_term);
-
-    // Update weight with momentum
-    float new_weight = current_weight + delta_w;
-    new_weight = momentum * current_weight + (1.0f - momentum) * new_weight;
-
-    // Clip weights
-    weights[id] = fmin(fmax(new_weight, MIN_WEIGHT), MAX_WEIGHT);
-  }
-}
-
-void backpropagationOnCPU(const Neuron *neurons, float *weights,
-                          const int *connections, const int max_neurons,
-                          const int max_connections,
-                          const float *target_outputs, float *output_errors,
-                          const float learning_rate) {
-  for (int id = 0; id < max_neurons; id++) {
-    // Compute output error for the current neuron
-    float predicted_output = neurons[id].output;
-    float target_output = target_outputs[id];
-
-    // Compute the error between predicted and target output
-    float error = predicted_output - target_output;
-    output_errors[id] = error;
-
-    float activation_gradient = predicted_output * (1.0f - predicted_output);
-
-    // Calculate weight updates for all connections to this neuron
-    for (int i = 0; i < max_connections; i++) {
-      int conn_idx = id * max_connections + i;
-      int connected_neuron = connections[conn_idx];
-
-      if (connected_neuron >= max_neurons)
-        continue;
-
-      // Calculate gradient for this weight (backpropagation)
-      float input_gradient =
-          neurons[connected_neuron].output * error * activation_gradient;
-
-      // Update weight using learning rate (gradient descent)
-      weights[conn_idx] -= learning_rate * input_gradient;
-    }
-  }
-}
-
-void reverseProcessOnCPU(Neuron *neurons, float *reverse_weights,
-                         int *reverse_connections, int max_neurons,
-                         int max_connections) {
-  for (int id = 0; id < max_neurons; id++) {
-    float sum = 0.0f;
-    for (int c = 0; c < max_connections; c++) {
-      int conn_idx = id * max_connections + c;
-      int source_neuron = reverse_connections[conn_idx];
-      sum += neurons[source_neuron].output * reverse_weights[conn_idx];
-    }
-    neurons[id].state += 0.1f * sum;
-  }
-}
-
-void memoryReplayOnCPU(Neuron *neurons, float *weights, int *connections,
-                       MemoryEntry *memories, int memory_capacity,
-                       int max_neurons, int max_connections) {
-  for (int id = 0; id < memory_capacity; id++) {
-    MemoryEntry memory = memories[id];
-
-    for (int i = 0; i < max_neurons; i++) {
-      for (int j = 0; j < max_connections; j++) {
-        int conn_idx = i * max_connections + j;
-        int target_neuron = connections[conn_idx];
-
-        float weight_delta = 0.01f * memory.importance * neurons[i].output *
-                             memory.vector[target_neuron];
-        weights[conn_idx] += weight_delta;
-      }
-    }
-  }
-}
-
-void processNeuronsOnCPU(Neuron *neurons, const float *weights,
-                         const int *connections, const int max_neurons,
-                         const int max_connections, const float *input_tensor,
-                         const int input_size,
-                         const unsigned int activation_type) {
-  for (int id = 0; id < max_neurons; id++) {
-    float current_state = neurons[id].state;
-    float current_output = neurons[id].output;
-    int num_conn = neurons[id].num_connections;
-    int layer = neurons[id].layer_id;
-
-    // Calculate weighted sum
-    float weighted_sum = 0.0f;
-    for (int i = 0; i < num_conn; i++) {
-      int conn_idx = id * max_connections + i;
-      int target = connections[conn_idx];
-
-      float depth_scale = 1.0f / (1.0f + layer);
-      float connection_strength = weights[conn_idx] * depth_scale;
-
-      weighted_sum += neurons[target].state * connection_strength * 0.6f +
-                      neurons[target].output * connection_strength * 0.4f;
-    }
-
-    // Input processing with temporal dynamics
-    float input_influence = input_tensor[id % input_size];
-    float temporal_factor = 1.0f / (1.0f + id % 4);
-
-    // State update with multiple influences
-    float new_state = current_state * DECAY_RATE +
-                      weighted_sum * CONNECTION_WEIGHT +
-                      input_influence * INPUT_WEIGHT * temporal_factor;
-
-    // Add recurrent influence
-    float recurrent_influence = current_output * weights[id];
-    new_state += recurrent_influence * 0.15f;
-
-    // Dynamic activation
-    float dynamic_scale =
-        ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-    float new_output = activation_function(new_state, dynamic_scale,
-                                           ACTIVATION_BIAS, activation_type);
-
-    // Add controlled randomization
-    float random_val = generate_random(id, new_state);
-    new_output += random_val * 0.01f;
-
-    // Clamp output
-    new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
-
-    // Store results
-    neurons[id].state = new_state;
-    neurons[id].output = new_output;
-  }
-}
-
-ContextNode *createContextNode(const char *name, int vector_size,
+ContextNode *createContextNode(const char *name, uint32_t vector_size,
                                ContextNode *parent) {
   ContextNode *node = (ContextNode *)malloc(sizeof(ContextNode));
   node->name = strdup(name);
@@ -5060,7 +5071,7 @@ ContextNode *createContextNode(const char *name, int vector_size,
   return node;
 }
 
-GlobalContextManager *initializeGlobalContextManager(int vector_size) {
+GlobalContextManager *initializeGlobalContextManager(uint32_t vector_size) {
   GlobalContextManager *manager =
       (GlobalContextManager *)malloc(sizeof(GlobalContextManager));
   manager->vector_size = vector_size;
@@ -5092,7 +5103,7 @@ GlobalContextManager *initializeGlobalContextManager(int vector_size) {
 }
 
 void updateContextNode(ContextNode *node, float *new_state, float importance) {
-  for (int i = 0; i < node->vector_size; i++) {
+  for (uint32_t i = 0; i < node->vector_size; i++) {
     node->state_vector[i] =
         node->state_vector[i] * (1 - importance) + new_state[i] * importance;
   }
@@ -5106,13 +5117,13 @@ void propagateContextUpdates(ContextNode *node) {
     float total_importance = 0.0f;
 
     // Aggregate child states weighted by importance
-    for (int i = 0; i < node->parent->num_children; i++) {
+    for (uint32_t i = 0; i < node->parent->num_children; i++) {
       ContextNode *sibling = node->parent->children[i];
       float temp_relevance =
           expf(-(time(NULL) - sibling->last_updated) / 3600.0f);
       float weight = sibling->importance * temp_relevance;
 
-      for (int j = 0; j < node->vector_size; j++) {
+      for (uint32_t j = 0; j < node->vector_size; j++) {
         aggregated[j] += sibling->state_vector[j] * weight;
       }
       total_importance += weight;
@@ -5120,7 +5131,7 @@ void propagateContextUpdates(ContextNode *node) {
 
     // Normalize and update parent
     if (total_importance > 0) {
-      for (int i = 0; i < node->vector_size; i++) {
+      for (uint32_t i = 0; i < node->vector_size; i++) {
         aggregated[i] /= total_importance;
       }
       updateContextNode(node->parent, aggregated, 0.3f);
@@ -5136,7 +5147,7 @@ ContextNode *findContextNode(ContextNode *root, const char *name) {
     return root;
   }
 
-  for (int i = 0; i < root->num_children; i++) {
+  for (uint32_t i = 0; i < root->num_children; i++) {
     ContextNode *result = findContextNode(root->children[i], name);
     if (result) {
       return result;
@@ -5166,7 +5177,7 @@ ContextNode *addContextNode(GlobalContextManager *manager, const char *name,
 }
 
 float evaluateConstraintSatisfaction(ContextNode *constraint, Neuron *neurons,
-                                     int num_neurons) {
+                                     uint32_t num_neurons) {
   float satisfaction = 1.0f;
 
   if (strcmp(constraint->name, "ActivityLevel") == 0) {
@@ -5174,13 +5185,13 @@ float evaluateConstraintSatisfaction(ContextNode *constraint, Neuron *neurons,
     float variance = 0.0f;
 
     // Compute total activity and mean
-    for (int i = 0; i < num_neurons; i++) {
+    for (uint32_t i = 0; i < num_neurons; i++) {
       total_activity += neurons[i].output;
     }
     float mean_activity = total_activity / num_neurons;
 
     // Compute variance
-    for (int i = 0; i < num_neurons; i++) {
+    for (uint32_t i = 0; i < num_neurons; i++) {
       float diff = neurons[i].output - mean_activity;
       variance += diff * diff;
     }
@@ -5195,12 +5206,12 @@ float evaluateConstraintSatisfaction(ContextNode *constraint, Neuron *neurons,
 }
 
 void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
-                         int num_neurons, float *input_tensor) {
+                         uint32_t num_neurons, float *input_tensor) {
   // Extract relevant features from current network state
   float *current_context = (float *)calloc(manager->vector_size, sizeof(float));
 
   // Analyze network activity patterns
-  for (int i = 0; i < manager->vector_size && i < num_neurons; i++) {
+  for (uint32_t i = 0; i < manager->vector_size && i < num_neurons; i++) {
     current_context[i] = neurons[i].output;
   }
 
@@ -5217,10 +5228,10 @@ void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
     float *constraint_state =
         (float *)calloc(manager->vector_size, sizeof(float));
     // Evaluate current constraint satisfaction
-    for (int i = 0; i < constraints->num_children; i++) {
+    for (uint32_t i = 0; i < constraints->num_children; i++) {
       float satisfaction = evaluateConstraintSatisfaction(
           constraints->children[i], neurons, num_neurons);
-      for (int j = 0; j < manager->vector_size; j++) {
+      for (uint32_t j = 0; j < manager->vector_size; j++) {
         constraint_state[j] += satisfaction;
       }
     }
@@ -5229,12 +5240,12 @@ void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
   }
 
   // Update global context vector
-  for (int i = 0; i < manager->vector_size; i++) {
+  for (uint32_t i = 0; i < manager->vector_size; i++) {
     manager->global_context_vector[i] = 0;
     float total_weight = 0;
 
     // Weighted combination of all top-level contexts
-    for (int j = 0; j < manager->root->num_children; j++) {
+    for (uint32_t j = 0; j < manager->root->num_children; j++) {
       ContextNode *child = manager->root->children[j];
       float weight = child->importance * child->temporal_relevance;
       manager->global_context_vector[i] += child->state_vector[i] * weight;
@@ -5250,22 +5261,22 @@ void updateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
 }
 
 void integrateGlobalContext(GlobalContextManager *manager, Neuron *neurons,
-                            int num_neurons, float *weights,
-                            int max_connections) {
+                            uint32_t num_neurons, float *weights,
+                            uint32_t max_connections) {
   // Compute network-wide entropy as a measure of state variability
   float total_entropy = 0.0f;
-  for (int i = 0; i < num_neurons; i++) {
+  for (uint32_t i = 0; i < num_neurons; i++) {
     total_entropy += fabs(neurons[i].output);
   }
   float network_entropy = total_entropy / num_neurons;
   float context_sensitivity = 1.0f - network_entropy;
 
   // Modulate neuron behavior based on global context
-  for (int i = 0; i < num_neurons; i++) {
+  for (uint32_t i = 0; i < num_neurons; i++) {
     float context_influence = 0;
 
     // Compute context influence on this neuron
-    for (int j = 0; j < manager->vector_size && j < num_neurons; j++) {
+    for (uint32_t j = 0; j < manager->vector_size && j < num_neurons; j++) {
       context_influence +=
           manager->global_context_vector[j] * weights[i * max_connections + j];
     }
@@ -5401,8 +5412,8 @@ IntrinsicMotivation *initializeMotivationSystem() {
 }
 
 GoalSystem *initializeGoalSystem(int capacity) {
-  GoalSystem *system = new GoalSystem;
-  system->goals = new Goal[capacity];
+  GoalSystem *system = (GoalSystem *)malloc(sizeof(GoalSystem));
+  system->goals = (Goal *)malloc(sizeof(Goal) * capacity);
   system->num_goals = 0;
   system->capacity = capacity;
   system->planning_horizon = 10.0f;
@@ -5709,7 +5720,8 @@ float estimateTaskDifficulty(TaskPrompt current_prompt, float error_rate) {
 
 float addRandomNoise(float value, float noise_level) {
   // Generate random noise within the range [-noise_level, noise_level]
-  float noise = ((float)rand() / UINT32_MAX) * 2.0f * noise_level - noise_level;
+  float noise =
+      ((float)arc4random() / UINT32_MAX) * 2.0f * noise_level - noise_level;
   return value + noise;
 }
 
@@ -5833,7 +5845,9 @@ MemoryEntry *retrieveRelevantMemory(MemorySystem *memorySystem,
 }
 
 ReflectionHistory *initializeReflectionSystem() {
-  ReflectionHistory *history = new ReflectionHistory();
+  ReflectionHistory *history =
+      (ReflectionHistory *)malloc(sizeof(ReflectionHistory));
+
   if (history == NULL) {
     fprintf(stderr, "Failed to allocate memory for ReflectionHistory\n");
     return NULL;
@@ -6918,7 +6932,7 @@ KnowledgeCategory *categorizeInput(KnowledgeFilter *filter, float *input_vector,
   KnowledgeCategory *best_match = NULL;
   float best_similarity = threshold;
 
-  for (int i = 0; i < filter->num_categories; i++) {
+  for (uint32_t i = 0; i < filter->num_categories; i++) {
     float similarity = computeCategorySimilarity(
         input_vector, filter->categories[i].feature_vector);
 
@@ -6929,6 +6943,8 @@ KnowledgeCategory *categorizeInput(KnowledgeFilter *filter, float *input_vector,
   }
 
   if (best_match) {
+
+    // Update usage statistics
     best_match->usage_count++;
     best_match->last_accessed = time(NULL);
 
@@ -7079,6 +7095,7 @@ float *extractFeatureVector(Neuron *neurons, float *input_tensor) {
   return feature_vector;
 }
 
+// Comparison function for memory sorting
 int compareMemoryImportance(const void *a, const void *b) {
   const MemoryEntry *entry_a = (const MemoryEntry *)a;
   const MemoryEntry *entry_b = (const MemoryEntry *)b;
@@ -7258,7 +7275,7 @@ void updateKnowledgeSystem(Neuron *neurons, float *input_tensor,
 }
 
 void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
-  for (int i = 0; i < filter->num_categories; i++) {
+  for (uint32_t i = 0; i < filter->num_categories; i++) {
     // Start with moderate values instead of extremes
     filter->categories[i].importance = 0.5f;
     filter->categories[i].confidence = 0.5f;
@@ -7880,7 +7897,8 @@ void updateContextAnswer(GlobalContextManager *contextManager,
 
       // Initialize state vector
       newNode->vector_size = contextManager->vector_size;
-      newNode->state_vector = new float[newNode->vector_size];
+      newNode->state_vector =
+          (float *)malloc(sizeof(float) * newNode->vector_size);
       for (uint32_t i = 0; i < newNode->vector_size; i++) {
         newNode->state_vector[i] = 0.0f;
       }
@@ -7900,7 +7918,9 @@ void updateContextAnswer(GlobalContextManager *contextManager,
       newNode->last_updated = time(NULL);
 
       // Add to parent's children
-      currentNode->children = new ContextNode *[currentNode->max_children];
+      currentNode->children = (ContextNode **)realloc(
+          currentNode->children,
+          sizeof(ContextNode *) * (currentNode->num_children + 1));
       currentNode->children[currentNode->num_children] = newNode;
       currentNode->num_children++;
 
@@ -8061,10 +8081,11 @@ void addQuestionAndAnswerToMemory(
     // Add to focused attention
     if (workingMemory->focus.size < workingMemory->focus.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      enhanced.features = (float *)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      enhanced.context_vector =
+          (float *)malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->focus.entries[workingMemory->focus.size++] = enhanced;
@@ -8074,10 +8095,11 @@ void addQuestionAndAnswerToMemory(
     // Add to active memory
     if (workingMemory->active.size < workingMemory->active.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      enhanced.features = (float *)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      enhanced.context_vector =
+          (float *)malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->active.entries[workingMemory->active.size++] = enhanced;
@@ -9067,7 +9089,7 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb,
   size_t real_size = size * nmemb;
   HttpResponse *response = (HttpResponse *)userp;
 
-  char *ptr = new char[response->size + real_size + 1];
+  char *ptr = (char *)realloc(response->data, response->size + real_size + 1);
   if (!ptr) {
     fprintf(stderr, "Failed to allocate memory for HTTP response\n");
     return 0;
@@ -9151,7 +9173,7 @@ SearchResults *parseSearchResults(const char *json_data) {
 SearchResults *performWebSearch(const char *query) {
   CURL *curl;
   CURLcode res;
-  HttpResponse response = {.data = new char[1], .size = 0};
+  HttpResponse response = {.data = (char *)malloc(1), .size = 0};
   SearchResults *results = NULL;
 
   if (!response.data) {
@@ -9382,10 +9404,14 @@ void addToWorkingMemory(
     // Add to focused attention
     if (working_memory->focus.size < working_memory->focus.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = new float(FEATURE_VECTOR_SIZE);
+      enhanced.features =
+          new float[FEATURE_VECTOR_SIZE *
+                    sizeof(float)]; // Use 'new' instead of malloc
       extractSemanticFeatures((float *)entry->vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = new float(CONTEXT_VECTOR_SIZE);
+      enhanced.context_vector =
+          new float[CONTEXT_VECTOR_SIZE *
+                    sizeof(float)]; // Use 'new' instead of malloc
       memcpy(enhanced.context_vector, working_memory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       working_memory->focus.entries[working_memory->focus.size++] = enhanced;
@@ -10026,6 +10052,7 @@ void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
   // Problem difficulty indicator
   problem_difficulty = fmin(1.0f, error_rate * 2.0f);
 
+  // Social context detection (simplified example)
   float social_context = 0.0f;
   for (int i = 0; i < num_neurons; i += 2) {
     social_context += neurons[i].output * 0.01f;
@@ -11187,19 +11214,20 @@ void detectSpecializations(NeuronSpecializationSystem *system, Neuron *neurons,
           decision_score, memory_score,  emotional_score, prediction_score};
 
       float max_score = 0.0f;
-      NeuronSpecializationType spec_type;
+      int spec_type = SPEC_NONE;
 
       for (int j = 1; j < MAX_SPECIALIZATIONS; j++) {
         if (scores[j] > max_score) {
           max_score = scores[j];
-          spec_type = (NeuronSpecializationType)j;
+          spec_type = j;
         }
       }
 
       // If score exceeds threshold, add as specialized neuron
       if (max_score >= system->specialization_threshold) {
         system->neurons[system->count].neuron_id = i;
-        system->neurons[system->count].type = spec_type;
+        system->neurons[system->count].type =
+            (NeuronSpecializationType)spec_type;
         system->neurons[system->count].specialization_score = max_score;
         system->neurons[system->count].importance_factor = 1.0f;
         system->neurons[system->count].avg_activation = neurons[i].output;
@@ -11851,6 +11879,7 @@ void saveMetaLearningState(MetaLearningState *state, const char *filename) {
   fwrite(&state->exploration_rate, sizeof(float), 1, fp);
   fwrite(&state->stability_index, sizeof(float), 1, fp);
   fwrite(&state->current_phase, sizeof(uint32_t), 1, fp);
+
   fwrite(state->priority_weights, sizeof(float), 4, fp);
 
   fclose(fp);
@@ -11893,6 +11922,7 @@ void saveAllSystems(MetaController *metaController,
   saveIntrinsicMotivation(motivation, "motivation.dat");
   saveNetworkPerformanceMetrics(performanceMetrics, "performance_metrics.dat");
   saveReflectionParameters(reflection_params, "reflection_params.dat");
+  saveSelfIdentitySystem(identity_system, "identity_system.dat");
   saveKnowledgeFilter(knowledge_filter, "knowledge_filter.dat");
   saveMetacognitionMetrics(metacognition, "metacognition.dat");
   saveMetaLearningState(meta_learning_state, "meta_learning.dat");
@@ -13014,8 +13044,6 @@ health_update: {
 }
 }
 
-namespace py = pybind11;
-
 PYBIND11_MODULE(neural_web, m) {
   // Memory System
   auto memory = m.def_submodule("memory", "Memory System Functions");
@@ -13026,7 +13054,6 @@ PYBIND11_MODULE(neural_web, m) {
   memory.def("decayMemorySystem", &decayMemorySystem);
   memory.def("mergeSimilarMemories", &mergeSimilarMemories);
   memory.def("retrieveMemory", &retrieveMemory);
-  memory.def("addMemory", &addMemory);
   memory.def("consolidateMemory", &consolidateMemory);
   memory.def("memoryReplayOnCPU", &memoryReplayOnCPU);
   memory.def("printReplayStatistics", &printReplayStatistics);
@@ -13180,7 +13207,6 @@ PYBIND11_MODULE(neural_web, m) {
   util.def("generatePredictiveInputs", &generatePredictiveInputs);
   util.def("generateInputTensor", &generateInputTensor);
   util.def("computeGradientFeedback", &computeGradientFeedback);
-  util.def("tokenizeString", &tokenizeString);
   util.def("updateEmbeddings", &updateEmbeddings);
   util.def("selectOptimalDecisionPath", &selectOptimalDecisionPath);
   util.def("computeRegionPerformanceMetrics", &computeRegionPerformanceMetrics);
@@ -13196,7 +13222,6 @@ PYBIND11_MODULE(neural_web, m) {
   util.def("computeAverageCorrelation", &computeAverageCorrelation);
   util.def("measureNetworkStability", &measureNetworkStability);
   util.def("estimateTaskDifficulty", &estimateTaskDifficulty);
-  util.def("askQuestion", &askQuestion);
   util.def("adjustBehaviorBasedOnAnswers", &adjustBehaviorBasedOnAnswers);
   util.def("transformOutputsToText", &transformOutputsToText);
   util.def("findSimilarMemoriesInCluster", &findSimilarMemoriesInCluster);
@@ -13206,7 +13231,6 @@ PYBIND11_MODULE(neural_web, m) {
   util.def("generateSearchQuery", &generateSearchQuery);
   util.def("performWebSearch", &performWebSearch);
   util.def("convertSearchResultsToInput", &convertSearchResultsToInput);
-  util.def("storeSearchResultsWithMetadata", &storeSearchResultsWithMetadata);
   util.def("enhanceDecisionMakingWithSearch", &enhanceDecisionMakingWithSearch);
   util.def("integrateWebSearch", &integrateWebSearch);
   util.def("saveNetworkStates", &saveNetworkStates);
