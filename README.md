@@ -165,7 +165,20 @@ To compile the code, run the following command in the root directory of the proj
 #### arch64 MacOS
 
 ```sh
-clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/include -L/opt/homebrew/Cellar/json-c/0.17/lib -ljson-c -lcurl -o neural_web neural_web.m
+# Build executable
+clang -framework Metal -framework Foundation \
+  -I/opt/homebrew/Cellar/json-c/0.17/include \
+  -L/opt/homebrew/Cellar/json-c/0.17/lib \
+  -ljson-c -lcurl \
+  -o neural_web neural_web.m
+
+# Build dynamic library
+clang -dynamiclib -framework Metal -framework Foundation \
+  -I/opt/homebrew/Cellar/json-c/0.17/include \
+  -L/opt/homebrew/Cellar/json-c/0.17/lib \
+  -ljson-c -lcurl \
+  -o libneural_web.dylib neural_web.m
+
 ```
 
 #### 64/86 unix
@@ -173,7 +186,14 @@ clang -framework Metal -framework Foundation -I/opt/homebrew/Cellar/json-c/0.17/
 For cpu 86/64 unix version
 
 ```sh
-clang -o neural_web neural_web64.c I/usr/include -ljson-c -lcurl -lm
+# Build executable
+clang -o neural_web64 neural_web64.c \
+  -I/usr/include \
+  -ljson-c -lcurl -lm
+
+# Build static library
+clang -c neural_web64.c -o neural_web64.o
+ar rcs libneural_web64.a neural_web64.o
 ```
 
 #### Cuda version 64/86
@@ -181,7 +201,15 @@ clang -o neural_web neural_web64.c I/usr/include -ljson-c -lcurl -lm
 For cuda version
 
 ```sh
-nvcc -o neural_web neural_web.cu -I/usr/include -ljson-c -lcurl
+# Build executable
+nvcc -o neural_web_cu neural_web.cu \
+  -I/usr/include \
+  -L/opt/homebrew/Cellar/json-c/0.17/lib \
+  -ljson-c -lcurl
+
+# Build static library
+nvcc -c neural_web.cu -o neural_web_cu.o
+ar rcs libneural_web_cu.a neural_web_cu.o
 ```
 
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
