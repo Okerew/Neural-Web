@@ -216,6 +216,7 @@ JsonC library replace with your own imports in the command if you copied it into
 
 1. Note: you can use the input_loader.c file to use specifically made functions which work with the neural web to load inputs by linking it like this `-o neural_web neural_web.c input_loader.c`
 2. Note: the actual code is located in src so you should either unpack files from there into your folder or just compile there
+3. Note: you can use the install.sh script to be able to use the lib thingy.
 
 ## Architecture Overview
 
