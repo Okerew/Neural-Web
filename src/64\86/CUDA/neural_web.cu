@@ -13,7 +13,6 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
-#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -2331,8 +2330,9 @@ void initializeSparseEmbedding(SparseEmbedding *emb, int word_idx) {
   emb->norm = 0.0f;
 
   // Select active dimensions using semantic and phonetic criteria
-  int *candidates = malloc(EMBEDDING_SIZE * sizeof(int));
-  float *scores = malloc(EMBEDDING_SIZE * sizeof(float));
+  int *candidates = (int*)malloc(EMBEDDING_SIZE * sizeof(int));
+float *scores = (float*)malloc(EMBEDDING_SIZE * sizeof(float));
+
 
   // Score each dimension based on word characteristics
   const char *word = vocabulary[word_idx].word;
@@ -2489,8 +2489,9 @@ SparseEmbedding *getContextualEmbedding(const char *word, const char **context,
   SparseEmbedding *contextual = &context_cache[cache_idx].embedding;
 
   contextual->num_active = base->num_active;
-  contextual->active_dims = malloc(contextual->num_active * sizeof(int));
-  contextual->values = malloc(contextual->num_active * sizeof(float));
+  contextual->active_dims = (int*)malloc(contextual->num_active * sizeof(int));
+contextual->values = (float*)malloc(contextual->num_active * sizeof(float));
+
 
   memcpy(contextual->active_dims, base->active_dims,
          base->num_active * sizeof(int));
@@ -3937,8 +3938,9 @@ void updateWorkingMemory(WorkingMemorySystem *working_memory, Neuron *neurons,
               &working_memory->focus.entries[working_memory->focus.size++];
 
           // Allocate and zero-init to prevent garbage values
-          entry->features = calloc(FEATURE_VECTOR_SIZE, sizeof(float));
-          entry->context_vector = calloc(CONTEXT_VECTOR_SIZE, sizeof(float));
+          entry->features = (float*)calloc(FEATURE_VECTOR_SIZE, sizeof(float));
+entry->context_vector = (float*)calloc(CONTEXT_VECTOR_SIZE, sizeof(float));
+
 
           entry->depth = 0;
           entry->abstraction_level =
@@ -5435,8 +5437,8 @@ IntrinsicMotivation *initializeMotivationSystem() {
 }
 
 GoalSystem *initializeGoalSystem(int capacity) {
-  GoalSystem *system = malloc(sizeof(GoalSystem));
-  system->goals = malloc(sizeof(Goal) * capacity);
+  GoalSystem *system = (GoalSystem*)malloc(sizeof(GoalSystem));
+system->goals = (Goal*)malloc(sizeof(Goal) * capacity);
   system->num_goals = 0;
   system->capacity = capacity;
   system->planning_horizon = 10.0f;
@@ -5868,7 +5870,7 @@ MemoryEntry *retrieveRelevantMemory(MemorySystem *memorySystem,
 }
 
 ReflectionHistory *initializeReflectionSystem() {
-  ReflectionHistory *history = malloc(sizeof(ReflectionHistory));
+  ReflectionHistory *history = (ReflectionHistory*)malloc(sizeof(ReflectionHistory));
   if (history == NULL) {
     fprintf(stderr, "Failed to allocate memory for ReflectionHistory\n");
     return NULL;
@@ -8104,10 +8106,10 @@ void addQuestionAndAnswerToMemory(
     // Add to focused attention
     if (workingMemory->focus.size < workingMemory->focus.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      enhanced.features = (float*)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      enhanced.context_vector = (float*)malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->focus.entries[workingMemory->focus.size++] = enhanced;
@@ -8117,10 +8119,10 @@ void addQuestionAndAnswerToMemory(
     // Add to active memory
     if (workingMemory->active.size < workingMemory->active.capacity) {
       WorkingMemoryEntry enhanced;
-      enhanced.features = malloc(FEATURE_VECTOR_SIZE * sizeof(float));
+      enhanced.features = (float*)malloc(FEATURE_VECTOR_SIZE * sizeof(float));
       extractSemanticFeatures(entry.vector, enhanced.features,
                               feature_projection_matrix);
-      enhanced.context_vector = malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
+      enhanced.context_vector = (float*)malloc(CONTEXT_VECTOR_SIZE * sizeof(float));
       memcpy(enhanced.context_vector, workingMemory->global_context,
              CONTEXT_VECTOR_SIZE * sizeof(float));
       workingMemory->active.entries[workingMemory->active.size++] = enhanced;
@@ -9110,7 +9112,7 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb,
   size_t real_size = size * nmemb;
   HttpResponse *response = (HttpResponse *)userp;
 
-  char *ptr = realloc(response->data, response->size + real_size + 1);
+  char *ptr = (char*)realloc(response->data, response->size + real_size + 1);
   if (!ptr) {
     fprintf(stderr, "Failed to allocate memory for HTTP response\n");
     return 0;
@@ -9194,7 +9196,7 @@ SearchResults *parseSearchResults(const char *json_data) {
 SearchResults *performWebSearch(const char *query) {
   CURL *curl;
   CURLcode res;
-  HttpResponse response = {.data = malloc(1), .size = 0};
+  HttpResponse response = {.data = (char*)malloc(1), .size = 0};
   SearchResults *results = NULL;
 
   if (!response.data) {
