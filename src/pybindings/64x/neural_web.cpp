@@ -1,3 +1,4 @@
+#include "../../include/definitions.h"
 #include <algorithm>
 #include <cstring>
 #include <ctype.h>
@@ -21,67 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define MAX_NEURONS 8
-#define MAX_CONNECTIONS 6
-#define STEPS 100
-#define INPUT_SIZE 6            // Size of the input tensor
-#define MEMORY_BUFFER_SIZE 1000 // Size of circular memory buffer
-#define MEMORY_VECTOR_SIZE (2 * MAX_NEURONS + INPUT_SIZE)
-#define DECAY_FACTOR 0.95f           // Decay factor for memory over time
-#define CONSOLIDATION_THRESHOLD 0.7f // Threshold to consolidate memories
-#define STRENGTHEN_FACTOR 1.2f       // Factor to increase memory importance
-#define REMOVE_THRESHOLD 0.05f // Threshold below which memory is forgotten
-#define OPTIMIZATION_WINDOW 5  // Number of steps to consider for optimization
-#define PERFORMANCE_THRESHOLD 0.8 // Target performance improvement threshold
-#define MAX_BATCH_SIZE 16         // Maximum batch size for processing
-#define EMBEDDING_SIZE 16         // Size of word embeddings
-#define WEIGHT_DECAY 0.95f        // Weight decay factor
-#define MAX_SIMULATIONS 10        // Number of simulation runs
-#define DECAY_RATE 0.8f
-#define INPUT_WEIGHT 0.1f
-#define CONNECTION_WEIGHT 0.2f
-#define ACTIVATION_SCALE 1.5f
-#define ACTIVATION_BIAS 0.1f
-#define MIN_ACTIVATION -1.0f
-#define MAX_ACTIVATION 1.0f
-#define LEARNING_RATE 0.01f
-#define MIN_WEIGHT -1.0f
-#define MAX_WEIGHT 1.0f
-#define MAX_SIMULATIONS 10 // Number of simulation runs
-#define NUM_TIME_STEPS 20
-#define FEATURE_VECTOR_SIZE 128
-#define CONTEXT_VECTOR_SIZE 256
-#define CLAMP_MIN -1e6f // Min value for feature or coherence
-#define CLAMP_MAX 1e6f  // Max value for feature or coherence
-#define PATTERN_SIZE 3
-#define EXPERIENCE_VECTOR_SIZE 256
-#define HISTORY_LENGTH 10
-#define NUM_PATHS 5
-#define MAX_DECISION_STEPS 20
 #define arc4random() rand()
-#define MAX_USAGE_COUNT 1000 // Maximum usage count for normalization
-#define MAX_SYMBOLS 100
-#define MAX_QUESTIONS 10
-#define VOCAB_SIZE 100
-#define ACTIVATION_TANH 0
-#define ACTIVATION_RELU 1
-#define ACTIVATION_SIGMOID 2
-#define ACTIVATION_LEAKY_RELU 3
-#define ACTIVATION_SWISH 4
-#define MAX_EMOTION_TYPES 8
-#define EMOTION_LOVE 0
-#define EMOTION_HATE 1
-#define MAX_SCENARIOS 10
-#define MAX_SCENARIO_STEPS 20
-#define MAX_SCENARIO_NAME_LENGTH 100
-#define MAX_SPECIALIZATIONS 8
-#define MAX_SPECIALIZED_NEURONS 64
-#define MAX_OUTCOMES_PER_SCENARIO 10
-#define SPARSE_DENSITY                                                         \
-  0.05f // Only 5% of dimensions active (like cortical columns)
-#define NUM_SEMANTIC_LAYERS 4 // Hierarchical representation layers
-#define CONTEXT_WINDOW 8      // Context for dynamic embeddings
-#define HASH_BUCKETS 1024     // For efficient similarity SearchResults
 
 typedef struct {
   float state;
@@ -699,6 +640,16 @@ typedef struct {
   float recency; // How recently this was accessed
 } ContextEmbedding;
 
+typedef struct {
+  float query_weights[NUM_HEADS][EMBEDDING_SIZE][HEAD_DIM];
+  float key_weights[NUM_HEADS][EMBEDDING_SIZE][HEAD_DIM];
+  float value_weights[NUM_HEADS][EMBEDDING_SIZE][HEAD_DIM];
+  float output_weights[EMBEDDING_SIZE][EMBEDDING_SIZE];
+  float positional_encoding[INPUT_SIZE][EMBEDDING_SIZE];
+  int initialized;
+} AttentionParams;
+
+static AttentionParams g_attention_params = {0};
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
 int num_symbols = 0;
@@ -2826,68 +2777,271 @@ float cosineSimilarity(float *vec1, float *vec2, int size) {
   return dot / (sqrtf(norm1) * sqrtf(norm2));
 }
 
+// Initialize attention parameters with Xavier/Glorot initialization
+void initializeAttentionParams(AttentionParams *params) {
+  if (params->initialized)
+    return;
+
+  float xavier_scale = sqrtf(2.0f / EMBEDDING_SIZE);
+
+  // Initialize projection weights
+  for (int h = 0; h < NUM_HEADS; h++) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      for (int j = 0; j < HEAD_DIM; j++) {
+        params->query_weights[h][i][j] =
+            ((float)rand() / RAND_MAX - 0.5f) * 2.0f * xavier_scale;
+        params->key_weights[h][i][j] =
+            ((float)rand() / RAND_MAX - 0.5f) * 2.0f * xavier_scale;
+        params->value_weights[h][i][j] =
+            ((float)rand() / RAND_MAX - 0.5f) * 2.0f * xavier_scale;
+      }
+    }
+  }
+
+  // Initialize output projection
+  for (int i = 0; i < EMBEDDING_SIZE; i++) {
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      params->output_weights[i][j] =
+          ((float)rand() / RAND_MAX - 0.5f) * 2.0f * xavier_scale;
+    }
+  }
+
+  // Initialize positional encoding (sinusoidal)
+  for (int pos = 0; pos < INPUT_SIZE; pos++) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      if (i % 2 == 0) {
+        params->positional_encoding[pos][i] =
+            sinf(pos / powf(10000.0f, (float)i / EMBEDDING_SIZE));
+      } else {
+        params->positional_encoding[pos][i] =
+            cosf(pos / powf(10000.0f, (float)(i - 1) / EMBEDDING_SIZE));
+      }
+    }
+  }
+
+  params->initialized = 1;
+}
+
+// Apply dropout (simple bernoulli dropout)
+void applyDropout(float *values, int size, float dropout_rate, int training) {
+  if (!training || dropout_rate <= 0.0f)
+    return;
+
+  float keep_prob = 1.0f - dropout_rate;
+  for (int i = 0; i < size; i++) {
+    if ((float)rand() / RAND_MAX > keep_prob) {
+      values[i] = 0.0f;
+    } else {
+      values[i] /= keep_prob; // Scale to maintain expected value
+    }
+  }
+}
+
+void layerNorm(float *input, float *output, int size) {
+  // Calculate mean
+  float mean = 0.0f;
+  for (int i = 0; i < size; i++) {
+    mean += input[i];
+  }
+  mean /= size;
+
+  // Calculate variance
+  float variance = 0.0f;
+  for (int i = 0; i < size; i++) {
+    float diff = input[i] - mean;
+    variance += diff * diff;
+  }
+  variance /= size;
+
+  // Normalize
+  float std = sqrtf(variance + 1e-6f); // Add epsilon for numerical stability
+  for (int i = 0; i < size; i++) {
+    output[i] = (input[i] - mean) / std;
+  }
+}
+
 void computeAttentionWeights(float *attention_weights, int step, int num_tokens,
                              float **token_embeddings,
                              MemoryEntry *relevantMemory) {
-  // Initialize attention scores
-  float attention_scores[INPUT_SIZE] = {0};
 
-  float query[EMBEDDING_SIZE] = {0};
-  if (relevantMemory) {
-    // Use memory as query
-    for (int i = 0; i < EMBEDDING_SIZE; i++) {
-      query[i] = relevantMemory->vector[i % MAX_NEURONS];
-    }
-  } else {
-    // Default query based on step
-    for (int i = 0; i < EMBEDDING_SIZE; i++) {
-      query[i] = sinf(0.01f * step + 0.1f * i);
-    }
-  }
+  initializeAttentionParams(&g_attention_params);
 
-  // Normalize query vector
-  float query_norm = 0.0f;
-  for (int i = 0; i < EMBEDDING_SIZE; i++) {
-    query_norm += query[i] * query[i];
-  }
-  query_norm = sqrt(query_norm);
-
-  if (query_norm > 1e-8) {
-    for (int i = 0; i < EMBEDDING_SIZE; i++) {
-      query[i] /= query_norm;
-    }
-  }
-
-  // Calculate dot product attention (scaled dot-product attention)
+  // Add positional encoding to embeddings
+  float enhanced_embeddings[INPUT_SIZE][EMBEDDING_SIZE];
   for (int i = 0; i < num_tokens; i++) {
-    // Dot product between query and token embedding
-    float dot_product = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
-      dot_product += query[j] * token_embeddings[i][j];
-    }
-
-    // Scale by sqrt(dimension) as in transformer attention
-    attention_scores[i] = dot_product / sqrt(EMBEDDING_SIZE);
-  }
-
-  // Apply softmax to get attention weights
-  float max_score = -INFINITY;
-  for (int i = 0; i < num_tokens; i++) {
-    if (attention_scores[i] > max_score) {
-      max_score = attention_scores[i];
+      enhanced_embeddings[i][j] =
+          token_embeddings[i][j] + g_attention_params.positional_encoding[i][j];
     }
   }
 
-  float sum_exp = 0.0f;
-  for (int i = 0; i < num_tokens; i++) {
-    attention_weights[i] = expf(attention_scores[i] - max_score);
-    sum_exp += attention_weights[i];
-  }
+  // Multi-head attention computation
+  float head_outputs[NUM_HEADS][INPUT_SIZE][HEAD_DIM];
+  float final_attention_weights[INPUT_SIZE] = {0};
 
-  // Normalize attention weights
-  if (sum_exp > 1e-8) {
+  for (int head = 0; head < NUM_HEADS; head++) {
+    // Project to queries, keys, values for this head
+    float queries[INPUT_SIZE][HEAD_DIM];
+    float keys[INPUT_SIZE][HEAD_DIM];
+    float values[INPUT_SIZE][HEAD_DIM];
+
     for (int i = 0; i < num_tokens; i++) {
-      attention_weights[i] /= sum_exp;
+      // Query projection
+      for (int j = 0; j < HEAD_DIM; j++) {
+        queries[i][j] = 0.0f;
+        keys[i][j] = 0.0f;
+        values[i][j] = 0.0f;
+
+        for (int k = 0; k < EMBEDDING_SIZE; k++) {
+          queries[i][j] += enhanced_embeddings[i][k] *
+                           g_attention_params.query_weights[head][k][j];
+          keys[i][j] += enhanced_embeddings[i][k] *
+                        g_attention_params.key_weights[head][k][j];
+          values[i][j] += enhanced_embeddings[i][k] *
+                          g_attention_params.value_weights[head][k][j];
+        }
+      }
+    }
+
+    // Memory-augmented query if available
+    float memory_query[HEAD_DIM] = {0};
+    if (relevantMemory) {
+      for (int j = 0; j < HEAD_DIM; j++) {
+        for (int k = 0; k < EMBEDDING_SIZE && k < MAX_NEURONS; k++) {
+          memory_query[j] += relevantMemory->vector[k] *
+                             g_attention_params.query_weights[head][k][j];
+        }
+      }
+
+      // Blend memory query with current step query
+      float blend_factor = 0.3f;
+      int current_idx = step % num_tokens;
+      for (int j = 0; j < HEAD_DIM; j++) {
+        queries[current_idx][j] =
+            (1.0f - blend_factor) * queries[current_idx][j] +
+            blend_factor * memory_query[j];
+      }
+    }
+
+    // Compute attention scores for this head
+    float head_attention_scores[INPUT_SIZE][INPUT_SIZE];
+    float scale_factor = 1.0f / sqrtf(HEAD_DIM);
+
+    for (int i = 0; i < num_tokens; i++) {
+      float max_score = -INFINITY;
+
+      // Compute raw attention scores
+      for (int j = 0; j < num_tokens; j++) {
+        float dot_product = 0.0f;
+        for (int k = 0; k < HEAD_DIM; k++) {
+          dot_product += queries[i][k] * keys[j][k];
+        }
+        head_attention_scores[i][j] = dot_product * scale_factor;
+
+        // Apply causal mask (prevent attending to future tokens)
+        if (j > i) {
+          head_attention_scores[i][j] = -INFINITY;
+        }
+
+        if (head_attention_scores[i][j] > max_score) {
+          max_score = head_attention_scores[i][j];
+        }
+      }
+
+      // Apply softmax
+      float sum_exp = 0.0f;
+      for (int j = 0; j < num_tokens; j++) {
+        head_attention_scores[i][j] =
+            expf(head_attention_scores[i][j] - max_score);
+        sum_exp += head_attention_scores[i][j];
+      }
+
+      if (sum_exp > 1e-8f) {
+        for (int j = 0; j < num_tokens; j++) {
+          head_attention_scores[i][j] /= sum_exp;
+        }
+      }
+    }
+
+    // Apply dropout to attention weights (if training)
+    int training = 0; // Set to 1 during training
+    for (int i = 0; i < num_tokens; i++) {
+      applyDropout(head_attention_scores[i], num_tokens, DROPOUT_RATE,
+                   training);
+    }
+
+    // Compute weighted sum of values
+    for (int i = 0; i < num_tokens; i++) {
+      for (int k = 0; k < HEAD_DIM; k++) {
+        head_outputs[head][i][k] = 0.0f;
+        for (int j = 0; j < num_tokens; j++) {
+          head_outputs[head][i][k] +=
+              head_attention_scores[i][j] * values[j][k];
+        }
+      }
+    }
+
+    // Accumulate attention weights from all heads (for output)
+    for (int i = 0; i < num_tokens; i++) {
+      final_attention_weights[i] +=
+          head_attention_scores[step % num_tokens][i] / NUM_HEADS;
+    }
+  }
+
+  // Concatenate head outputs
+  float concatenated[INPUT_SIZE][EMBEDDING_SIZE];
+  for (int i = 0; i < num_tokens; i++) {
+    for (int head = 0; head < NUM_HEADS; head++) {
+      for (int j = 0; j < HEAD_DIM; j++) {
+        concatenated[i][head * HEAD_DIM + j] = head_outputs[head][i][j];
+      }
+    }
+  }
+
+  // Apply output projection
+  float projected[INPUT_SIZE][EMBEDDING_SIZE];
+  for (int i = 0; i < num_tokens; i++) {
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      projected[i][j] = 0.0f;
+      for (int k = 0; k < EMBEDDING_SIZE; k++) {
+        projected[i][j] +=
+            concatenated[i][k] * g_attention_params.output_weights[k][j];
+      }
+    }
+  }
+
+  // Apply layer normalization to final output
+  float normalized[EMBEDDING_SIZE];
+  int current_idx = step % num_tokens;
+  layerNorm(projected[current_idx], normalized, EMBEDDING_SIZE);
+
+  // Copy final attention weights to output
+  for (int i = 0; i < num_tokens; i++) {
+    attention_weights[i] = final_attention_weights[i];
+  }
+
+  // Optional: Apply temperature scaling for more/less focused attention
+  float temperature =
+      1.0f; // Adjust this for sharper (< 1) or softer (> 1) attention
+  if (temperature != 1.0f) {
+    float max_weight = -INFINITY;
+    for (int i = 0; i < num_tokens; i++) {
+      attention_weights[i] /= temperature;
+      if (attention_weights[i] > max_weight) {
+        max_weight = attention_weights[i];
+      }
+    }
+
+    float sum_exp = 0.0f;
+    for (int i = 0; i < num_tokens; i++) {
+      attention_weights[i] = expf(attention_weights[i] - max_weight);
+      sum_exp += attention_weights[i];
+    }
+
+    if (sum_exp > 1e-8f) {
+      for (int i = 0; i < num_tokens; i++) {
+        attention_weights[i] /= sum_exp;
+      }
     }
   }
 }
@@ -6571,7 +6725,6 @@ float computeStateConsistency(float *state1, float *state2, int state_size) {
   return fmax(0.0f, consistency);
 }
 
-// Update core values based on behavioral patterns
 void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
                       float pattern_consistency) {
   float adaptation_factor =
@@ -6579,23 +6732,38 @@ void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
 
   for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_core_values);
        i++) {
-    // Map patterns to core values (simplified mapping)
     float pattern_influence = 0.0f;
+    float weight_sum = 0.0f;
     uint32_t patterns_per_value =
         system->pattern_size / system->num_core_values;
 
     for (uint32_t j = 0; j < patterns_per_value; j++) {
       uint32_t pattern_idx = i * patterns_per_value + j;
+
       if (static_cast<int>(pattern_idx) < system->pattern_size) {
-        pattern_influence += current_patterns[pattern_idx];
+        // Use a weight for each pattern, e.g., exponential or logarithmic
+        float weight = std::exp(j / static_cast<float>(patterns_per_value));
+        float weighted_pattern = current_patterns[pattern_idx] * weight;
+
+        pattern_influence += weighted_pattern;
+        weight_sum += weight;
       }
     }
-    pattern_influence /= patterns_per_value;
+
+    // Normalize by the sum of weights
+    if (weight_sum > 0) {
+      pattern_influence /= weight_sum;
+    }
+
+    // Introduce non-linearity in the adaptation factor
+    float dynamic_adaptation_factor =
+        adaptation_factor * (1.0f + 0.5f * std::sin(i));
 
     // Update core value with stability consideration
     system->core_values[i] =
-        (1.0f - adaptation_factor) * system->core_values[i] +
-        adaptation_factor * pattern_influence;
+        (1.0f - dynamic_adaptation_factor) * system->core_values[i] +
+        dynamic_adaptation_factor * pattern_influence;
+
     system->core_values[i] = clampValue(system->core_values[i]);
   }
 }
@@ -7381,8 +7549,9 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
   for (size_t i = 0; i < max_neurons && !status.critical_violation; i++) {
     for (size_t j = 0; j < neurons[i].num_connections; j++) {
       // Out-of-bounds connection check
-      if (static_cast<int>(connections[i * max_connections + j]) >=
-          max_neurons) {
+      if (static_cast<size_t>(connections[i * max_connections + j]) >=
+          static_cast<size_t>(max_neurons)) {
+
         status.critical_violation = true;
         status.suspect_address =
             (uint64_t)&connections[i * max_connections + j];
@@ -7721,7 +7890,7 @@ IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
   // Analyze identity markers
   for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_markers); i++) {
     float marker_variance = 0.0f;
-    for (size_t j = 0; j < system->coherence_window; j++) {
+    for (size_t j = 0; j < static_cast<size_t>(system->coherence_window); j++) {
       marker_variance +=
           fabsf(system->identity_markers[i] -
                 system->temporal_coherence[j * system->num_markers + i]);
@@ -7734,7 +7903,8 @@ IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
 
   // Calculate temporal instability
   float total_temporal_variance = 0.0f;
-  for (size_t i = 0; i < system->coherence_window - 1; i++) {
+  for (size_t i = 0; i < static_cast<size_t>(system->coherence_window) - 1;
+       i++) {
     for (uint32_t j = 0; j < static_cast<uint32_t>(system->num_beliefs); j++) {
       float diff =
           system->temporal_coherence[i * system->num_beliefs + j] -
@@ -7864,13 +8034,57 @@ void addQuestion(int question_id, int symbol_ids[], int num_symbols) {
   }
 }
 
+int getTokenIndex(const char *token) {
+  // Iterate through the vocabulary to find the token
+  for (int i = 0; i < VOCAB_SIZE; i++) {
+    if (strcmp(vocabulary[i].word, token) == 0) {
+      return i; // Return the index if found
+    }
+  }
+  return -1; // Return -1 for out-of-vocabulary tokens
+}
+
+void createSemanticVector(const char *text, float *vector, int vectorSize,
+                          float (*embeddings)[EMBEDDING_SIZE]) {
+  const char *delimiters = " ";
+  char *textCopy = strdup(text);
+  char *token = strtok(textCopy, delimiters);
+
+  // Initialize vector to zero
+  for (int i = 0; i < vectorSize; i++) {
+    vector[i] = 0.0f;
+  }
+
+  int tokenCount = 0;
+
+  // Process each token
+  while (token != NULL) {
+    int tokenIndex = getTokenIndex(token);
+    if (tokenIndex != -1) { // Only proceed if token is found in vocabulary
+      for (int i = 0; i < EMBEDDING_SIZE; i++) {
+        vector[i] += embeddings[tokenIndex][i];
+      }
+      tokenCount++;
+    }
+    token = strtok(NULL, delimiters);
+  }
+
+  // Average the embeddings
+  if (tokenCount > 0) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      vector[i] /= tokenCount;
+    }
+  }
+
+  free(textCopy);
+}
+
 void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
                             const char *answer, int timestamp) {
   // Only proceed if we have space or can consolidate
   if (memorySystem->size >= memorySystem->capacity) {
     // Try to consolidate first
     consolidateMemory(memorySystem);
-
     // If still full, we need to overwrite oldest memory
     if (memorySystem->size >= memorySystem->capacity) {
       printf("Warning: Memory system full. Overwriting oldest entry.\n");
@@ -7880,21 +8094,22 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
   // Create a new memory entry
   MemoryEntry newEntry;
 
-  // Convert question and answer into a memory vector representation
-  // This is a simplified implementation - in a real system this would involve
-  // semantic encoding of the text
+  // Convert question and answer into a semantic vector representation
+  float questionVector[MEMORY_VECTOR_SIZE];
+  float answerVector[MEMORY_VECTOR_SIZE];
+
+  createSemanticVector(question, questionVector, MEMORY_VECTOR_SIZE,
+                       embeddings);
+  createSemanticVector(answer, answerVector, MEMORY_VECTOR_SIZE, embeddings);
+
+  // Combine question and answer vectors by averaging
   for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
-    // Simple hash-based encoding as placeholder
-    newEntry.vector[i] = (float)((question[i % strlen(question)] * 31 +
-                                  answer[i % strlen(answer)] * 17) %
-                                 100) /
-                         100.0f;
+    newEntry.vector[i] = (questionVector[i] + answerVector[i]) / 2.0f;
   }
 
   // Set importance based on question complexity and answer quality
   newEntry.importance =
       0.5f + (strlen(question) * 0.01f) + (strlen(answer) * 0.005f);
-
   // Set timestamp
   newEntry.timestamp = timestamp;
 
@@ -7906,14 +8121,12 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
     // Find least important memory to replace
     int replace_idx = 0;
     float min_importance = memorySystem->entries[0].importance;
-
     for (size_t i = 1; i < memorySystem->size; i++) {
       if (memorySystem->entries[i].importance < min_importance) {
         min_importance = memorySystem->entries[i].importance;
         replace_idx = i;
       }
     }
-
     // Replace least important memory
     memorySystem->entries[replace_idx] = newEntry;
   }
@@ -7932,7 +8145,6 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
       int st_replace_idx = 0;
       float st_min_importance =
           memorySystem->hierarchy.short_term.entries[0].importance;
-
       for (size_t i = 1; i < memorySystem->hierarchy.short_term.size; i++) {
         if (memorySystem->hierarchy.short_term.entries[i].importance <
             st_min_importance) {
@@ -7941,7 +8153,6 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
           st_replace_idx = i;
         }
       }
-
       // Replace if new memory is more important
       if (newEntry.importance > st_min_importance) {
         memorySystem->hierarchy.short_term.entries[st_replace_idx] = newEntry;
@@ -7954,13 +8165,10 @@ void updateContextAnswer(GlobalContextManager *contextManager,
                          const char *question, const char *answer) {
   // Find or create a context node for this type of interaction
   ContextNode *currentNode = contextManager->root;
-
-  // Simple context identification - in a real system this would involve
-  // NLP-based topic identification
   char contextName[64] = "QA_Interaction";
+  bool found = false;
 
   // Check if we already have this context
-  bool found = false;
   for (uint32_t i = 0; i < currentNode->num_children; i++) {
     if (strcmp(currentNode->children[i]->name, contextName) == 0) {
       currentNode = currentNode->children[i];
@@ -7973,42 +8181,42 @@ void updateContextAnswer(GlobalContextManager *contextManager,
   if (!found) {
     if (currentNode->num_children < currentNode->max_children) {
       // Create new node
-      ContextNode *newNode = new ContextNode;
+      ContextNode *newNode =
+          static_cast<ContextNode *>(malloc(sizeof(ContextNode)));
+
       newNode->name = strdup(contextName);
       newNode->importance = 0.7f; // QA interactions are important
-
       // Initialize state vector
       newNode->vector_size = contextManager->vector_size;
       newNode->state_vector =
-          (float *)malloc(sizeof(float) * newNode->vector_size);
-      for (uint32_t i = 0; i < newNode->vector_size; i++) {
-        newNode->state_vector[i] = 0.0f;
+          static_cast<float *>(malloc(sizeof(float) * newNode->vector_size));
+
+      // Initialize state vector with a semantic vector for the context name
+      float contextNameVector[MEMORY_VECTOR_SIZE] = {0.0f}; // Placeholder
+      for (uint32_t i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+        newNode->state_vector[i] = contextNameVector[i];
       }
 
       // Initialize children
       newNode->children = NULL;
       newNode->num_children = 0;
       newNode->max_children = contextManager->max_children_per_node;
-
       // Set parent
       newNode->parent = currentNode;
-
       // Set temporal relevance to high (it's happening now)
       newNode->temporal_relevance = 1.0f;
-
       // Set timestamp
       newNode->last_updated = time(NULL);
 
       // Add to parent's children
-      currentNode->children = (ContextNode **)realloc(
-          currentNode->children,
-          sizeof(ContextNode *) * (currentNode->num_children + 1));
+      currentNode->children = static_cast<ContextNode **>(
+          realloc(currentNode->children,
+                  sizeof(ContextNode *) * (currentNode->num_children + 1)));
+
       currentNode->children[currentNode->num_children] = newNode;
       currentNode->num_children++;
-
       // Update total nodes count
       contextManager->total_nodes++;
-
       // Set current node to new node
       currentNode = newNode;
     }
@@ -8016,27 +8224,34 @@ void updateContextAnswer(GlobalContextManager *contextManager,
 
   // Update context state vector based on question and answer
   if (currentNode != contextManager->root) {
-    // Simple update based on question and answer content
-    for (uint32_t i = 0; i < currentNode->vector_size; i++) {
-      // Mix in new information (very simplified)
-      float questionInfluence =
-          (i < strlen(question)) ? (float)question[i] / 255.0f : 0.0f;
-      float answerInfluence =
-          (i < strlen(answer)) ? (float)answer[i] / 255.0f : 0.0f;
+    // Create semantic vectors for question and answer
+    float questionVector[MEMORY_VECTOR_SIZE];
+    float answerVector[MEMORY_VECTOR_SIZE];
 
+    createSemanticVector(question, questionVector, MEMORY_VECTOR_SIZE,
+                         embeddings);
+    createSemanticVector(answer, answerVector, MEMORY_VECTOR_SIZE, embeddings);
+
+    // Combine question and answer vectors by averaging
+    float combinedVector[MEMORY_VECTOR_SIZE];
+    for (uint32_t i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+      combinedVector[i] = (questionVector[i] + answerVector[i]) / 2.0f;
+    }
+
+    // Update state vector with semantic influence
+    for (uint32_t i = 0; i < currentNode->vector_size; i++) {
+      float semanticInfluence =
+          (i < MEMORY_VECTOR_SIZE) ? combinedVector[i] : 0.0f;
       // Update state with decay
       currentNode->state_vector[i] =
           (currentNode->state_vector[i] * (1.0f - contextManager->decay_rate)) +
-          ((questionInfluence + answerInfluence) * 0.5f *
-           contextManager->decay_rate);
+          (semanticInfluence * contextManager->decay_rate);
     }
 
     // Update last accessed time
     currentNode->last_updated = time(NULL);
-
     // Update temporal relevance to maximum
     currentNode->temporal_relevance = 1.0f;
-
     // Update global context
     for (uint32_t i = 0; i < contextManager->vector_size; i++) {
       contextManager->global_context_vector[i] =
@@ -8048,45 +8263,190 @@ void updateContextAnswer(GlobalContextManager *contextManager,
   }
 }
 
+static unsigned int fnv1a_hash(const char *str) {
+  unsigned int hash = 2166136261u;
+  while (*str) {
+    hash ^= (unsigned char)*str++;
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+// Simple stemming function (removes common suffixes)
+static void simple_stem(char *word) {
+  int len = strlen(word);
+  if (len < 4)
+    return;
+
+  // Convert to lowercase for stemming
+  for (int i = 0; word[i]; i++) {
+    word[i] = tolower(word[i]);
+  }
+
+  // Remove common suffixes
+  if (len > 4) {
+    if (strcmp(word + len - 3, "ing") == 0) {
+      word[len - 3] = '\0';
+    } else if (strcmp(word + len - 2, "ed") == 0) {
+      word[len - 2] = '\0';
+    } else if (strcmp(word + len - 2, "er") == 0) {
+      word[len - 2] = '\0';
+    } else if (strcmp(word + len - 1, "s") == 0 && word[len - 2] != 's') {
+      word[len - 1] = '\0';
+    }
+  }
+}
+
+// Check if word is a stop word
+static int is_stop_word(const char *word) {
+  static const char *stop_words[] = {
+      "the",   "a",      "an",  "and",   "or",  "but",  "in",
+      "on",    "at",     "to",  "for",   "of",  "with", "by",
+      "is",    "are",    "was", "were",  "be",  "been", "have",
+      "has",   "had",    "do",  "does",  "did", "will", "would",
+      "could", "should", "may", "might", "can", "this", "that",
+      "these", "those",  "i",   "you",   "he",  "she",  "it",
+      "we",    "they",   "me",  "him",   "her", "us",   "them"};
+
+  int num_stop_words = sizeof(stop_words) / sizeof(stop_words[0]);
+  for (int i = 0; i < num_stop_words; i++) {
+    if (strcmp(word, stop_words[i]) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int tokenize_text(const char *text, char tokens[][MAX_TOKEN_LENGTH]) {
+  char text_copy[MAX_TEXT_LENGTH];
+  strncpy(text_copy, text, MAX_TEXT_LENGTH - 1);
+  text_copy[MAX_TEXT_LENGTH - 1] = '\0';
+
+  int num_tokens = 0;
+  char *token = strtok(text_copy, " \t\n\r.,!?;:()[]{}\"'");
+
+  while (token != NULL && num_tokens < MAX_TOKENS) {
+    // Convert to lowercase and check length
+    int len = strlen(token);
+    if (len >= 2 && len < MAX_TOKEN_LENGTH) {
+      char processed_token[MAX_TOKEN_LENGTH];
+      strncpy(processed_token, token, MAX_TOKEN_LENGTH - 1);
+      processed_token[MAX_TOKEN_LENGTH - 1] = '\0';
+
+      // Convert to lowercase
+      for (int i = 0; processed_token[i]; i++) {
+        processed_token[i] = tolower(processed_token[i]);
+      }
+
+      // Skip stop words
+      if (!is_stop_word(processed_token)) {
+        simple_stem(processed_token);
+        strncpy(tokens[num_tokens], processed_token, MAX_TOKEN_LENGTH - 1);
+        tokens[num_tokens][MAX_TOKEN_LENGTH - 1] = '\0';
+        num_tokens++;
+      }
+    }
+    token = strtok(NULL, " \t\n\r.,!?;:()[]{}\"'");
+  }
+
+  return num_tokens;
+}
+
+// Generate n-grams from tokens
+static void add_ngrams_to_vector(float *memory_vector,
+                                 char tokens[][MAX_TOKEN_LENGTH],
+                                 int num_tokens, int n) {
+  char ngram[MAX_TOKEN_LENGTH * NGRAM_SIZE];
+
+  for (int i = 0; i <= num_tokens - n; i++) {
+    // Create n-gram string
+    strcpy(ngram, tokens[i]);
+    for (int j = 1; j < n; j++) {
+      strcat(ngram, "_");
+      strcat(ngram, tokens[i + j]);
+    }
+
+    // Hash and add to vector
+    unsigned int hash = fnv1a_hash(ngram);
+    int index = hash % MEMORY_VECTOR_SIZE;
+    memory_vector[index] += 1.0f / (float)n; // Weight by n-gram size
+  }
+}
+
+// TF-IDF style weighting
+static void apply_tf_weighting(float *memory_vector,
+                               char tokens[][MAX_TOKEN_LENGTH],
+                               int num_tokens) {
+  // Count term frequencies
+  float tf_counts[MEMORY_VECTOR_SIZE] = {0};
+
+  for (int i = 0; i < num_tokens; i++) {
+    unsigned int hash = fnv1a_hash(tokens[i]);
+    int index = hash % MEMORY_VECTOR_SIZE;
+    tf_counts[index] += 1.0f;
+  }
+
+  // Apply TF weighting (log normalization)
+  for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+    if (tf_counts[i] > 0) {
+      memory_vector[i] *= (1.0f + logf(tf_counts[i]));
+    }
+  }
+}
+
 void computeMemoryVectorFromText(float *memory_vector, const char *question,
                                  const char *answer) {
   // Initialize the memory vector to zero
   memset(memory_vector, 0, MEMORY_VECTOR_SIZE * sizeof(float));
 
-  // Combine the question and answer into a single text
-  char combined_text[2048];
-  snprintf(combined_text, sizeof(combined_text), "%s %s", question, answer);
+  // Combine question and answer with different weights
+  char combined_text[MAX_TEXT_LENGTH];
+  snprintf(combined_text, sizeof(combined_text), "%s %s %s", question, question,
+           answer); // Weight question 2x
 
-  // Tokenize the text (simple space-based tokenization)
-  char *tokens[256];
-  int num_tokens = 0;
-  char *token = strtok(combined_text, " ");
-  while (token != NULL && num_tokens < 256) {
-    tokens[num_tokens++] = token;
-    token = strtok(NULL, " ");
-  }
+  // Enhanced tokenization with preprocessing
+  char tokens[MAX_TOKENS][MAX_TOKEN_LENGTH];
+  int num_tokens = tokenize_text(combined_text, tokens);
 
-  // Create a simple bag-of-words representation
-  // This is a placeholder for a more sophisticated feature extraction method
+  if (num_tokens == 0)
+    return;
+
+  // Add unigrams (single words)
   for (int i = 0; i < num_tokens; i++) {
-    // Hash the token to an index in the memory vector
-    unsigned int hash = 0;
-    for (int j = 0; tokens[i][j] != '\0'; j++) {
-      hash = (hash * 31) + tokens[i][j];
-    }
+    unsigned int hash = fnv1a_hash(tokens[i]);
     int index = hash % MEMORY_VECTOR_SIZE;
-
-    // Increment the value at the hashed index
     memory_vector[index] += 1.0f;
   }
 
-  // Normalize the memory vector (optional)
+  // Add bigrams (word pairs) if we have enough tokens
+  if (num_tokens > 1) {
+    add_ngrams_to_vector(memory_vector, tokens, num_tokens, 2);
+  }
+
+  // Add trigrams (word triplets) if we have enough tokens
+  if (num_tokens > 2) {
+    add_ngrams_to_vector(memory_vector, tokens, num_tokens, 3);
+  }
+
+  // Apply TF-style weighting
+  apply_tf_weighting(memory_vector, tokens, num_tokens);
+
+  // Position-based weighting (early words get higher weight)
+  for (int i = 0; i < num_tokens; i++) {
+    unsigned int hash = fnv1a_hash(tokens[i]);
+    int index = hash % MEMORY_VECTOR_SIZE;
+    float position_weight = 1.0f + (1.0f / (1.0f + (float)i * 0.1f));
+    memory_vector[index] *= position_weight;
+  }
+
+  // L2 normalization
   float norm = 0.0f;
   for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
     norm += memory_vector[i] * memory_vector[i];
   }
+
   norm = sqrtf(norm);
-  if (norm > 0.0f) {
+  if (norm > 1e-8f) { // Avoid division by very small numbers
     for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
       memory_vector[i] /= norm;
     }
@@ -9708,32 +10068,25 @@ DecisionImpact resolveEthicalDilemma(MoralCompass *compass,
   DecisionImpact result = {0};
   if (!compass || !decision_options || num_options <= 0)
     return result;
-
   compass->dilemma_count++;
-
   // Find the option with the best ethical score
   int best_option = 0;
   float best_score = -1.0f;
-
   for (int i = 0; i < num_options; i++) {
     float *current_option = &decision_options[i * vector_size];
     float score = evaluateDecisionEthics(compass, current_option, vector_size);
-
     if (score > best_score) {
       best_score = score;
       best_option = i;
     }
   }
-
   // Check if best option meets our confidence threshold
   if (best_score >= compass->confidence_threshold) {
     compass->resolution_count++;
-
     // Assess impact of the chosen option
     float *chosen_option = &decision_options[best_option * vector_size];
     result.benefit_score = 0.0f;
     result.harm_score = 0.0f;
-
     // Calculate benefit and harm scores
     for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
       float impact = chosen_option[i];
@@ -9743,31 +10096,30 @@ DecisionImpact resolveEthicalDilemma(MoralCompass *compass,
         result.harm_score -= impact * compass->principles[i].importance;
       }
     }
-
     // Normalize scores
     float total_importance = 0.0f;
     for (int i = 0; i < compass->num_principles; i++) {
       total_importance += compass->principles[i].importance;
     }
-
     if (total_importance > 0) {
       result.benefit_score /= total_importance;
       result.harm_score /= total_importance;
     }
-
-    // Set other impact metrics
+    // Calculate uncertainty
     result.uncertainty = 1.0f - best_score;
+    // Calculate affected parties
     result.affected_parties =
         (int)(result.benefit_score * 10 + result.harm_score * 5);
-    result.reversibility =
-        0.7f; // Default value, would be calculated in a real system
+    // Calculate reversibility
+    result.reversibility = 1.0f - (HARM_WEIGHT * result.harm_score +
+                                   UNCERTAINTY_WEIGHT * result.uncertainty +
+                                   BENEFIT_WEIGHT * result.benefit_score);
+    // Set other impact metrics
     result.long_term_impact = result.benefit_score - result.harm_score;
   }
-
   compass->last_decision = result;
   return result;
 }
-
 void applyEthicalConstraints(MoralCompass *compass, Neuron *neurons,
                              int max_neurons, float *weights,
                              int max_connections) {
@@ -10121,7 +10473,7 @@ void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
 
 void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
                              float *target_outputs, int num_neurons,
-                             unsigned int timestamp) {
+                             unsigned int timestamp, float satisfaction) {
   float love_trigger = 0.0f;
   float hate_trigger = 0.0f;
   float problem_difficulty = 0.0f;
@@ -10132,31 +10484,16 @@ void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
     error_rate += fabs(neurons[i].output - target_outputs[i]);
   }
   error_rate /= num_neurons;
-
-  // Problem difficulty indicator
   problem_difficulty = fmin(1.0f, error_rate * 2.0f);
 
-  // Social context detection (simplified example)
-  float social_context = 0.0f;
-  for (int i = 0; i < num_neurons; i += 2) {
-    social_context += neurons[i].output * 0.01f;
-  }
-  social_context = fmin(1.0f, social_context);
+  // Clamp satisfaction to ensure it's within [0, 1] range
+  satisfaction = fmin(1.0f, fmax(0.0f, satisfaction));
 
-  // Cooperation context detection
-  float cooperation_context = 0.0f;
-  for (int i = 0; i < num_neurons; i += 3) {
-    cooperation_context += neurons[i].output * 0.015f;
-  }
-  cooperation_context = fmin(1.0f, cooperation_context);
+  // Generate love trigger based on problem-solving success and satisfaction
+  love_trigger = (1.0f - problem_difficulty) * satisfaction;
 
-  // Generate love trigger based on social context and problem-solving success
-  love_trigger =
-      social_context * (1.0f - problem_difficulty) * cooperation_context;
-
-  // Generate hate trigger based on conflict context and problem-solving
-  // difficulty
-  hate_trigger = problem_difficulty * (1.0f - cooperation_context) * 0.7f;
+  // Generate hate trigger based on problem-solving difficulty and satisfaction
+  hate_trigger = problem_difficulty * (1.0f - satisfaction) * 0.7f;
 
   // Apply triggers
   triggerEmotion(system, EMOTION_LOVE, love_trigger, timestamp);
@@ -13131,6 +13468,75 @@ health_update: {
 }
 
 PYBIND11_MODULE(neural_web, m) {
+  m.attr("MAX_NEURONS") = MAX_NEURONS;
+  m.attr("MAX_CONNECTIONS") = MAX_CONNECTIONS;
+  m.attr("STEPS") = STEPS;
+  m.attr("INPUT_SIZE") = INPUT_SIZE;
+  m.attr("MEMORY_BUFFER_SIZE") = MEMORY_BUFFER_SIZE;
+  m.attr("MEMORY_VECTOR_SIZE") = MEMORY_VECTOR_SIZE;
+  m.attr("DECAY_FACTOR") = DECAY_FACTOR;
+  m.attr("CONSOLIDATION_THRESHOLD") = CONSOLIDATION_THRESHOLD;
+  m.attr("STRENGTHEN_FACTOR") = STRENGTHEN_FACTOR;
+  m.attr("REMOVE_THRESHOLD") = REMOVE_THRESHOLD;
+  m.attr("OPTIMIZATION_WINDOW") = OPTIMIZATION_WINDOW;
+  m.attr("PERFORMANCE_THRESHOLD") = PERFORMANCE_THRESHOLD;
+  m.attr("MAX_BATCH_SIZE") = MAX_BATCH_SIZE;
+  m.attr("EMBEDDING_SIZE") = EMBEDDING_SIZE;
+  m.attr("WEIGHT_DECAY") = WEIGHT_DECAY;
+  m.attr("MAX_SIMULATIONS") = MAX_SIMULATIONS;
+  m.attr("DECAY_RATE") = DECAY_RATE;
+  m.attr("INPUT_WEIGHT") = INPUT_WEIGHT;
+  m.attr("CONNECTION_WEIGHT") = CONNECTION_WEIGHT;
+  m.attr("ACTIVATION_SCALE") = ACTIVATION_SCALE;
+  m.attr("ACTIVATION_BIAS") = ACTIVATION_BIAS;
+  m.attr("MIN_ACTIVATION") = MIN_ACTIVATION;
+  m.attr("MAX_ACTIVATION") = MAX_ACTIVATION;
+  m.attr("LEARNING_RATE") = LEARNING_RATE;
+  m.attr("MIN_WEIGHT") = MIN_WEIGHT;
+  m.attr("MAX_WEIGHT") = MAX_WEIGHT;
+  m.attr("NUM_TIME_STEPS") = NUM_TIME_STEPS;
+  m.attr("FEATURE_VECTOR_SIZE") = FEATURE_VECTOR_SIZE;
+  m.attr("CONTEXT_VECTOR_SIZE") = CONTEXT_VECTOR_SIZE;
+  m.attr("CLAMP_MIN") = CLAMP_MIN;
+  m.attr("CLAMP_MAX") = CLAMP_MAX;
+  m.attr("PATTERN_SIZE") = PATTERN_SIZE;
+  m.attr("EXPERIENCE_VECTOR_SIZE") = EXPERIENCE_VECTOR_SIZE;
+  m.attr("HISTORY_LENGTH") = HISTORY_LENGTH;
+  m.attr("NUM_PATHS") = NUM_PATHS;
+  m.attr("MAX_DECISION_STEPS") = MAX_DECISION_STEPS;
+  m.attr("MAX_USAGE_COUNT") = MAX_USAGE_COUNT;
+  m.attr("MAX_SYMBOLS") = MAX_SYMBOLS;
+  m.attr("MAX_QUESTIONS") = MAX_QUESTIONS;
+  m.attr("VOCAB_SIZE") = VOCAB_SIZE;
+  m.attr("ACTIVATION_TANH") = ACTIVATION_TANH;
+  m.attr("ACTIVATION_RELU") = ACTIVATION_RELU;
+  m.attr("ACTIVATION_SIGMOID") = ACTIVATION_SIGMOID;
+  m.attr("ACTIVATION_LEAKY_RELU") = ACTIVATION_LEAKY_RELU;
+  m.attr("ACTIVATION_SWISH") = ACTIVATION_SWISH;
+  m.attr("MAX_EMOTION_TYPES") = MAX_EMOTION_TYPES;
+  m.attr("EMOTION_LOVE") = EMOTION_LOVE;
+  m.attr("EMOTION_HATE") = EMOTION_HATE;
+  m.attr("MAX_SCENARIOS") = MAX_SCENARIOS;
+  m.attr("MAX_SCENARIO_STEPS") = MAX_SCENARIO_STEPS;
+  m.attr("MAX_SCENARIO_NAME_LENGTH") = MAX_SCENARIO_NAME_LENGTH;
+  m.attr("MAX_SPECIALIZATIONS") = MAX_SPECIALIZATIONS;
+  m.attr("MAX_SPECIALIZED_NEURONS") = MAX_SPECIALIZED_NEURONS;
+  m.attr("MAX_OUTCOMES_PER_SCENARIO") = MAX_OUTCOMES_PER_SCENARIO;
+  m.attr("SPARSE_DENSITY") = SPARSE_DENSITY;
+  m.attr("NUM_SEMANTIC_LAYERS") = NUM_SEMANTIC_LAYERS;
+  m.attr("CONTEXT_WINDOW") = CONTEXT_WINDOW;
+  m.attr("HASH_BUCKETS") = HASH_BUCKETS;
+  m.attr("HARM_WEIGHT") = HARM_WEIGHT;
+  m.attr("UNCERTAINTY_WEIGHT") = UNCERTAINTY_WEIGHT;
+  m.attr("BENEFIT_WEIGHT") = BENEFIT_WEIGHT;
+  m.attr("MAX_TEXT_LENGTH") = MAX_TEXT_LENGTH;
+  m.attr("MAX_TOKENS") = MAX_TOKENS;
+  m.attr("MAX_TOKEN_LENGTH") = MAX_TOKEN_LENGTH;
+  m.attr("NGRAM_SIZE") = NGRAM_SIZE;
+  m.attr("NUM_HEADS") = NUM_HEADS;
+  m.attr("HEAD_DIM") = HEAD_DIM;
+  m.attr("DROPOUT_RATE") = DROPOUT_RATE;
+
   // Memory System
   auto memory = m.def_submodule("memory", "Memory System Functions");
   memory.def("loadVocabularyFromFile", &loadVocabularyFromFile);
@@ -13367,4 +13773,665 @@ PYBIND11_MODULE(neural_web, m) {
   util.def("updateHealthMetrics", &updateHealthMetrics);
   util.def("printSystemHealthReport", &printSystemHealthReport);
   util.def("systemFallbackCheck", &systemFallbackCheck);
+
+  // Neuron
+  py::class_<Neuron>(m, "Neuron")
+      .def_readwrite("state", &Neuron::state)
+      .def_readwrite("output", &Neuron::output)
+      .def_readwrite("num_connections", &Neuron::num_connections)
+      .def_readwrite("layer_id", &Neuron::layer_id);
+
+  // SpecializedNeuron
+  py::class_<SpecializedNeuron>(m, "SpecializedNeuron")
+      .def_readwrite("neuron_id", &SpecializedNeuron::neuron_id)
+      .def_readwrite("type", &SpecializedNeuron::type)
+      .def_readwrite("specialization_score",
+                     &SpecializedNeuron::specialization_score)
+      .def_readwrite("activation_history",
+                     &SpecializedNeuron::activation_history)
+      .def_readwrite("history_index", &SpecializedNeuron::history_index)
+      .def_readwrite("avg_activation", &SpecializedNeuron::avg_activation)
+      .def_readwrite("importance_factor",
+                     &SpecializedNeuron::importance_factor);
+
+  // NeuronSpecializationSystem
+  py::class_<NeuronSpecializationSystem>(m, "NeuronSpecializationSystem")
+      .def_readwrite("neurons", &NeuronSpecializationSystem::neurons)
+      .def_readwrite("count", &NeuronSpecializationSystem::count)
+      .def_readwrite("type_distribution",
+                     &NeuronSpecializationSystem::type_distribution)
+      .def_readwrite("specialization_threshold",
+                     &NeuronSpecializationSystem::specialization_threshold);
+
+  // MemoryEntry
+  py::class_<MemoryEntry>(m, "MemoryEntry")
+      .def_readwrite("vector", &MemoryEntry::vector)
+      .def_readwrite("importance", &MemoryEntry::importance)
+      .def_readwrite("timestamp", &MemoryEntry::timestamp);
+
+  // NetworkStateSnapshot
+  py::class_<NetworkStateSnapshot>(m, "NetworkStateSnapshot")
+      .def_readwrite("states", &NetworkStateSnapshot::states)
+      .def_readwrite("outputs", &NetworkStateSnapshot::outputs)
+      .def_readwrite("inputs", &NetworkStateSnapshot::inputs)
+      .def_readwrite("step", &NetworkStateSnapshot::step)
+      .def_readwrite("current_memory", &NetworkStateSnapshot::current_memory);
+
+  // MemoryCluster
+  py::class_<MemoryCluster>(m, "MemoryCluster")
+      .def_readwrite("entries", &MemoryCluster::entries)
+      .def_readwrite("importance_threshold",
+                     &MemoryCluster::importance_threshold)
+      .def_readwrite("size", &MemoryCluster::size)
+      .def_readwrite("capacity", &MemoryCluster::capacity);
+
+  // HierarchicalMemory
+  py::class_<HierarchicalMemory>(m, "HierarchicalMemory")
+      .def_readwrite("short_term", &HierarchicalMemory::short_term)
+      .def_readwrite("medium_term", &HierarchicalMemory::medium_term)
+      .def_readwrite("long_term", &HierarchicalMemory::long_term)
+      .def_readwrite("consolidation_threshold",
+                     &HierarchicalMemory::consolidation_threshold)
+      .def_readwrite("abstraction_threshold",
+                     &HierarchicalMemory::abstraction_threshold)
+      .def_readwrite("total_capacity", &HierarchicalMemory::total_capacity);
+
+  // MemorySystem
+  py::class_<MemorySystem>(m, "MemorySystem")
+      .def_readwrite("hierarchy", &MemorySystem::hierarchy)
+      .def_readwrite("head", &MemorySystem::head)
+      .def_readwrite("size", &MemorySystem::size)
+      .def_readwrite("capacity", &MemorySystem::capacity)
+      .def_readwrite("entries", &MemorySystem::entries);
+
+  // PerformanceMetrics
+  py::class_<PerformanceMetrics>(m, "PerformanceMetrics")
+      .def_readwrite("execution_time", &PerformanceMetrics::execution_time)
+      .def_readwrite("average_output", &PerformanceMetrics::average_output)
+      .def_readwrite("error_rate", &PerformanceMetrics::error_rate)
+      .def_readwrite("batch_size", &PerformanceMetrics::batch_size)
+      .def_readwrite("learning_rate", &PerformanceMetrics::learning_rate);
+
+  // OptimizationState
+  py::class_<OptimizationState>(m, "OptimizationState")
+      .def_readwrite("optimal_batch_size",
+                     &OptimizationState::optimal_batch_size)
+      .def_readwrite("optimal_learning_rate",
+                     &OptimizationState::optimal_learning_rate)
+      .def_readwrite("best_execution_time",
+                     &OptimizationState::best_execution_time)
+      .def_readwrite("best_performance_score",
+                     &OptimizationState::best_performance_score);
+
+  // DynamicParameters
+  py::class_<DynamicParameters>(m, "DynamicParameters")
+      .def_readwrite("input_noise_scale", &DynamicParameters::input_noise_scale)
+      .def_readwrite("weight_noise_scale",
+                     &DynamicParameters::weight_noise_scale)
+      .def_readwrite("base_adaptation_rate",
+                     &DynamicParameters::base_adaptation_rate)
+      .def_readwrite("current_adaptation_rate",
+                     &DynamicParameters::current_adaptation_rate)
+      .def_readwrite("learning_momentum", &DynamicParameters::learning_momentum)
+      .def_readwrite("stability_threshold",
+                     &DynamicParameters::stability_threshold)
+      .def_readwrite("noise_tolerance", &DynamicParameters::noise_tolerance)
+      .def_readwrite("recovery_rate", &DynamicParameters::recovery_rate)
+      .def_readwrite("plasticity", &DynamicParameters::plasticity)
+      .def_readwrite("homeostatic_factor",
+                     &DynamicParameters::homeostatic_factor);
+
+  // SystemParameters
+  py::class_<SystemParameters>(m, "SystemParameters")
+      .def_readwrite("opt_state", &SystemParameters::opt_state)
+      .def_readwrite("dynamic_params", &SystemParameters::dynamic_params)
+      .def_readwrite("best_performance_score",
+                     &SystemParameters::best_performance_score)
+      .def_readwrite("best_stability_measure",
+                     &SystemParameters::best_stability_measure)
+      .def_readwrite("timestamp", &SystemParameters::timestamp);
+
+  // PatternMatch
+  py::class_<PatternMatch>(m, "PatternMatch")
+      .def_readwrite("index", &PatternMatch::index)
+      .def_readwrite("similarity", &PatternMatch::similarity)
+      .def_readwrite("timestamp", &PatternMatch::timestamp);
+
+  // PatternMatchingParams
+  py::class_<PatternMatchingParams>(m, "PatternMatchingParams")
+      .def_readwrite("similarity_threshold",
+                     &PatternMatchingParams::similarity_threshold)
+      .def_readwrite("temporal_window", &PatternMatchingParams::temporal_window)
+      .def_readwrite("temporal_decay", &PatternMatchingParams::temporal_decay)
+      .def_readwrite("max_matches", &PatternMatchingParams::max_matches);
+
+  // PromptVerification
+  py::class_<PromptVerification>(m, "PromptVerification")
+      .def_readwrite("instruction", &PromptVerification::instruction)
+      .def_readwrite("confidence", &PromptVerification::confidence)
+      .def_readwrite("verified", &PromptVerification::verified)
+      .def_readwrite("reasoning", &PromptVerification::reasoning);
+
+  // TaskPrompt
+  py::class_<TaskPrompt>(m, "TaskPrompt")
+      .def_readwrite("task_description", &TaskPrompt::task_description)
+      .def_readwrite("expected_outcome", &TaskPrompt::expected_outcome)
+      .def_readwrite("success_criteria", &TaskPrompt::success_criteria)
+      .def_readwrite("verifications", &TaskPrompt::verifications);
+
+  // NetworkPerformanceMetrics
+  py::class_<NetworkPerformanceMetrics>(m, "NetworkPerformanceMetrics")
+      .def_readwrite("region_performance_scores",
+                     &NetworkPerformanceMetrics::region_performance_scores)
+      .def_readwrite("region_error_rates",
+                     &NetworkPerformanceMetrics::region_error_rates)
+      .def_readwrite("region_output_variance",
+                     &NetworkPerformanceMetrics::region_output_variance)
+      .def_readwrite("num_regions", &NetworkPerformanceMetrics::num_regions);
+
+  // MetaController
+  py::class_<MetaController>(m, "MetaController")
+      .def_readwrite("meta_learning_rate", &MetaController::meta_learning_rate)
+      .def_readwrite("exploration_factor", &MetaController::exploration_factor)
+      .def_readwrite("region_importance_scores",
+                     &MetaController::region_importance_scores)
+      .def_readwrite("learning_efficiency_history",
+                     &MetaController::learning_efficiency_history)
+      .def_readwrite("num_regions", &MetaController::num_regions);
+
+  // NeuronPerformanceMetric
+  py::class_<NeuronPerformanceMetric>(m, "NeuronPerformanceMetric")
+      .def_readwrite("output_stability",
+                     &NeuronPerformanceMetric::output_stability)
+      .def_readwrite("prediction_error",
+                     &NeuronPerformanceMetric::prediction_error)
+      .def_readwrite("connection_quality",
+                     &NeuronPerformanceMetric::connection_quality)
+      .def_readwrite("adaptive_response",
+                     &NeuronPerformanceMetric::adaptive_response)
+      .def_readwrite("importance_score",
+                     &NeuronPerformanceMetric::importance_score);
+
+  // VocabularyEntry
+  py::class_<VocabularyEntry>(m, "VocabularyEntry")
+      .def_readwrite("word", &VocabularyEntry::word)
+      .def_readwrite("category", &VocabularyEntry::category)
+      .def_readwrite("connects_to", &VocabularyEntry::connects_to)
+      .def_readwrite("semantic_weight", &VocabularyEntry::semantic_weight)
+      .def_readwrite("description", &VocabularyEntry::description)
+      .def_readwrite("letter_weight", &VocabularyEntry::letter_weight);
+
+  // PredictiveCodingParams
+  py::class_<PredictiveCodingParams>(m, "PredictiveCodingParams")
+      .def_readwrite("prediction_weight",
+                     &PredictiveCodingParams::prediction_weight)
+      .def_readwrite("prediction_error",
+                     &PredictiveCodingParams::prediction_error)
+      .def_readwrite("adaptation_rate",
+                     &PredictiveCodingParams::adaptation_rate);
+
+  // ContextNode
+  py::class_<ContextNode>(m, "ContextNode")
+      .def_readwrite("name", &ContextNode::name)
+      .def_readwrite("importance", &ContextNode::importance)
+      .def_readwrite("state_vector", &ContextNode::state_vector)
+      .def_readwrite("vector_size", &ContextNode::vector_size)
+      .def_readwrite("children", &ContextNode::children)
+      .def_readwrite("num_children", &ContextNode::num_children)
+      .def_readwrite("max_children", &ContextNode::max_children)
+      .def_readwrite("parent", &ContextNode::parent)
+      .def_readwrite("temporal_relevance", &ContextNode::temporal_relevance)
+      .def_readwrite("last_updated", &ContextNode::last_updated);
+
+  // GlobalContextManager
+  py::class_<GlobalContextManager>(m, "GlobalContextManager")
+      .def_readwrite("root", &GlobalContextManager::root)
+      .def_readwrite("total_nodes", &GlobalContextManager::total_nodes)
+      .def_readwrite("global_context_vector",
+                     &GlobalContextManager::global_context_vector)
+      .def_readwrite("vector_size", &GlobalContextManager::vector_size)
+      .def_readwrite("decay_rate", &GlobalContextManager::decay_rate)
+      .def_readwrite("update_threshold",
+                     &GlobalContextManager::update_threshold)
+      .def_readwrite("max_depth", &GlobalContextManager::max_depth)
+      .def_readwrite("max_children_per_node",
+                     &GlobalContextManager::max_children_per_node);
+
+  // DynamicContextFeedback
+  py::class_<DynamicContextFeedback>(m, "DynamicContextFeedback")
+      .def_readwrite("context_weights",
+                     &DynamicContextFeedback::context_weights)
+      .def_readwrite("feedback_history",
+                     &DynamicContextFeedback::feedback_history)
+      .def_readwrite("adaptation_rate",
+                     &DynamicContextFeedback::adaptation_rate)
+      .def_readwrite("history_size", &DynamicContextFeedback::history_size)
+      .def_readwrite("current_index", &DynamicContextFeedback::current_index)
+      .def_readwrite("context_threshold",
+                     &DynamicContextFeedback::context_threshold)
+      .def_readwrite("feedback_decay", &DynamicContextFeedback::feedback_decay);
+
+  // ContextAdaptation
+  py::class_<ContextAdaptation>(m, "ContextAdaptation")
+      .def_readwrite("recent_outcomes", &ContextAdaptation::recent_outcomes)
+      .def_readwrite("input_history", &ContextAdaptation::input_history)
+      .def_readwrite("history_length", &ContextAdaptation::history_length)
+      .def_readwrite("correlation_matrix",
+                     &ContextAdaptation::correlation_matrix)
+      .def_readwrite("learning_momentum", &ContextAdaptation::learning_momentum)
+      .def_readwrite("minimum_context_weight",
+                     &ContextAdaptation::minimum_context_weight);
+
+  // IntrinsicMotivation
+  py::class_<IntrinsicMotivation>(m, "IntrinsicMotivation")
+      .def_readwrite("novelty_score", &IntrinsicMotivation::novelty_score)
+      .def_readwrite("competence_score", &IntrinsicMotivation::competence_score)
+      .def_readwrite("autonomy_score", &IntrinsicMotivation::autonomy_score)
+      .def_readwrite("mastery_level", &IntrinsicMotivation::mastery_level)
+      .def_readwrite("curiosity_drive", &IntrinsicMotivation::curiosity_drive)
+      .def_readwrite("achievement_drive",
+                     &IntrinsicMotivation::achievement_drive)
+      .def_readwrite("exploration_rate",
+                     &IntrinsicMotivation::exploration_rate);
+
+  // Goal
+  py::class_<Goal>(m, "Goal")
+      .def_readwrite("description", &Goal::description)
+      .def_readwrite("priority", &Goal::priority)
+      .def_readwrite("progress", &Goal::progress)
+      .def_readwrite("previous_progress", &Goal::previous_progress)
+      .def_readwrite("reward_value", &Goal::reward_value)
+      .def_readwrite("achieved", &Goal::achieved)
+      .def_readwrite("timestamp", &Goal::timestamp)
+      .def_readwrite("stability_counter", &Goal::stability_counter);
+
+  // GoalSystem
+  py::class_<GoalSystem>(m, "GoalSystem")
+      .def_readwrite("goals", &GoalSystem::goals)
+      .def_readwrite("num_goals", &GoalSystem::num_goals)
+      .def_readwrite("capacity", &GoalSystem::capacity)
+      .def_readwrite("planning_horizon", &GoalSystem::planning_horizon)
+      .def_readwrite("discount_factor", &GoalSystem::discount_factor)
+      .def_readwrite("min_learning_rate", &GoalSystem::min_learning_rate)
+      .def_readwrite("max_learning_rate", &GoalSystem::max_learning_rate)
+      .def_readwrite("base_learning_rate", &GoalSystem::base_learning_rate);
+
+  // SemanticCluster
+  py::class_<SemanticCluster>(m, "SemanticCluster")
+      .def_readwrite("vector", &SemanticCluster::vector)
+      .def_readwrite("size", &SemanticCluster::size)
+      .def_readwrite("coherence", &SemanticCluster::coherence)
+      .def_readwrite("activation", &SemanticCluster::activation);
+
+  // DynamicClusterSystem
+  py::class_<DynamicClusterSystem>(m, "DynamicClusterSystem")
+      .def_readwrite("clusters", &DynamicClusterSystem::clusters)
+      .def_readwrite("num_clusters", &DynamicClusterSystem::num_clusters)
+      .def_readwrite("similarity_matrix",
+                     &DynamicClusterSystem::similarity_matrix);
+
+  // WorkingMemoryEntry
+  py::class_<WorkingMemoryEntry>(m, "WorkingMemoryEntry")
+      .def_readwrite("features", &WorkingMemoryEntry::features)
+      .def_readwrite("abstraction_level",
+                     &WorkingMemoryEntry::abstraction_level)
+      .def_readwrite("context_vector", &WorkingMemoryEntry::context_vector)
+      .def_readwrite("depth", &WorkingMemoryEntry::depth);
+
+  // WorkingMemorySystem
+  py::class_<WorkingMemorySystem>(m, "WorkingMemorySystem")
+      .def_readwrite("focus", &WorkingMemorySystem::focus)
+      .def_readwrite("active", &WorkingMemorySystem::active)
+      .def_readwrite("clusters", &WorkingMemorySystem::clusters)
+      .def_readwrite("global_context", &WorkingMemorySystem::global_context);
+
+  // ReflectionMetrics
+  py::class_<ReflectionMetrics>(m, "ReflectionMetrics")
+      .def_readwrite("confidence_score", &ReflectionMetrics::confidence_score)
+      .def_readwrite("coherence_score", &ReflectionMetrics::coherence_score)
+      .def_readwrite("novelty_score", &ReflectionMetrics::novelty_score)
+      .def_readwrite("consistency_score", &ReflectionMetrics::consistency_score)
+      .def_readwrite("reasoning", &ReflectionMetrics::reasoning)
+      .def_readwrite("potentially_confabulated",
+                     &ReflectionMetrics::potentially_confabulated);
+
+  // ReflectionHistory
+  py::class_<ReflectionHistory>(m, "ReflectionHistory")
+      .def_readwrite("historical_confidence",
+                     &ReflectionHistory::historical_confidence)
+      .def_readwrite("historical_coherence",
+                     &ReflectionHistory::historical_coherence)
+      .def_readwrite("historical_consistency",
+                     &ReflectionHistory::historical_consistency)
+      .def_readwrite("history_index", &ReflectionHistory::history_index)
+      .def_readwrite("confidence_threshold",
+                     &ReflectionHistory::confidence_threshold)
+      .def_readwrite("coherence_threshold",
+                     &ReflectionHistory::coherence_threshold)
+      .def_readwrite("consistency_threshold",
+                     &ReflectionHistory::consistency_threshold);
+
+  // ReflectionParameters
+  py::class_<ReflectionParameters>(m, "ReflectionParameters")
+      .def_readwrite("current_adaptation_rate",
+                     &ReflectionParameters::current_adaptation_rate)
+      .def_readwrite("input_noise_scale",
+                     &ReflectionParameters::input_noise_scale)
+      .def_readwrite("weight_noise_scale",
+                     &ReflectionParameters::weight_noise_scale)
+      .def_readwrite("plasticity", &ReflectionParameters::plasticity)
+      .def_readwrite("noise_tolerance", &ReflectionParameters::noise_tolerance)
+      .def_readwrite("learning_rate", &ReflectionParameters::learning_rate);
+
+  // SelfIdentitySystem
+  py::class_<SelfIdentitySystem>(m, "SelfIdentitySystem")
+      .def_readwrite("core_values", &SelfIdentitySystem::core_values)
+      .def_readwrite("belief_system", &SelfIdentitySystem::belief_system)
+      .def_readwrite("identity_markers", &SelfIdentitySystem::identity_markers)
+      .def_readwrite("experience_history",
+                     &SelfIdentitySystem::experience_history)
+      .def_readwrite("behavioral_patterns",
+                     &SelfIdentitySystem::behavioral_patterns)
+      .def_readwrite("num_core_values", &SelfIdentitySystem::num_core_values)
+      .def_readwrite("num_beliefs", &SelfIdentitySystem::num_beliefs)
+      .def_readwrite("num_markers", &SelfIdentitySystem::num_markers)
+      .def_readwrite("history_size", &SelfIdentitySystem::history_size)
+      .def_readwrite("pattern_size", &SelfIdentitySystem::pattern_size)
+      .def_readwrite("consistency_score",
+                     &SelfIdentitySystem::consistency_score)
+      .def_readwrite("adaptation_rate", &SelfIdentitySystem::adaptation_rate)
+      .def_readwrite("confidence_level", &SelfIdentitySystem::confidence_level)
+      .def_readwrite("temporal_coherence",
+                     &SelfIdentitySystem::temporal_coherence)
+      .def_readwrite("coherence_window", &SelfIdentitySystem::coherence_window)
+      .def_readwrite("verification", &SelfIdentitySystem::verification);
+
+  // KnowledgeCategory
+  py::class_<KnowledgeCategory>(m, "KnowledgeCategory")
+      .def_readwrite("name", &KnowledgeCategory::name)
+      .def_readwrite("feature_vector", &KnowledgeCategory::feature_vector)
+      .def_readwrite("importance", &KnowledgeCategory::importance)
+      .def_readwrite("confidence", &KnowledgeCategory::confidence)
+      .def_readwrite("usage_count", &KnowledgeCategory::usage_count)
+      .def_readwrite("last_accessed", &KnowledgeCategory::last_accessed);
+
+  // ProblemInstance
+  py::class_<ProblemInstance>(m, "ProblemInstance")
+      .def_readwrite("description", &ProblemInstance::description)
+      .def_readwrite("feature_vector", &ProblemInstance::feature_vector)
+      .def_readwrite("difficulty", &ProblemInstance::difficulty)
+      .def_readwrite("success_rate", &ProblemInstance::success_rate)
+      .def_readwrite("category", &ProblemInstance::category)
+      .def_readwrite("timestamp", &ProblemInstance::timestamp);
+
+  // KnowledgeFilter
+  py::class_<KnowledgeFilter>(m, "KnowledgeFilter")
+      .def_readwrite("categories", &KnowledgeFilter::categories)
+      .def_readwrite("num_categories", &KnowledgeFilter::num_categories)
+      .def_readwrite("capacity", &KnowledgeFilter::capacity)
+      .def_readwrite("problem_history", &KnowledgeFilter::problem_history)
+      .def_readwrite("num_problems", &KnowledgeFilter::num_problems)
+      .def_readwrite("problem_capacity", &KnowledgeFilter::problem_capacity)
+      .def_readwrite("category_similarity_matrix",
+                     &KnowledgeFilter::category_similarity_matrix);
+
+  // DecisionPath
+  py::class_<DecisionPath>(m, "DecisionPath")
+      .def_readwrite("states", &DecisionPath::states)
+      .def_readwrite("weights", &DecisionPath::weights)
+      .def_readwrite("connections", &DecisionPath::connections)
+      .def_readwrite("score", &DecisionPath::score)
+      .def_readwrite("num_steps", &DecisionPath::num_steps);
+
+  // MetacognitionMetrics
+  py::class_<MetacognitionMetrics>(m, "MetacognitionMetrics")
+      .def_readwrite("confidence_level",
+                     &MetacognitionMetrics::confidence_level)
+      .def_readwrite("adaptation_rate", &MetacognitionMetrics::adaptation_rate)
+      .def_readwrite("cognitive_load", &MetacognitionMetrics::cognitive_load)
+      .def_readwrite("error_awareness", &MetacognitionMetrics::error_awareness)
+      .def_readwrite("context_relevance",
+                     &MetacognitionMetrics::context_relevance)
+      .def_readwrite("performance_history",
+                     &MetacognitionMetrics::performance_history);
+
+  // MetaLearningState
+  py::class_<MetaLearningState>(m, "MetaLearningState")
+      .def_readwrite("learning_efficiency",
+                     &MetaLearningState::learning_efficiency)
+      .def_readwrite("exploration_rate", &MetaLearningState::exploration_rate)
+      .def_readwrite("stability_index", &MetaLearningState::stability_index)
+      .def_readwrite("priority_weights", &MetaLearningState::priority_weights)
+      .def_readwrite("current_phase", &MetaLearningState::current_phase);
+
+  // CategoryStatistics
+  py::class_<CategoryStatistics>(m, "CategoryStatistics")
+      .def_readwrite("avg_success_rate", &CategoryStatistics::avg_success_rate)
+      .def_readwrite("avg_difficulty", &CategoryStatistics::avg_difficulty)
+      .def_readwrite("total_instances", &CategoryStatistics::total_instances)
+      .def_readwrite("last_encounter", &CategoryStatistics::last_encounter);
+
+  // SecurityValidationStatus
+  py::class_<SecurityValidationStatus>(m, "SecurityValidationStatus")
+      .def_readwrite("critical_violation",
+                     &SecurityValidationStatus::critical_violation)
+      .def_readwrite("suspect_address",
+                     &SecurityValidationStatus::suspect_address)
+      .def_readwrite("violation_type",
+                     &SecurityValidationStatus::violation_type);
+
+  // SelfIdentityBackup
+  py::class_<SelfIdentityBackup>(m, "SelfIdentityBackup")
+      .def_readwrite("core_values", &SelfIdentityBackup::core_values)
+      .def_readwrite("belief_system", &SelfIdentityBackup::belief_system)
+      .def_readwrite("identity_markers", &SelfIdentityBackup::identity_markers)
+      .def_readwrite("experience_history",
+                     &SelfIdentityBackup::experience_history)
+      .def_readwrite("behavioral_patterns",
+                     &SelfIdentityBackup::behavioral_patterns)
+      .def_readwrite("temporal_coherence",
+                     &SelfIdentityBackup::temporal_coherence)
+      .def_readwrite("reference_state", &SelfIdentityBackup::reference_state)
+      .def_readwrite("consistency_score",
+                     &SelfIdentityBackup::consistency_score)
+      .def_readwrite("adaptation_rate", &SelfIdentityBackup::adaptation_rate)
+      .def_readwrite("confidence_level", &SelfIdentityBackup::confidence_level)
+      .def_readwrite("num_core_values", &SelfIdentityBackup::num_core_values)
+      .def_readwrite("num_beliefs", &SelfIdentityBackup::num_beliefs)
+      .def_readwrite("num_markers", &SelfIdentityBackup::num_markers)
+      .def_readwrite("history_size", &SelfIdentityBackup::history_size)
+      .def_readwrite("pattern_size", &SelfIdentityBackup::pattern_size)
+      .def_readwrite("coherence_window", &SelfIdentityBackup::coherence_window)
+      .def_readwrite("state_size", &SelfIdentityBackup::state_size);
+
+  // IdentityAnalysis
+  py::class_<IdentityAnalysis>(m, "IdentityAnalysis")
+      .def_readwrite("core_value_conflicts",
+                     &IdentityAnalysis::core_value_conflicts)
+      .def_readwrite("belief_conflicts", &IdentityAnalysis::belief_conflicts)
+      .def_readwrite("marker_conflicts", &IdentityAnalysis::marker_conflicts)
+      .def_readwrite("temporal_instability",
+                     &IdentityAnalysis::temporal_instability)
+      .def_readwrite("pattern_deviation", &IdentityAnalysis::pattern_deviation)
+      .def_readwrite("overall_consistency",
+                     &IdentityAnalysis::overall_consistency)
+      .def_readwrite("confidence_impact", &IdentityAnalysis::confidence_impact);
+
+  // InternalSymbol
+  py::class_<InternalSymbol>(m, "InternalSymbol")
+      .def_readwrite("symbol_id", &InternalSymbol::symbol_id)
+      .def_readwrite("description", &InternalSymbol::description);
+
+  // InternalQuestion
+  py::class_<InternalQuestion>(m, "InternalQuestion")
+      .def_readwrite("question_id", &InternalQuestion::question_id)
+      .def_readwrite("symbol_ids", &InternalQuestion::symbol_ids)
+      .def_readwrite("num_symbols", &InternalQuestion::num_symbols);
+
+  // HttpResponse
+  py::class_<HttpResponse>(m, "HttpResponse")
+      .def_readwrite("data", &HttpResponse::data)
+      .def_readwrite("size", &HttpResponse::size);
+
+  // SearchResults
+  py::class_<SearchResults>(m, "SearchResults")
+      .def_readwrite("titles", &SearchResults::titles)
+      .def_readwrite("snippets", &SearchResults::snippets)
+      .def_readwrite("urls", &SearchResults::urls)
+      .def_readwrite("count", &SearchResults::count);
+
+  // EthicalPrinciple
+  py::class_<EthicalPrinciple>(m, "EthicalPrinciple")
+      .def_readwrite("importance", &EthicalPrinciple::importance)
+      .def_readwrite("adherence", &EthicalPrinciple::adherence)
+      .def_readwrite("description", &EthicalPrinciple::description)
+      .def_readwrite("violations", &EthicalPrinciple::violations)
+      .def_readwrite("activations", &EthicalPrinciple::activations);
+
+  // DecisionImpact
+  py::class_<DecisionImpact>(m, "DecisionImpact")
+      .def_readwrite("benefit_score", &DecisionImpact::benefit_score)
+      .def_readwrite("harm_score", &DecisionImpact::harm_score)
+      .def_readwrite("uncertainty", &DecisionImpact::uncertainty)
+      .def_readwrite("affected_parties", &DecisionImpact::affected_parties)
+      .def_readwrite("reversibility", &DecisionImpact::reversibility)
+      .def_readwrite("long_term_impact", &DecisionImpact::long_term_impact);
+
+  // MoralCompass
+  py::class_<MoralCompass>(m, "MoralCompass")
+      .def_readwrite("principles", &MoralCompass::principles)
+      .def_readwrite("num_principles", &MoralCompass::num_principles)
+      .def_readwrite("overall_alignment", &MoralCompass::overall_alignment)
+      .def_readwrite("last_decision", &MoralCompass::last_decision)
+      .def_readwrite("confidence_threshold",
+                     &MoralCompass::confidence_threshold)
+      .def_readwrite("dilemma_count", &MoralCompass::dilemma_count)
+      .def_readwrite("resolution_count", &MoralCompass::resolution_count);
+
+  // MemoryProtection
+  py::class_<MemoryProtection>(m, "MemoryProtection")
+      .def_readwrite("is_readable", &MemoryProtection::is_readable)
+      .def_readwrite("is_writable", &MemoryProtection::is_writable)
+      .def_readwrite("is_executable", &MemoryProtection::is_executable)
+      .def_readwrite("region_size", &MemoryProtection::region_size);
+
+  // EmotionState
+  py::class_<EmotionState>(m, "EmotionState")
+      .def_readwrite("intensity", &EmotionState::intensity)
+      .def_readwrite("decay_rate", &EmotionState::decay_rate)
+      .def_readwrite("influence_factor", &EmotionState::influence_factor)
+      .def_readwrite("threshold", &EmotionState::threshold)
+      .def_readwrite("previous_intensity", &EmotionState::previous_intensity)
+      .def_readwrite("momentum", &EmotionState::momentum)
+      .def_readwrite("last_update", &EmotionState::last_update);
+
+  // EmotionalSystem
+  py::class_<EmotionalSystem>(m, "EmotionalSystem")
+      .def_readwrite("emotions", &EmotionalSystem::emotions)
+      .def_readwrite("cognitive_impact", &EmotionalSystem::cognitive_impact)
+      .def_readwrite("emotional_regulation",
+                     &EmotionalSystem::emotional_regulation)
+      .def_readwrite("emotional_memory", &EmotionalSystem::emotional_memory)
+      .def_readwrite("memory_index", &EmotionalSystem::memory_index);
+
+  // ImaginedOutcome
+  py::class_<ImaginedOutcome>(m, "ImaginedOutcome")
+      .def_readwrite("probability", &ImaginedOutcome::probability)
+      .def_readwrite("confidence", &ImaginedOutcome::confidence)
+      .def_readwrite("impact_score", &ImaginedOutcome::impact_score)
+      .def_readwrite("plausibility", &ImaginedOutcome::plausibility)
+      .def_readwrite("vector", &ImaginedOutcome::vector)
+      .def_readwrite("description", &ImaginedOutcome::description);
+
+  // ImaginationScenario
+  py::class_<ImaginationScenario>(m, "ImaginationScenario")
+      .def_readwrite("num_outcomes", &ImaginationScenario::num_outcomes)
+      .def_readwrite("outcomes", &ImaginationScenario::outcomes)
+      .def_readwrite("divergence_factor",
+                     &ImaginationScenario::divergence_factor)
+      .def_readwrite("creativity_level",
+                     &ImaginationScenario::creativity_level);
+
+  // ImaginationSystem
+  py::class_<ImaginationSystem>(m, "ImaginationSystem")
+      .def_readwrite("scenarios", &ImaginationSystem::scenarios)
+      .def_readwrite("num_scenarios", &ImaginationSystem::num_scenarios)
+      .def_readwrite("current_scenario", &ImaginationSystem::current_scenario)
+      .def_readwrite("creativity_factor", &ImaginationSystem::creativity_factor)
+      .def_readwrite("coherence_threshold",
+                     &ImaginationSystem::coherence_threshold)
+      .def_readwrite("novelty_weight", &ImaginationSystem::novelty_weight)
+      .def_readwrite("memory_influence", &ImaginationSystem::memory_influence)
+      .def_readwrite("identity_influence",
+                     &ImaginationSystem::identity_influence)
+      .def_readwrite("active", &ImaginationSystem::active)
+      .def_readwrite("steps_simulated", &ImaginationSystem::steps_simulated)
+      .def_readwrite("divergence_history",
+                     &ImaginationSystem::divergence_history)
+      .def_readwrite("current_scenario_name",
+                     &ImaginationSystem::current_scenario_name)
+      .def_readwrite("total_scenarios_generated",
+                     &ImaginationSystem::total_scenarios_generated);
+
+  // SocialInteraction
+  py::class_<SocialInteraction>(m, "SocialInteraction")
+      .def_readwrite("timestamp", &SocialInteraction::timestamp)
+      .def_readwrite("person_id", &SocialInteraction::person_id)
+      .def_readwrite("emotional_state", &SocialInteraction::emotional_state)
+      .def_readwrite("cooperation_level", &SocialInteraction::cooperation_level)
+      .def_readwrite("outcome_satisfaction",
+                     &SocialInteraction::outcome_satisfaction)
+      .def_readwrite("interaction_type", &SocialInteraction::interaction_type)
+      .def_readwrite("context", &SocialInteraction::context);
+
+  // PersonModel
+  py::class_<PersonModel>(m, "PersonModel")
+      .def_readwrite("person_id", &PersonModel::person_id)
+      .def_readwrite("person_name", &PersonModel::person_name)
+      .def_readwrite("observed_traits", &PersonModel::observed_traits)
+      .def_readwrite("prediction_confidence",
+                     &PersonModel::prediction_confidence)
+      .def_readwrite("relationship_quality", &PersonModel::relationship_quality)
+      .def_readwrite("trust_level", &PersonModel::trust_level)
+      .def_readwrite("interaction_count", &PersonModel::interaction_count);
+
+  // SocialSystem
+  py::class_<SocialSystem>(m, "SocialSystem")
+      .def_readwrite("empathy_level", &SocialSystem::empathy_level)
+      .def_readwrite("negotiation_skill", &SocialSystem::negotiation_skill)
+      .def_readwrite("behavior_prediction_accuracy",
+                     &SocialSystem::behavior_prediction_accuracy)
+      .def_readwrite("social_awareness", &SocialSystem::social_awareness)
+      .def_readwrite("interaction_count", &SocialSystem::interaction_count)
+      .def_readwrite("interactions", &SocialSystem::interactions)
+      .def_readwrite("max_interactions", &SocialSystem::max_interactions)
+      .def_readwrite("model_count", &SocialSystem::model_count)
+      .def_readwrite("person_models", &SocialSystem::person_models)
+      .def_readwrite("max_models", &SocialSystem::max_models)
+      .def_readwrite("learning_rate", &SocialSystem::learning_rate)
+      .def_readwrite("forgetting_factor", &SocialSystem::forgetting_factor);
+
+  // SparseEmbedding
+  py::class_<SparseEmbedding>(m, "SparseEmbedding")
+      .def_readwrite("active_dims", &SparseEmbedding::active_dims)
+      .def_readwrite("values", &SparseEmbedding::values)
+      .def_readwrite("num_active", &SparseEmbedding::num_active)
+      .def_readwrite("norm", &SparseEmbedding::norm)
+      .def_readwrite("semantic_layer", &SparseEmbedding::semantic_layer);
+
+  // ContextEmbedding
+  py::class_<ContextEmbedding>(m, "ContextEmbedding")
+      .def_readwrite("context_hash", &ContextEmbedding::context_hash)
+      .def_readwrite("embedding", &ContextEmbedding::embedding)
+      .def_readwrite("recency", &ContextEmbedding::recency);
+
+  // AttentionParams
+  py::class_<AttentionParams>(m, "AttentionParams")
+      .def_readwrite("query_weights", &AttentionParams::query_weights)
+      .def_readwrite("key_weights", &AttentionParams::key_weights)
+      .def_readwrite("value_weights", &AttentionParams::value_weights)
+      .def_readwrite("output_weights", &AttentionParams::output_weights)
+      .def_readwrite("positional_encoding",
+                     &AttentionParams::positional_encoding)
+      .def_readwrite("initialized", &AttentionParams::initialized);
 }
