@@ -1817,6 +1817,21 @@ void initializeVocabularyWeights() {
   }
 }
 
+static inline void clip_range(int start, int end, int *out_start,
+                              int *out_end) {
+  if (start < 0)
+    start = 0;
+  if (end > EMBEDDING_SIZE)
+    end = EMBEDDING_SIZE;
+  if (start >= end) {
+    *out_start = 0;
+    *out_end = 0;
+  } else {
+    *out_start = start;
+    *out_end = end;
+  }
+}
+
 void importPretrainedEmbeddings(const char *embedding_file) {
   FILE *file = fopen(embedding_file, "r");
   if (!file) {
@@ -1940,49 +1955,72 @@ void importPretrainedEmbeddings(const char *embedding_file) {
     }
   }
   // Apply custom modifiers for all words based on vocabulary attributes
-  for (int i = 0; i < vocab_size; i++) {
-    // Apply category-specific modifiers to certain dimensions
-    if (strcmp(vocabulary[i].category, "fruit") == 0) {
-      for (int j = 0; j < 10; j++) {
-        embeddings[i][j] += 0.2f; // Boost fruit-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "action") == 0) {
-      for (int j = 10; j < 20; j++) {
-        embeddings[i][j] += 0.2f; // Boost action-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
-      for (int j = 20; j < 30; j++) {
-        embeddings[i][j] += 0.2f; // Boost emotion-specific dimensions
+  for (int i = 0; i < vocab_size; ++i) {
+    if (!embeddings[i])
+      continue; // skip missing row
+
+    float *emb_i = embeddings[i];
+    const char *cat = vocabulary[i].category;
+
+    // ---- category boosts ----
+    if (cat) {
+      int s, e;
+      if (strcmp(cat, "fruit") == 0) {
+        clip_range(0, 10, &s, &e);
+        for (int j = s; j < e; ++j)
+          emb_i[j] += 0.2f;
+      } else if (strcmp(cat, "action") == 0) {
+        clip_range(10, 20, &s, &e);
+        for (int j = s; j < e; ++j)
+          emb_i[j] += 0.2f;
+      } else if (strcmp(cat, "emotion") == 0) {
+        clip_range(20, 30, &s, &e);
+        for (int j = s; j < e; ++j)
+          emb_i[j] += 0.2f;
       }
     }
-    // Incorporate letter-weight in specific dimensions
-    float letter_weight = vocabulary[i].letter_weight;
-    for (int j = 30; j < 40; j++) {
-      embeddings[i][j] += letter_weight * 0.1f;
+
+    // ---- letter weight [30,40) ----
+    {
+      int s, e;
+      clip_range(30, 40, &s, &e);
+      float lw = vocabulary[i].letter_weight;
+      for (int j = s; j < e; ++j)
+        emb_i[j] += lw * 0.1f;
     }
-    // Incorporate semantic weight in specific dimensions
-    float semantic_weight = vocabulary[i].semantic_weight;
-    for (int j = 40; j < 50; j++) {
-      embeddings[i][j] += semantic_weight * 0.1f;
+
+    // ---- semantic weight [40,50) ----
+    {
+      int s, e;
+      clip_range(40, 50, &s, &e);
+      float sw = vocabulary[i].semantic_weight;
+      for (int j = s; j < e; ++j)
+        emb_i[j] += sw * 0.1f;
     }
-    // Use connections information to modify embedding
+
+    // ---- connections [50,60) ----
     if (vocabulary[i].connects_to) {
-      // Find the connected word in vocabulary
-      for (int j = 0; j < vocab_size; j++) {
-        if (strcmp(vocabulary[i].connects_to, vocabulary[j].word) == 0) {
-          // Make connected words more similar in specific dimensions
-          for (int k = 50; k < 60; k++) {
-            float avg = (embeddings[i][k] + embeddings[j][k]) * 0.5f;
-            // Move both embeddings slightly toward each other
-            embeddings[i][k] = embeddings[i][k] * 0.8f + avg * 0.2f;
-            embeddings[j][k] = embeddings[j][k] * 0.8f + avg * 0.2f;
+      const char *conn = vocabulary[i].connects_to;
+      for (int j = 0; j < vocab_size; ++j) {
+        if (j == i)
+          continue;
+        if (strcmp(conn, vocabulary[j].word) == 0) {
+          if (!embeddings[j])
+            break;
+          float *emb_j = embeddings[j];
+
+          int s, e;
+          clip_range(50, 60, &s, &e);
+          for (int k = s; k < e; ++k) {
+            float avg = (emb_i[k] + emb_j[k]) * 0.5f;
+            emb_i[k] = emb_i[k] * 0.8f + avg * 0.2f;
+            emb_j[k] = emb_j[k] * 0.8f + avg * 0.2f;
           }
-          break;
+          break; // only first matching connection
         }
       }
     }
-  }
-  // Final L2 normalization for all embeddings (industry standard)
+  } // Final L2 normalization for all embeddings (industry standard)
   for (int i = 0; i < vocab_size; i++) {
     float norm = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
