@@ -28,10 +28,12 @@ USER $USERNAME
 COPY --chown=$USERNAME:$USERNAME neural_web.cu ./
 
 # Copy the custom_embeddings.txt file with correct ownership
-COPY --chown=$USERNAME:$USERNAME custom_embeddings.txt ./
+COPY --chown=$USERNAME:$USERNAME replace/with/your/own/path/custom_embeddings.txt ./
 
 # Copy the vocabulary.txt file with correct ownership
-COPY --chown=$USERNAME:$USERNAME vocabulary.txt ./
+COPY --chown=$USERNAME:$USERNAME replace/with/your/own/path/vocabulary.txt ./
+
+COPY --chown=$USERNAME:$USERNAME /replace/with/path/to/you/have/to/also/change/the/c/code/to/include/it/definitions.h ./
 
 # Compile the CUDA program using NVCC
 RUN nvcc -o neural_web neural_web.cu -I/usr/include -ljson-c -lcurl
