@@ -36,7 +36,10 @@ COPY --chown=$USERNAME:$USERNAME custom_embeddings.txt ./
 COPY --chown=$USERNAME:$USERNAME vocabulary.txt ./
 
 # Compile the C program using Clang
-RUN clang -o neural_web neural_web64.c -I/usr/include -ljson-c -lcurl -lm
+RUN clang++ -std=c++17 -O2 -Wall -Wextra \
+  -o neural_web64 neural_web.cpp \
+  -I/usr/include \
+  -ljson-c -lcurl -lm
 
 # Set the default command to run the program
 CMD ["./neural_web"]
