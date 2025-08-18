@@ -56,7 +56,7 @@ osxiec - https://github.com/Okerew/osxiec
 
 It's recommended you use this more in a framework kind of way than by just copying the whole int main functionality basicly use functions you like from here compilation guide is below.
 
-It's good practive to use the validaitng critical secyrity status functions if doing more complex things with the code.
+It's good practice to use the validaitng critical secyrity status functions if doing more complex things with the code.
 
 ```c
 
