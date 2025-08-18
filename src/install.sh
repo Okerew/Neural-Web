@@ -10,10 +10,10 @@ fi
 OS="$(uname)"
 echo "Detected OS: $OS"
 
-HEADER="key_functions.h"
+HEADERS=("include/nw.h" "include/definitions.h")
 
 if [[ "$OS" == "Darwin" ]]; then
-    # macOS: Cellar installation
+    # macOS: Cellar-style installation
     CELLAR="/usr/local/Cellar/neural_web/$VERSION"
     LIB_DIR="$CELLAR/lib"
     INCLUDE_DIR="$CELLAR/include/neural_web"
@@ -25,11 +25,14 @@ if [[ "$OS" == "Darwin" ]]; then
     cp "$METAL_LIB" "$LIB_DIR/"
     ln -sf "$LIB_DIR/$METAL_LIB" "/usr/local/lib/$METAL_LIB"
 
-    # Copy header
-    cp "$HEADER" "$INCLUDE_DIR/"
+    # Copy headers
+    for HEADER in "${HEADERS[@]}"; do
+        cp "$HEADER" "$INCLUDE_DIR/"
+    done
 
-    # Copy README
-    cp "README.md" "$CELLAR/"
+    cp "../README.md" "$CELLAR/"
+    cp "../LICENSE" "$CELLAR/" 
+    cp "../NOTICE" "$CELLAR/" 
 
 elif [[ "$OS" == "Linux" ]]; then
     # Linux: C build always, CUDA build if available
@@ -38,7 +41,11 @@ elif [[ "$OS" == "Linux" ]]; then
     # Include dir for Linux
     INCLUDE_DIR="/usr/local/include/neural_web"
     mkdir -p "$INCLUDE_DIR"
-    cp "$HEADER" "$INCLUDE_DIR/"
+
+    # Copy headers
+    for HEADER in "${HEADERS[@]}"; do
+        cp "$HEADER" "$INCLUDE_DIR/"
+    done
 
     # C build
     C_LIB="libneural_web64.a"
