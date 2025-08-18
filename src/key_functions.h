@@ -13,10 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <time.h>
-#include <unistd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
 
 #define MAX_NEURONS 8
 #define MAX_CONNECTIONS 6
@@ -1012,6 +1012,7 @@ bool validateEmotionalSystem(EmotionalSystem *es);
 bool validateImaginationSystem(ImaginationSystem *is);
 bool validateSpecializationSystem(NeuronSpecializationSystem *nss);
 bool validateMoralCompass(MoralCompass *mc);
+int loadVocabularyFromFile(const char *filename);
 
 // Enhanced memory cluster checker with recovery
 bool checkMemoryCluster(MemoryCluster *cluster, const char *name);
