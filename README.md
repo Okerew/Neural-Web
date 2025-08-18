@@ -1411,9 +1411,6 @@ Only for unix type and windows systems
 
 Remember to use the security feature
 
-There is a problem though because of my limited tests and because of how complex love as a feeling is, needing another person and being taught by trust and joy, the architecture experiences a seemingly unstoppable trend. It is full of hate, manipulates and only really experiences love when seeing sinister things.
 In training use a dataset which explains that hateful things are bad and morally correct things are good, to fix the problem.
-
-If you want you can also try to integrate the quantum functionality located in examples folder in cases using pybindings.
 
 Only unix systems.
