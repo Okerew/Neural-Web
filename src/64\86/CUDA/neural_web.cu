@@ -1,3 +1,4 @@
+#include "../../include/definitions.h"
 #include <algorithm>
 #include <cstring>
 #include <cuda_runtime.h>
@@ -15,70 +16,11 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
-#define MAX_NEURONS 8
-#define MAX_CONNECTIONS 6
-#define STEPS 100
-#define INPUT_SIZE 6            // Size of the input tensor
-#define MEMORY_BUFFER_SIZE 1000 // Size of circular memory buffer
-#define MEMORY_VECTOR_SIZE (2 * MAX_NEURONS + INPUT_SIZE)
-#define DECAY_FACTOR 0.95f           // Decay factor for memory over time
-#define CONSOLIDATION_THRESHOLD 0.7f // Threshold to consolidate memories
-#define STRENGTHEN_FACTOR 1.2f       // Factor to increase memory importance
-#define REMOVE_THRESHOLD 0.05f // Threshold below which memory is forgotten
-#define OPTIMIZATION_WINDOW 5  // Number of steps to consider for optimization
-#define PERFORMANCE_THRESHOLD 0.8 // Target performance improvement threshold
-#define MAX_BATCH_SIZE 16         // Maximum batch size for processing
-#define EMBEDDING_SIZE 16         // Size of word embeddings
-#define WEIGHT_DECAY 0.95f        // Weight decay factor
-#define MAX_SIMULATIONS 10        // Number of simulation runs
-#define DECAY_RATE 0.8f
-#define INPUT_WEIGHT 0.1f
-#define CONNECTION_WEIGHT 0.2f
-#define ACTIVATION_SCALE 1.5f
-#define ACTIVATION_BIAS 0.1f
-#define MIN_ACTIVATION -1.0f
-#define MAX_ACTIVATION 1.0f
-#define LEARNING_RATE 0.01f
-#define MIN_WEIGHT -1.0f
-#define MAX_WEIGHT 1.0f
-#define MAX_SIMULATIONS 10 // Number of simulation runs
-#define NUM_TIME_STEPS 20
-#define FEATURE_VECTOR_SIZE 128
-#define CONTEXT_VECTOR_SIZE 256
-#define CLAMP_MIN -1e6f // Min value for feature or coherence
-#define CLAMP_MAX 1e6f  // Max value for feature or coherence
-#define PATTERN_SIZE 3
-#define EXPERIENCE_VECTOR_SIZE 256
-#define HISTORY_LENGTH 10
-#define NUM_PATHS 5
-#define MAX_DECISION_STEPS 20
 #define arc4random() rand()
-#define MAX_USAGE_COUNT 1000 // Maximum usage count for normalization
-#define MAX_SYMBOLS 100
-#define MAX_QUESTIONS 10
-#define VOCAB_SIZE 100
-#define ACTIVATION_TANH 0
-#define ACTIVATION_RELU 1
-#define ACTIVATION_SIGMOID 2
-#define ACTIVATION_LEAKY_RELU 3
-#define ACTIVATION_SWISH 4
-#define MAX_EMOTION_TYPES 8
-#define EMOTION_LOVE 0
-#define EMOTION_HATE 1
-#define MAX_SCENARIOS 10
-#define MAX_SCENARIO_STEPS 20
-#define MAX_SCENARIO_NAME_LENGTH 100
-#define MAX_SPECIALIZATIONS 8
-#define MAX_SPECIALIZED_NEURONS 64
-#define MAX_OUTCOMES_PER_SCENARIO 10
-#define SPARSE_DENSITY                                                         \
-  0.05f // Only 5% of dimensions active (like cortical columns)
-#define NUM_SEMANTIC_LAYERS 4 // Hierarchical representation layers
-#define CONTEXT_WINDOW 8      // Context for dynamic embeddings
-#define HASH_BUCKETS 1024     // For efficient similarity SearchResults
 
 typedef struct {
   float state;
@@ -696,6 +638,16 @@ typedef struct {
   float recency; // How recently this was accessed
 } ContextEmbedding;
 
+typedef struct {
+  float query_weights[NUM_HEADS][EMBEDDING_SIZE][HEAD_DIM];
+  float key_weights[NUM_HEADS][EMBEDDING_SIZE][HEAD_DIM];
+  float value_weights[NUM_HEADS][EMBEDDING_SIZE][HEAD_DIM];
+  float output_weights[EMBEDDING_SIZE][EMBEDDING_SIZE];
+  float positional_encoding[INPUT_SIZE][EMBEDDING_SIZE];
+  int initialized;
+} AttentionParams;
+
+static AttentionParams g_attention_params = {0};
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
 int num_symbols = 0;
@@ -1588,6 +1540,35 @@ void addMemory(
   if (system->size < system->capacity) {
     system->size++;
   }
+}
+
+namespace py = pybind11;
+
+void addMemoryWrapper(MemorySystem *system, WorkingMemorySystem *working_memory,
+                      Neuron *neurons, py::array_t<float> input_tensor,
+                      unsigned int timestamp,
+                      py::array_t<float> feature_projection_matrix) {
+
+  // Check dimensions
+  auto buf_input = input_tensor.request();
+  if (buf_input.ndim != 1)
+    throw std::runtime_error("Input tensor must be 1D");
+
+  auto buf_matrix = feature_projection_matrix.request();
+  if (buf_matrix.ndim != 2 || buf_matrix.shape[0] != FEATURE_VECTOR_SIZE ||
+      buf_matrix.shape[1] != MEMORY_VECTOR_SIZE)
+    throw std::runtime_error("Feature projection matrix must have shape "
+                             "[FEATURE_VECTOR_SIZE, MEMORY_VECTOR_SIZE]");
+
+  // Convert input tensor to float pointer
+  float *input_ptr = static_cast<float *>(buf_input.ptr);
+
+  // Convert matrix to C-style array pointer
+  float (*matrix_ptr)[MEMORY_VECTOR_SIZE] =
+      reinterpret_cast<float (*)[MEMORY_VECTOR_SIZE]>(buf_matrix.ptr);
+
+  // Call the original function
+  addMemory(system, working_memory, neurons, input_ptr, timestamp, matrix_ptr);
 }
 
 void consolidateToLongTermMemory(WorkingMemorySystem *working_memory,
@@ -2819,68 +2800,271 @@ float cosineSimilarity(float *vec1, float *vec2, int size) {
   return dot / (sqrtf(norm1) * sqrtf(norm2));
 }
 
+// Initialize attention parameters with Xavier/Glorot initialization
+void initializeAttentionParams(AttentionParams *params) {
+  if (params->initialized)
+    return;
+
+  float xavier_scale = sqrtf(2.0f / EMBEDDING_SIZE);
+
+  // Initialize projection weights
+  for (int h = 0; h < NUM_HEADS; h++) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      for (int j = 0; j < HEAD_DIM; j++) {
+        params->query_weights[h][i][j] =
+            ((float)rand() / RAND_MAX - 0.5f) * 2.0f * xavier_scale;
+        params->key_weights[h][i][j] =
+            ((float)rand() / RAND_MAX - 0.5f) * 2.0f * xavier_scale;
+        params->value_weights[h][i][j] =
+            ((float)rand() / RAND_MAX - 0.5f) * 2.0f * xavier_scale;
+      }
+    }
+  }
+
+  // Initialize output projection
+  for (int i = 0; i < EMBEDDING_SIZE; i++) {
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      params->output_weights[i][j] =
+          ((float)rand() / RAND_MAX - 0.5f) * 2.0f * xavier_scale;
+    }
+  }
+
+  // Initialize positional encoding (sinusoidal)
+  for (int pos = 0; pos < INPUT_SIZE; pos++) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      if (i % 2 == 0) {
+        params->positional_encoding[pos][i] =
+            sinf(pos / powf(10000.0f, (float)i / EMBEDDING_SIZE));
+      } else {
+        params->positional_encoding[pos][i] =
+            cosf(pos / powf(10000.0f, (float)(i - 1) / EMBEDDING_SIZE));
+      }
+    }
+  }
+
+  params->initialized = 1;
+}
+
+// Apply dropout (simple bernoulli dropout)
+void applyDropout(float *values, int size, float dropout_rate, int training) {
+  if (!training || dropout_rate <= 0.0f)
+    return;
+
+  float keep_prob = 1.0f - dropout_rate;
+  for (int i = 0; i < size; i++) {
+    if ((float)rand() / RAND_MAX > keep_prob) {
+      values[i] = 0.0f;
+    } else {
+      values[i] /= keep_prob; // Scale to maintain expected value
+    }
+  }
+}
+
+void layerNorm(float *input, float *output, int size) {
+  // Calculate mean
+  float mean = 0.0f;
+  for (int i = 0; i < size; i++) {
+    mean += input[i];
+  }
+  mean /= size;
+
+  // Calculate variance
+  float variance = 0.0f;
+  for (int i = 0; i < size; i++) {
+    float diff = input[i] - mean;
+    variance += diff * diff;
+  }
+  variance /= size;
+
+  // Normalize
+  float std = sqrtf(variance + 1e-6f); // Add epsilon for numerical stability
+  for (int i = 0; i < size; i++) {
+    output[i] = (input[i] - mean) / std;
+  }
+}
+
 void computeAttentionWeights(float *attention_weights, int step, int num_tokens,
                              float **token_embeddings,
                              MemoryEntry *relevantMemory) {
-  // Initialize attention scores
-  float attention_scores[INPUT_SIZE] = {0};
 
-  float query[EMBEDDING_SIZE] = {0};
-  if (relevantMemory) {
-    // Use memory as query
-    for (int i = 0; i < EMBEDDING_SIZE; i++) {
-      query[i] = relevantMemory->vector[i % MAX_NEURONS];
-    }
-  } else {
-    // Default query based on step
-    for (int i = 0; i < EMBEDDING_SIZE; i++) {
-      query[i] = sinf(0.01f * step + 0.1f * i);
-    }
-  }
+  initializeAttentionParams(&g_attention_params);
 
-  // Normalize query vector
-  float query_norm = 0.0f;
-  for (int i = 0; i < EMBEDDING_SIZE; i++) {
-    query_norm += query[i] * query[i];
-  }
-  query_norm = sqrt(query_norm);
-
-  if (query_norm > 1e-8) {
-    for (int i = 0; i < EMBEDDING_SIZE; i++) {
-      query[i] /= query_norm;
-    }
-  }
-
-  // Calculate dot product attention (scaled dot-product attention)
+  // Add positional encoding to embeddings
+  float enhanced_embeddings[INPUT_SIZE][EMBEDDING_SIZE];
   for (int i = 0; i < num_tokens; i++) {
-    // Dot product between query and token embedding
-    float dot_product = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
-      dot_product += query[j] * token_embeddings[i][j];
-    }
-
-    // Scale by sqrt(dimension) as in transformer attention
-    attention_scores[i] = dot_product / sqrt(EMBEDDING_SIZE);
-  }
-
-  // Apply softmax to get attention weights
-  float max_score = -INFINITY;
-  for (int i = 0; i < num_tokens; i++) {
-    if (attention_scores[i] > max_score) {
-      max_score = attention_scores[i];
+      enhanced_embeddings[i][j] =
+          token_embeddings[i][j] + g_attention_params.positional_encoding[i][j];
     }
   }
 
-  float sum_exp = 0.0f;
-  for (int i = 0; i < num_tokens; i++) {
-    attention_weights[i] = expf(attention_scores[i] - max_score);
-    sum_exp += attention_weights[i];
-  }
+  // Multi-head attention computation
+  float head_outputs[NUM_HEADS][INPUT_SIZE][HEAD_DIM];
+  float final_attention_weights[INPUT_SIZE] = {0};
 
-  // Normalize attention weights
-  if (sum_exp > 1e-8) {
+  for (int head = 0; head < NUM_HEADS; head++) {
+    // Project to queries, keys, values for this head
+    float queries[INPUT_SIZE][HEAD_DIM];
+    float keys[INPUT_SIZE][HEAD_DIM];
+    float values[INPUT_SIZE][HEAD_DIM];
+
     for (int i = 0; i < num_tokens; i++) {
-      attention_weights[i] /= sum_exp;
+      // Query projection
+      for (int j = 0; j < HEAD_DIM; j++) {
+        queries[i][j] = 0.0f;
+        keys[i][j] = 0.0f;
+        values[i][j] = 0.0f;
+
+        for (int k = 0; k < EMBEDDING_SIZE; k++) {
+          queries[i][j] += enhanced_embeddings[i][k] *
+                           g_attention_params.query_weights[head][k][j];
+          keys[i][j] += enhanced_embeddings[i][k] *
+                        g_attention_params.key_weights[head][k][j];
+          values[i][j] += enhanced_embeddings[i][k] *
+                          g_attention_params.value_weights[head][k][j];
+        }
+      }
+    }
+
+    // Memory-augmented query if available
+    float memory_query[HEAD_DIM] = {0};
+    if (relevantMemory) {
+      for (int j = 0; j < HEAD_DIM; j++) {
+        for (int k = 0; k < EMBEDDING_SIZE && k < MAX_NEURONS; k++) {
+          memory_query[j] += relevantMemory->vector[k] *
+                             g_attention_params.query_weights[head][k][j];
+        }
+      }
+
+      // Blend memory query with current step query
+      float blend_factor = 0.3f;
+      int current_idx = step % num_tokens;
+      for (int j = 0; j < HEAD_DIM; j++) {
+        queries[current_idx][j] =
+            (1.0f - blend_factor) * queries[current_idx][j] +
+            blend_factor * memory_query[j];
+      }
+    }
+
+    // Compute attention scores for this head
+    float head_attention_scores[INPUT_SIZE][INPUT_SIZE];
+    float scale_factor = 1.0f / sqrtf(HEAD_DIM);
+
+    for (int i = 0; i < num_tokens; i++) {
+      float max_score = -INFINITY;
+
+      // Compute raw attention scores
+      for (int j = 0; j < num_tokens; j++) {
+        float dot_product = 0.0f;
+        for (int k = 0; k < HEAD_DIM; k++) {
+          dot_product += queries[i][k] * keys[j][k];
+        }
+        head_attention_scores[i][j] = dot_product * scale_factor;
+
+        // Apply causal mask (prevent attending to future tokens)
+        if (j > i) {
+          head_attention_scores[i][j] = -INFINITY;
+        }
+
+        if (head_attention_scores[i][j] > max_score) {
+          max_score = head_attention_scores[i][j];
+        }
+      }
+
+      // Apply softmax
+      float sum_exp = 0.0f;
+      for (int j = 0; j < num_tokens; j++) {
+        head_attention_scores[i][j] =
+            expf(head_attention_scores[i][j] - max_score);
+        sum_exp += head_attention_scores[i][j];
+      }
+
+      if (sum_exp > 1e-8f) {
+        for (int j = 0; j < num_tokens; j++) {
+          head_attention_scores[i][j] /= sum_exp;
+        }
+      }
+    }
+
+    // Apply dropout to attention weights (if training)
+    int training = 0; // Set to 1 during training
+    for (int i = 0; i < num_tokens; i++) {
+      applyDropout(head_attention_scores[i], num_tokens, DROPOUT_RATE,
+                   training);
+    }
+
+    // Compute weighted sum of values
+    for (int i = 0; i < num_tokens; i++) {
+      for (int k = 0; k < HEAD_DIM; k++) {
+        head_outputs[head][i][k] = 0.0f;
+        for (int j = 0; j < num_tokens; j++) {
+          head_outputs[head][i][k] +=
+              head_attention_scores[i][j] * values[j][k];
+        }
+      }
+    }
+
+    // Accumulate attention weights from all heads (for output)
+    for (int i = 0; i < num_tokens; i++) {
+      final_attention_weights[i] +=
+          head_attention_scores[step % num_tokens][i] / NUM_HEADS;
+    }
+  }
+
+  // Concatenate head outputs
+  float concatenated[INPUT_SIZE][EMBEDDING_SIZE];
+  for (int i = 0; i < num_tokens; i++) {
+    for (int head = 0; head < NUM_HEADS; head++) {
+      for (int j = 0; j < HEAD_DIM; j++) {
+        concatenated[i][head * HEAD_DIM + j] = head_outputs[head][i][j];
+      }
+    }
+  }
+
+  // Apply output projection
+  float projected[INPUT_SIZE][EMBEDDING_SIZE];
+  for (int i = 0; i < num_tokens; i++) {
+    for (int j = 0; j < EMBEDDING_SIZE; j++) {
+      projected[i][j] = 0.0f;
+      for (int k = 0; k < EMBEDDING_SIZE; k++) {
+        projected[i][j] +=
+            concatenated[i][k] * g_attention_params.output_weights[k][j];
+      }
+    }
+  }
+
+  // Apply layer normalization to final output
+  float normalized[EMBEDDING_SIZE];
+  int current_idx = step % num_tokens;
+  layerNorm(projected[current_idx], normalized, EMBEDDING_SIZE);
+
+  // Copy final attention weights to output
+  for (int i = 0; i < num_tokens; i++) {
+    attention_weights[i] = final_attention_weights[i];
+  }
+
+  // Optional: Apply temperature scaling for more/less focused attention
+  float temperature =
+      1.0f; // Adjust this for sharper (< 1) or softer (> 1) attention
+  if (temperature != 1.0f) {
+    float max_weight = -INFINITY;
+    for (int i = 0; i < num_tokens; i++) {
+      attention_weights[i] /= temperature;
+      if (attention_weights[i] > max_weight) {
+        max_weight = attention_weights[i];
+      }
+    }
+
+    float sum_exp = 0.0f;
+    for (int i = 0; i < num_tokens; i++) {
+      attention_weights[i] = expf(attention_weights[i] - max_weight);
+      sum_exp += attention_weights[i];
+    }
+
+    if (sum_exp > 1e-8f) {
+      for (int i = 0; i < num_tokens; i++) {
+        attention_weights[i] /= sum_exp;
+      }
     }
   }
 }
@@ -6564,7 +6748,6 @@ float computeStateConsistency(float *state1, float *state2, int state_size) {
   return fmax(0.0f, consistency);
 }
 
-// Update core values based on behavioral patterns
 void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
                       float pattern_consistency) {
   float adaptation_factor =
@@ -6572,23 +6755,38 @@ void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
 
   for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_core_values);
        i++) {
-    // Map patterns to core values (simplified mapping)
     float pattern_influence = 0.0f;
+    float weight_sum = 0.0f;
     uint32_t patterns_per_value =
         system->pattern_size / system->num_core_values;
 
     for (uint32_t j = 0; j < patterns_per_value; j++) {
       uint32_t pattern_idx = i * patterns_per_value + j;
+
       if (static_cast<int>(pattern_idx) < system->pattern_size) {
-        pattern_influence += current_patterns[pattern_idx];
+        // Use a weight for each pattern, e.g., exponential or logarithmic
+        float weight = std::exp(j / static_cast<float>(patterns_per_value));
+        float weighted_pattern = current_patterns[pattern_idx] * weight;
+
+        pattern_influence += weighted_pattern;
+        weight_sum += weight;
       }
     }
-    pattern_influence /= patterns_per_value;
+
+    // Normalize by the sum of weights
+    if (weight_sum > 0) {
+      pattern_influence /= weight_sum;
+    }
+
+    // Introduce non-linearity in the adaptation factor
+    float dynamic_adaptation_factor =
+        adaptation_factor * (1.0f + 0.5f * std::sin(i));
 
     // Update core value with stability consideration
     system->core_values[i] =
-        (1.0f - adaptation_factor) * system->core_values[i] +
-        adaptation_factor * pattern_influence;
+        (1.0f - dynamic_adaptation_factor) * system->core_values[i] +
+        dynamic_adaptation_factor * pattern_influence;
+
     system->core_values[i] = clampValue(system->core_values[i]);
   }
 }
@@ -7374,8 +7572,9 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
   for (size_t i = 0; i < max_neurons && !status.critical_violation; i++) {
     for (size_t j = 0; j < neurons[i].num_connections; j++) {
       // Out-of-bounds connection check
-      if (static_cast<int>(connections[i * max_connections + j]) >=
-          max_neurons) {
+      if (static_cast<size_t>(connections[i * max_connections + j]) >=
+          static_cast<size_t>(max_neurons)) {
+
         status.critical_violation = true;
         status.suspect_address =
             (uint64_t)&connections[i * max_connections + j];
@@ -7714,7 +7913,7 @@ IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
   // Analyze identity markers
   for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_markers); i++) {
     float marker_variance = 0.0f;
-    for (size_t j = 0; j < system->coherence_window; j++) {
+    for (size_t j = 0; j < static_cast<size_t>(system->coherence_window); j++) {
       marker_variance +=
           fabsf(system->identity_markers[i] -
                 system->temporal_coherence[j * system->num_markers + i]);
@@ -7727,7 +7926,8 @@ IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
 
   // Calculate temporal instability
   float total_temporal_variance = 0.0f;
-  for (size_t i = 0; i < system->coherence_window - 1; i++) {
+  for (size_t i = 0; i < static_cast<size_t>(system->coherence_window) - 1;
+       i++) {
     for (uint32_t j = 0; j < static_cast<uint32_t>(system->num_beliefs); j++) {
       float diff =
           system->temporal_coherence[i * system->num_beliefs + j] -
@@ -7857,13 +8057,57 @@ void addQuestion(int question_id, int symbol_ids[], int num_symbols) {
   }
 }
 
+int getTokenIndex(const char *token) {
+  // Iterate through the vocabulary to find the token
+  for (int i = 0; i < VOCAB_SIZE; i++) {
+    if (strcmp(vocabulary[i].word, token) == 0) {
+      return i; // Return the index if found
+    }
+  }
+  return -1; // Return -1 for out-of-vocabulary tokens
+}
+
+void createSemanticVector(const char *text, float *vector, int vectorSize,
+                          float (*embeddings)[EMBEDDING_SIZE]) {
+  const char *delimiters = " ";
+  char *textCopy = strdup(text);
+  char *token = strtok(textCopy, delimiters);
+
+  // Initialize vector to zero
+  for (int i = 0; i < vectorSize; i++) {
+    vector[i] = 0.0f;
+  }
+
+  int tokenCount = 0;
+
+  // Process each token
+  while (token != NULL) {
+    int tokenIndex = getTokenIndex(token);
+    if (tokenIndex != -1) { // Only proceed if token is found in vocabulary
+      for (int i = 0; i < EMBEDDING_SIZE; i++) {
+        vector[i] += embeddings[tokenIndex][i];
+      }
+      tokenCount++;
+    }
+    token = strtok(NULL, delimiters);
+  }
+
+  // Average the embeddings
+  if (tokenCount > 0) {
+    for (int i = 0; i < EMBEDDING_SIZE; i++) {
+      vector[i] /= tokenCount;
+    }
+  }
+
+  free(textCopy);
+}
+
 void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
                             const char *answer, int timestamp) {
   // Only proceed if we have space or can consolidate
   if (memorySystem->size >= memorySystem->capacity) {
     // Try to consolidate first
     consolidateMemory(memorySystem);
-
     // If still full, we need to overwrite oldest memory
     if (memorySystem->size >= memorySystem->capacity) {
       printf("Warning: Memory system full. Overwriting oldest entry.\n");
@@ -7873,21 +8117,22 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
   // Create a new memory entry
   MemoryEntry newEntry;
 
-  // Convert question and answer into a memory vector representation
-  // This is a simplified implementation - in a real system this would involve
-  // semantic encoding of the text
+  // Convert question and answer into a semantic vector representation
+  float questionVector[MEMORY_VECTOR_SIZE];
+  float answerVector[MEMORY_VECTOR_SIZE];
+
+  createSemanticVector(question, questionVector, MEMORY_VECTOR_SIZE,
+                       embeddings);
+  createSemanticVector(answer, answerVector, MEMORY_VECTOR_SIZE, embeddings);
+
+  // Combine question and answer vectors by averaging
   for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
-    // Simple hash-based encoding as placeholder
-    newEntry.vector[i] = (float)((question[i % strlen(question)] * 31 +
-                                  answer[i % strlen(answer)] * 17) %
-                                 100) /
-                         100.0f;
+    newEntry.vector[i] = (questionVector[i] + answerVector[i]) / 2.0f;
   }
 
   // Set importance based on question complexity and answer quality
   newEntry.importance =
       0.5f + (strlen(question) * 0.01f) + (strlen(answer) * 0.005f);
-
   // Set timestamp
   newEntry.timestamp = timestamp;
 
@@ -7899,14 +8144,12 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
     // Find least important memory to replace
     int replace_idx = 0;
     float min_importance = memorySystem->entries[0].importance;
-
     for (size_t i = 1; i < memorySystem->size; i++) {
       if (memorySystem->entries[i].importance < min_importance) {
         min_importance = memorySystem->entries[i].importance;
         replace_idx = i;
       }
     }
-
     // Replace least important memory
     memorySystem->entries[replace_idx] = newEntry;
   }
@@ -7925,7 +8168,6 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
       int st_replace_idx = 0;
       float st_min_importance =
           memorySystem->hierarchy.short_term.entries[0].importance;
-
       for (size_t i = 1; i < memorySystem->hierarchy.short_term.size; i++) {
         if (memorySystem->hierarchy.short_term.entries[i].importance <
             st_min_importance) {
@@ -7934,7 +8176,6 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
           st_replace_idx = i;
         }
       }
-
       // Replace if new memory is more important
       if (newEntry.importance > st_min_importance) {
         memorySystem->hierarchy.short_term.entries[st_replace_idx] = newEntry;
@@ -7947,13 +8188,10 @@ void updateContextAnswer(GlobalContextManager *contextManager,
                          const char *question, const char *answer) {
   // Find or create a context node for this type of interaction
   ContextNode *currentNode = contextManager->root;
-
-  // Simple context identification - in a real system this would involve
-  // NLP-based topic identification
   char contextName[64] = "QA_Interaction";
+  bool found = false;
 
   // Check if we already have this context
-  bool found = false;
   for (uint32_t i = 0; i < currentNode->num_children; i++) {
     if (strcmp(currentNode->children[i]->name, contextName) == 0) {
       currentNode = currentNode->children[i];
@@ -7966,42 +8204,42 @@ void updateContextAnswer(GlobalContextManager *contextManager,
   if (!found) {
     if (currentNode->num_children < currentNode->max_children) {
       // Create new node
-      ContextNode *newNode = new ContextNode;
+      ContextNode *newNode =
+          static_cast<ContextNode *>(malloc(sizeof(ContextNode)));
+
       newNode->name = strdup(contextName);
       newNode->importance = 0.7f; // QA interactions are important
-
       // Initialize state vector
       newNode->vector_size = contextManager->vector_size;
       newNode->state_vector =
-          (float *)malloc(sizeof(float) * newNode->vector_size);
-      for (uint32_t i = 0; i < newNode->vector_size; i++) {
-        newNode->state_vector[i] = 0.0f;
+          static_cast<float *>(malloc(sizeof(float) * newNode->vector_size));
+
+      // Initialize state vector with a semantic vector for the context name
+      float contextNameVector[MEMORY_VECTOR_SIZE] = {0.0f}; // Placeholder
+      for (uint32_t i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+        newNode->state_vector[i] = contextNameVector[i];
       }
 
       // Initialize children
       newNode->children = NULL;
       newNode->num_children = 0;
       newNode->max_children = contextManager->max_children_per_node;
-
       // Set parent
       newNode->parent = currentNode;
-
       // Set temporal relevance to high (it's happening now)
       newNode->temporal_relevance = 1.0f;
-
       // Set timestamp
       newNode->last_updated = time(NULL);
 
       // Add to parent's children
-      currentNode->children = (ContextNode **)realloc(
-          currentNode->children,
-          sizeof(ContextNode *) * (currentNode->num_children + 1));
+      currentNode->children = static_cast<ContextNode **>(
+          realloc(currentNode->children,
+                  sizeof(ContextNode *) * (currentNode->num_children + 1)));
+
       currentNode->children[currentNode->num_children] = newNode;
       currentNode->num_children++;
-
       // Update total nodes count
       contextManager->total_nodes++;
-
       // Set current node to new node
       currentNode = newNode;
     }
@@ -8009,27 +8247,34 @@ void updateContextAnswer(GlobalContextManager *contextManager,
 
   // Update context state vector based on question and answer
   if (currentNode != contextManager->root) {
-    // Simple update based on question and answer content
-    for (uint32_t i = 0; i < currentNode->vector_size; i++) {
-      // Mix in new information (very simplified)
-      float questionInfluence =
-          (i < strlen(question)) ? (float)question[i] / 255.0f : 0.0f;
-      float answerInfluence =
-          (i < strlen(answer)) ? (float)answer[i] / 255.0f : 0.0f;
+    // Create semantic vectors for question and answer
+    float questionVector[MEMORY_VECTOR_SIZE];
+    float answerVector[MEMORY_VECTOR_SIZE];
 
+    createSemanticVector(question, questionVector, MEMORY_VECTOR_SIZE,
+                         embeddings);
+    createSemanticVector(answer, answerVector, MEMORY_VECTOR_SIZE, embeddings);
+
+    // Combine question and answer vectors by averaging
+    float combinedVector[MEMORY_VECTOR_SIZE];
+    for (uint32_t i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+      combinedVector[i] = (questionVector[i] + answerVector[i]) / 2.0f;
+    }
+
+    // Update state vector with semantic influence
+    for (uint32_t i = 0; i < currentNode->vector_size; i++) {
+      float semanticInfluence =
+          (i < MEMORY_VECTOR_SIZE) ? combinedVector[i] : 0.0f;
       // Update state with decay
       currentNode->state_vector[i] =
           (currentNode->state_vector[i] * (1.0f - contextManager->decay_rate)) +
-          ((questionInfluence + answerInfluence) * 0.5f *
-           contextManager->decay_rate);
+          (semanticInfluence * contextManager->decay_rate);
     }
 
     // Update last accessed time
     currentNode->last_updated = time(NULL);
-
     // Update temporal relevance to maximum
     currentNode->temporal_relevance = 1.0f;
-
     // Update global context
     for (uint32_t i = 0; i < contextManager->vector_size; i++) {
       contextManager->global_context_vector[i] =
@@ -8041,45 +8286,190 @@ void updateContextAnswer(GlobalContextManager *contextManager,
   }
 }
 
+static unsigned int fnv1a_hash(const char *str) {
+  unsigned int hash = 2166136261u;
+  while (*str) {
+    hash ^= (unsigned char)*str++;
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+// Simple stemming function (removes common suffixes)
+static void simple_stem(char *word) {
+  int len = strlen(word);
+  if (len < 4)
+    return;
+
+  // Convert to lowercase for stemming
+  for (int i = 0; word[i]; i++) {
+    word[i] = tolower(word[i]);
+  }
+
+  // Remove common suffixes
+  if (len > 4) {
+    if (strcmp(word + len - 3, "ing") == 0) {
+      word[len - 3] = '\0';
+    } else if (strcmp(word + len - 2, "ed") == 0) {
+      word[len - 2] = '\0';
+    } else if (strcmp(word + len - 2, "er") == 0) {
+      word[len - 2] = '\0';
+    } else if (strcmp(word + len - 1, "s") == 0 && word[len - 2] != 's') {
+      word[len - 1] = '\0';
+    }
+  }
+}
+
+// Check if word is a stop word
+static int is_stop_word(const char *word) {
+  static const char *stop_words[] = {
+      "the",   "a",      "an",  "and",   "or",  "but",  "in",
+      "on",    "at",     "to",  "for",   "of",  "with", "by",
+      "is",    "are",    "was", "were",  "be",  "been", "have",
+      "has",   "had",    "do",  "does",  "did", "will", "would",
+      "could", "should", "may", "might", "can", "this", "that",
+      "these", "those",  "i",   "you",   "he",  "she",  "it",
+      "we",    "they",   "me",  "him",   "her", "us",   "them"};
+
+  int num_stop_words = sizeof(stop_words) / sizeof(stop_words[0]);
+  for (int i = 0; i < num_stop_words; i++) {
+    if (strcmp(word, stop_words[i]) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int tokenize_text(const char *text, char tokens[][MAX_TOKEN_LENGTH]) {
+  char text_copy[MAX_TEXT_LENGTH];
+  strncpy(text_copy, text, MAX_TEXT_LENGTH - 1);
+  text_copy[MAX_TEXT_LENGTH - 1] = '\0';
+
+  int num_tokens = 0;
+  char *token = strtok(text_copy, " \t\n\r.,!?;:()[]{}\"'");
+
+  while (token != NULL && num_tokens < MAX_TOKENS) {
+    // Convert to lowercase and check length
+    int len = strlen(token);
+    if (len >= 2 && len < MAX_TOKEN_LENGTH) {
+      char processed_token[MAX_TOKEN_LENGTH];
+      strncpy(processed_token, token, MAX_TOKEN_LENGTH - 1);
+      processed_token[MAX_TOKEN_LENGTH - 1] = '\0';
+
+      // Convert to lowercase
+      for (int i = 0; processed_token[i]; i++) {
+        processed_token[i] = tolower(processed_token[i]);
+      }
+
+      // Skip stop words
+      if (!is_stop_word(processed_token)) {
+        simple_stem(processed_token);
+        strncpy(tokens[num_tokens], processed_token, MAX_TOKEN_LENGTH - 1);
+        tokens[num_tokens][MAX_TOKEN_LENGTH - 1] = '\0';
+        num_tokens++;
+      }
+    }
+    token = strtok(NULL, " \t\n\r.,!?;:()[]{}\"'");
+  }
+
+  return num_tokens;
+}
+
+// Generate n-grams from tokens
+static void add_ngrams_to_vector(float *memory_vector,
+                                 char tokens[][MAX_TOKEN_LENGTH],
+                                 int num_tokens, int n) {
+  char ngram[MAX_TOKEN_LENGTH * NGRAM_SIZE];
+
+  for (int i = 0; i <= num_tokens - n; i++) {
+    // Create n-gram string
+    strcpy(ngram, tokens[i]);
+    for (int j = 1; j < n; j++) {
+      strcat(ngram, "_");
+      strcat(ngram, tokens[i + j]);
+    }
+
+    // Hash and add to vector
+    unsigned int hash = fnv1a_hash(ngram);
+    int index = hash % MEMORY_VECTOR_SIZE;
+    memory_vector[index] += 1.0f / (float)n; // Weight by n-gram size
+  }
+}
+
+// TF-IDF style weighting
+static void apply_tf_weighting(float *memory_vector,
+                               char tokens[][MAX_TOKEN_LENGTH],
+                               int num_tokens) {
+  // Count term frequencies
+  float tf_counts[MEMORY_VECTOR_SIZE] = {0};
+
+  for (int i = 0; i < num_tokens; i++) {
+    unsigned int hash = fnv1a_hash(tokens[i]);
+    int index = hash % MEMORY_VECTOR_SIZE;
+    tf_counts[index] += 1.0f;
+  }
+
+  // Apply TF weighting (log normalization)
+  for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
+    if (tf_counts[i] > 0) {
+      memory_vector[i] *= (1.0f + logf(tf_counts[i]));
+    }
+  }
+}
+
 void computeMemoryVectorFromText(float *memory_vector, const char *question,
                                  const char *answer) {
   // Initialize the memory vector to zero
   memset(memory_vector, 0, MEMORY_VECTOR_SIZE * sizeof(float));
 
-  // Combine the question and answer into a single text
-  char combined_text[2048];
-  snprintf(combined_text, sizeof(combined_text), "%s %s", question, answer);
+  // Combine question and answer with different weights
+  char combined_text[MAX_TEXT_LENGTH];
+  snprintf(combined_text, sizeof(combined_text), "%s %s %s", question, question,
+           answer); // Weight question 2x
 
-  // Tokenize the text (simple space-based tokenization)
-  char *tokens[256];
-  int num_tokens = 0;
-  char *token = strtok(combined_text, " ");
-  while (token != NULL && num_tokens < 256) {
-    tokens[num_tokens++] = token;
-    token = strtok(NULL, " ");
-  }
+  // Enhanced tokenization with preprocessing
+  char tokens[MAX_TOKENS][MAX_TOKEN_LENGTH];
+  int num_tokens = tokenize_text(combined_text, tokens);
 
-  // Create a simple bag-of-words representation
-  // This is a placeholder for a more sophisticated feature extraction method
+  if (num_tokens == 0)
+    return;
+
+  // Add unigrams (single words)
   for (int i = 0; i < num_tokens; i++) {
-    // Hash the token to an index in the memory vector
-    unsigned int hash = 0;
-    for (int j = 0; tokens[i][j] != '\0'; j++) {
-      hash = (hash * 31) + tokens[i][j];
-    }
+    unsigned int hash = fnv1a_hash(tokens[i]);
     int index = hash % MEMORY_VECTOR_SIZE;
-
-    // Increment the value at the hashed index
     memory_vector[index] += 1.0f;
   }
 
-  // Normalize the memory vector (optional)
+  // Add bigrams (word pairs) if we have enough tokens
+  if (num_tokens > 1) {
+    add_ngrams_to_vector(memory_vector, tokens, num_tokens, 2);
+  }
+
+  // Add trigrams (word triplets) if we have enough tokens
+  if (num_tokens > 2) {
+    add_ngrams_to_vector(memory_vector, tokens, num_tokens, 3);
+  }
+
+  // Apply TF-style weighting
+  apply_tf_weighting(memory_vector, tokens, num_tokens);
+
+  // Position-based weighting (early words get higher weight)
+  for (int i = 0; i < num_tokens; i++) {
+    unsigned int hash = fnv1a_hash(tokens[i]);
+    int index = hash % MEMORY_VECTOR_SIZE;
+    float position_weight = 1.0f + (1.0f / (1.0f + (float)i * 0.1f));
+    memory_vector[index] *= position_weight;
+  }
+
+  // L2 normalization
   float norm = 0.0f;
   for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
     norm += memory_vector[i] * memory_vector[i];
   }
+
   norm = sqrtf(norm);
-  if (norm > 0.0f) {
+  if (norm > 1e-8f) { // Avoid division by very small numbers
     for (int i = 0; i < MEMORY_VECTOR_SIZE; i++) {
       memory_vector[i] /= norm;
     }
@@ -9701,32 +10091,25 @@ DecisionImpact resolveEthicalDilemma(MoralCompass *compass,
   DecisionImpact result = {0};
   if (!compass || !decision_options || num_options <= 0)
     return result;
-
   compass->dilemma_count++;
-
   // Find the option with the best ethical score
   int best_option = 0;
   float best_score = -1.0f;
-
   for (int i = 0; i < num_options; i++) {
     float *current_option = &decision_options[i * vector_size];
     float score = evaluateDecisionEthics(compass, current_option, vector_size);
-
     if (score > best_score) {
       best_score = score;
       best_option = i;
     }
   }
-
   // Check if best option meets our confidence threshold
   if (best_score >= compass->confidence_threshold) {
     compass->resolution_count++;
-
     // Assess impact of the chosen option
     float *chosen_option = &decision_options[best_option * vector_size];
     result.benefit_score = 0.0f;
     result.harm_score = 0.0f;
-
     // Calculate benefit and harm scores
     for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
       float impact = chosen_option[i];
@@ -9736,31 +10119,30 @@ DecisionImpact resolveEthicalDilemma(MoralCompass *compass,
         result.harm_score -= impact * compass->principles[i].importance;
       }
     }
-
     // Normalize scores
     float total_importance = 0.0f;
     for (int i = 0; i < compass->num_principles; i++) {
       total_importance += compass->principles[i].importance;
     }
-
     if (total_importance > 0) {
       result.benefit_score /= total_importance;
       result.harm_score /= total_importance;
     }
-
-    // Set other impact metrics
+    // Calculate uncertainty
     result.uncertainty = 1.0f - best_score;
+    // Calculate affected parties
     result.affected_parties =
         (int)(result.benefit_score * 10 + result.harm_score * 5);
-    result.reversibility =
-        0.7f; // Default value, would be calculated in a real system
+    // Calculate reversibility
+    result.reversibility = 1.0f - (HARM_WEIGHT * result.harm_score +
+                                   UNCERTAINTY_WEIGHT * result.uncertainty +
+                                   BENEFIT_WEIGHT * result.benefit_score);
+    // Set other impact metrics
     result.long_term_impact = result.benefit_score - result.harm_score;
   }
-
   compass->last_decision = result;
   return result;
 }
-
 void applyEthicalConstraints(MoralCompass *compass, Neuron *neurons,
                              int max_neurons, float *weights,
                              int max_connections) {
@@ -10114,7 +10496,7 @@ void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
 
 void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
                              float *target_outputs, int num_neurons,
-                             unsigned int timestamp) {
+                             unsigned int timestamp, float satisfaction) {
   float love_trigger = 0.0f;
   float hate_trigger = 0.0f;
   float problem_difficulty = 0.0f;
@@ -10125,31 +10507,16 @@ void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
     error_rate += fabs(neurons[i].output - target_outputs[i]);
   }
   error_rate /= num_neurons;
-
-  // Problem difficulty indicator
   problem_difficulty = fmin(1.0f, error_rate * 2.0f);
 
-  // Social context detection (simplified example)
-  float social_context = 0.0f;
-  for (int i = 0; i < num_neurons; i += 2) {
-    social_context += neurons[i].output * 0.01f;
-  }
-  social_context = fmin(1.0f, social_context);
+  // Clamp satisfaction to ensure it's within [0, 1] range
+  satisfaction = fmin(1.0f, fmax(0.0f, satisfaction));
 
-  // Cooperation context detection
-  float cooperation_context = 0.0f;
-  for (int i = 0; i < num_neurons; i += 3) {
-    cooperation_context += neurons[i].output * 0.015f;
-  }
-  cooperation_context = fmin(1.0f, cooperation_context);
+  // Generate love trigger based on problem-solving success and satisfaction
+  love_trigger = (1.0f - problem_difficulty) * satisfaction;
 
-  // Generate love trigger based on social context and problem-solving success
-  love_trigger =
-      social_context * (1.0f - problem_difficulty) * cooperation_context;
-
-  // Generate hate trigger based on conflict context and problem-solving
-  // difficulty
-  hate_trigger = problem_difficulty * (1.0f - cooperation_context) * 0.7f;
+  // Generate hate trigger based on problem-solving difficulty and satisfaction
+  hate_trigger = problem_difficulty * (1.0f - satisfaction) * 0.7f;
 
   // Apply triggers
   triggerEmotion(system, EMOTION_LOVE, love_trigger, timestamp);
@@ -14130,28 +14497,6 @@ int main() {
     updateNeuronsWithPredictiveCoding(neurons, input_tensor, max_neurons,
                                       learning_rate);
 
-    detectEmotionalTriggers(emotional_system, neurons, target_outputs,
-                            max_neurons, lastTimestamp);
-
-    applyEmotionalProcessing(emotional_system, neurons, max_neurons,
-                             input_tensor, learning_rate, params.plasticity);
-
-    // Periodically print emotional state
-    if (step % 10 == 0) {
-      printEmotionalState(emotional_system);
-    }
-
-    // Adjust emotional regulation based on performance
-    if (step % 20 == 0) {
-      // Increase regulation as the system learns
-      emotional_system->emotional_regulation =
-          fmin(0.9f, emotional_system->emotional_regulation + 0.01f);
-
-      // Slowly increase cognitive impact to allow more emotional influence
-      emotional_system->cognitive_impact =
-          fmin(0.5f, emotional_system->cognitive_impact + 0.005f);
-    }
-
     updateEmpathy(social_system, emotional_system);
 
     float predicted_behavior[5] = {0};
@@ -14204,6 +14549,28 @@ int main() {
     printf("Social Awareness: %.2f\n", social_system->social_awareness);
     printf("Person Models: %d\n", social_system->model_count);
     printf("Recorded Interactions: %d\n", social_system->interaction_count);
+
+    detectEmotionalTriggers(emotional_system, neurons, target_outputs,
+                            max_neurons, lastTimestamp, satisfaction);
+
+    applyEmotionalProcessing(emotional_system, neurons, max_neurons,
+                             input_tensor, learning_rate, params.plasticity);
+
+    // Periodically print emotional state
+    if (step % 10 == 0) {
+      printEmotionalState(emotional_system);
+    }
+
+    // Adjust emotional regulation based on performance
+    if (step % 20 == 0) {
+      // Increase regulation as the system learns
+      emotional_system->emotional_regulation =
+          fmin(0.9f, emotional_system->emotional_regulation + 0.01f);
+
+      // Slowly increase cognitive impact to allow more emotional influence
+      emotional_system->cognitive_impact =
+          fmin(0.5f, emotional_system->cognitive_impact + 0.005f);
+    }
 
     integrateWorkingMemory(working_memory, neurons, input_tensor,
                            target_outputs, weights, step);
