@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cstring>
 #include <ctype.h>
 #include <curl/curl.h>
 #include <errno.h>
@@ -5,6 +7,7 @@
 #include <immintrin.h>
 #include <json-c/json.h>
 #include <math.h>
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -835,7 +838,7 @@ void updateWeightsOnCPU(float *weights, const Neuron *neurons,
     int neuron_idx = id / max_connections;
     int conn_idx = id % max_connections;
 
-    if (conn_idx >= neurons[neuron_idx].num_connections)
+    if (conn_idx >= static_cast<int>(neurons[neuron_idx].num_connections))
       continue;
 
     int target_idx = connections[id];
@@ -1035,7 +1038,7 @@ MemorySystem *createMemorySystem(unsigned int capacity) {
 }
 
 void consolidateMemory(MemorySystem *system) {
-  for (int i = 0; i < system->size; i++) {
+  for (size_t i = 0; i < system->size; i++) {
     // Strengthen memories above the threshold
     if (system->entries[i].importance > CONSOLIDATION_THRESHOLD) {
       system->entries[i].importance *= STRENGTHEN_FACTOR;
@@ -1563,6 +1566,35 @@ void addMemory(
   if (system->size < system->capacity) {
     system->size++;
   }
+}
+
+namespace py = pybind11;
+
+void addMemoryWrapper(MemorySystem *system, WorkingMemorySystem *working_memory,
+                      Neuron *neurons, py::array_t<float> input_tensor,
+                      unsigned int timestamp,
+                      py::array_t<float> feature_projection_matrix) {
+
+  // Check dimensions
+  auto buf_input = input_tensor.request();
+  if (buf_input.ndim != 1)
+    throw std::runtime_error("Input tensor must be 1D");
+
+  auto buf_matrix = feature_projection_matrix.request();
+  if (buf_matrix.ndim != 2 || buf_matrix.shape[0] != FEATURE_VECTOR_SIZE ||
+      buf_matrix.shape[1] != MEMORY_VECTOR_SIZE)
+    throw std::runtime_error("Feature projection matrix must have shape "
+                             "[FEATURE_VECTOR_SIZE, MEMORY_VECTOR_SIZE]");
+
+  // Convert input tensor to float pointer
+  float *input_ptr = static_cast<float *>(buf_input.ptr);
+
+  // Convert matrix to C-style array pointer
+  float (*matrix_ptr)[MEMORY_VECTOR_SIZE] =
+      reinterpret_cast<float (*)[MEMORY_VECTOR_SIZE]>(buf_matrix.ptr);
+
+  // Call the original function
+  addMemory(system, working_memory, neurons, input_ptr, timestamp, matrix_ptr);
 }
 
 void consolidateToLongTermMemory(WorkingMemorySystem *working_memory,
@@ -2122,82 +2154,75 @@ void importPretrainedEmbeddings(const char *embedding_file) {
   if (!file) {
     fprintf(stderr, "Error: Could not open embedding file: %s\n",
             embedding_file);
-    // Fall back to random initialization if file can't be opened
     printf("Falling back to random initialization...\n");
+
     for (int i = 0; i < vocab_size; i++) {
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
-        // Initialize with Gaussian distribution (standard practice)
-        float u1 = (float)rand() / RAND_MAX;
-        float u2 = (float)rand() / RAND_MAX;
-        float z = sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
-        // Scale to be small (typical for initialization)
+        float u1 = ((float)rand() + 1.0f) / (RAND_MAX + 2.0f);
+        float u2 = (float)rand() / (RAND_MAX + 1.0f);
+        float z = sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
         embeddings[i][j] = z * 0.02f;
       }
     }
     return;
   }
+
   printf("Loading pre-trained word embeddings from %s...\n", embedding_file);
-  // Initialize vocab_found array to track which words were found in the
-  // pre-trained file
-  bool vocab_found[vocab_size];
-  memset(vocab_found, 0, vocab_size * sizeof(bool));
-  // Read header (if GloVe or Word2Vec format)
-  char line[10000]; // Buffer for reading lines (embeddings can be large)
+
+  // Allocate vocab_found safely
+  bool *vocab_found =
+      static_cast<bool *>(std::calloc(vocab_size, sizeof(bool)));
+  if (!vocab_found) {
+    fprintf(stderr, "Error: Memory allocation failed for vocab_found\n");
+    fclose(file);
+    return;
+  }
+
+  char line[10000];
   if (fgets(line, sizeof(line), file) != NULL) {
-    // Word2Vec format often starts with: <vocab_size> <embedding_dimension>
     int file_vocab_size, file_dim;
     if (sscanf(line, "%d %d", &file_vocab_size, &file_dim) == 2) {
       printf("Word2Vec format detected: %d words, %d dimensions\n",
              file_vocab_size, file_dim);
-      // If dimensions don't match, we'll need to adjust
       if (file_dim != EMBEDDING_SIZE) {
-        printf("Warning: File embedding size (%d) doesn't match system "
-               "embedding size (%d)\n",
-               file_dim, EMBEDDING_SIZE);
-        printf("Embeddings will be %s\n",
-               file_dim > EMBEDDING_SIZE ? "truncated" : "padded with zeros");
+        printf("Warning: file_dim=%d vs system_dim=%d → trunc/pad\n", file_dim,
+               EMBEDDING_SIZE);
       }
     } else {
-      // If not a header, rewind to read the first embedding
       rewind(file);
     }
   }
-  // Process each line of the embedding file
+
   int loaded_count = 0;
   while (fgets(line, sizeof(line), file) != NULL) {
     char *word = strtok(line, " \t");
     if (!word)
       continue;
-    // Find this word in our vocabulary
+
+    // Search vocabulary
     int vocab_idx = -1;
     for (int i = 0; i < vocab_size; i++) {
-      if (strcmp(word, vocabulary[i].word) == 0) {
+      if (vocabulary[i].word && strcmp(word, vocabulary[i].word) == 0) {
         vocab_idx = i;
         break;
       }
     }
-    // Skip this word if not in our vocabulary
     if (vocab_idx == -1)
       continue;
-    // Mark as found
+
     vocab_found[vocab_idx] = true;
     loaded_count++;
-    // Parse the embedding values
+
     float *current_embedding = embeddings[vocab_idx];
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       char *token = strtok(NULL, " \t\n");
-      if (token) {
-        current_embedding[j] = atof(token);
-      } else {
-        // If we run out of values, pad with zeros
-        current_embedding[j] = 0.0f;
-      }
+      current_embedding[j] = token ? (float)atof(token) : 0.0f;
     }
   }
   fclose(file);
-  printf(
-      "Successfully loaded %d/%d vocabulary words from pretrained embeddings\n",
-      loaded_count, vocab_size);
+
+  printf("Loaded %d/%d words from pretrained embeddings\n", loaded_count,
+         vocab_size);
   // For words not found in the pre-trained file, initialize with random values
   // and try to infer from similar words in our vocabulary that were found
   for (int i = 0; i < vocab_size; i++) {
@@ -2240,44 +2265,84 @@ void importPretrainedEmbeddings(const char *embedding_file) {
     }
   }
   // Apply custom modifiers for all words based on vocabulary attributes
-  for (int i = 0; i < vocab_size; i++) {
-    // Apply category-specific modifiers to certain dimensions
-    if (strcmp(vocabulary[i].category, "fruit") == 0) {
-      for (int j = 0; j < 10; j++) {
-        embeddings[i][j] += 0.2f; // Boost fruit-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "action") == 0) {
-      for (int j = 10; j < 20; j++) {
-        embeddings[i][j] += 0.2f; // Boost action-specific dimensions
-      }
-    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
-      for (int j = 20; j < 30; j++) {
-        embeddings[i][j] += 0.2f; // Boost emotion-specific dimensions
+  for (int i = 0; i < vocab_size; ++i) {
+    if (!vocabulary || !embeddings)
+      break; // sanity check
+    if (!embeddings[i])
+      continue; // skip if row not allocated
+
+    float *emb_i = embeddings[i];
+    const char *cat = vocabulary[i].category;
+
+    // helper: clip range to [0, EMBEDDING_SIZE)
+    auto clip = [&](int s, int e) -> std::pair<int, int> {
+      int ss = std::max(0, s);
+      int ee = std::min(EMBEDDING_SIZE, e);
+      if (ss >= ee)
+        return {0, 0};
+      return {ss, ee};
+    };
+
+    // ---- category boosts ----
+    if (cat) {
+      if (strcmp(cat, "fruit") == 0) {
+        auto [s, e] = clip(0, 10);
+        for (int j = s; j < e; ++j)
+          emb_i[j] += 0.2f;
+      } else if (strcmp(cat, "action") == 0) {
+        auto [s, e] = clip(10, 20);
+        for (int j = s; j < e; ++j)
+          emb_i[j] += 0.2f;
+      } else if (strcmp(cat, "emotion") == 0) {
+        auto [s, e] = clip(20, 30);
+        for (int j = s; j < e; ++j)
+          emb_i[j] += 0.2f;
       }
     }
-    // Incorporate letter-weight in specific dimensions
-    float letter_weight = vocabulary[i].letter_weight;
-    for (int j = 30; j < 40; j++) {
-      embeddings[i][j] += letter_weight * 0.1f;
+
+    // ---- letter weight → [30,40) ----
+    {
+      auto [s, e] = clip(30, 40);
+      if (s < e) {
+        float lw = vocabulary[i].letter_weight;
+        for (int j = s; j < e; ++j)
+          emb_i[j] += lw * 0.1f;
+      }
     }
-    // Incorporate semantic weight in specific dimensions
-    float semantic_weight = vocabulary[i].semantic_weight;
-    for (int j = 40; j < 50; j++) {
-      embeddings[i][j] += semantic_weight * 0.1f;
+
+    // ---- semantic weight → [40,50) ----
+    {
+      auto [s, e] = clip(40, 50);
+      if (s < e) {
+        float sw = vocabulary[i].semantic_weight;
+        for (int j = s; j < e; ++j)
+          emb_i[j] += sw * 0.1f;
+      }
     }
-    // Use connections information to modify embedding
+
+    // ---- connections: pull pairs together in [50,60) ----
     if (vocabulary[i].connects_to) {
-      // Find the connected word in vocabulary
-      for (int j = 0; j < vocab_size; j++) {
-        if (strcmp(vocabulary[i].connects_to, vocabulary[j].word) == 0) {
-          // Make connected words more similar in specific dimensions
-          for (int k = 50; k < 60; k++) {
-            float avg = (embeddings[i][k] + embeddings[j][k]) * 0.5f;
-            // Move both embeddings slightly toward each other
-            embeddings[i][k] = embeddings[i][k] * 0.8f + avg * 0.2f;
-            embeddings[j][k] = embeddings[j][k] * 0.8f + avg * 0.2f;
+      const char *conn = vocabulary[i].connects_to;
+      for (int j = 0; j < vocab_size; ++j) {
+        if (j == i)
+          continue;
+        if (!vocabulary[j].word)
+          continue;
+        if (strcmp(conn, vocabulary[j].word) == 0) {
+          if (!embeddings[j])
+            break;
+          float *emb_j = embeddings[j];
+
+          auto [s, e] = clip(50, 60);
+          if (s >= e)
+            break;
+
+          for (int k = s; k < e; ++k) {
+            float avg = (emb_i[k] + emb_j[k]) * 0.5f;
+            emb_i[k] = emb_i[k] * 0.8f + avg * 0.2f;
+            emb_j[k] = emb_j[k] * 0.8f + avg * 0.2f;
           }
-          break;
+          break; // only first matching connection (same as original)
         }
       }
     }
@@ -2296,7 +2361,7 @@ void importPretrainedEmbeddings(const char *embedding_file) {
       }
     }
   }
-  printf("Embedding initialization completed with custom modifiers applied\n");
+  printf("Embedding initialization completed with custom modifiers aplied\n");
 }
 
 void initializeSparseEmbedding(SparseEmbedding *emb, int word_idx) {
@@ -2557,52 +2622,62 @@ void initializeEmbeddings(const char *embedding_file) {
   initializeBrainInspiredEmbeddings(embedding_file);
 
   for (int i = 0; i < vocab_size; i++) {
-    if (strcmp(vocabulary[i].category, "fruit") == 0) {
-      for (int j = 0; j < 10; j++) {
+    // Ensure category string is valid
+    if (vocabulary[i].category == NULL) {
+      continue;
+    }
+
+    // Apply category-based adjustments safely
+    if (strcmp(vocabulary[i].category, "fruit") == 0 && EMBEDDING_SIZE >= 10) {
+      for (int j = 0; j < 10; j++)
         embeddings[i][j] += 0.2f;
-      }
-    } else if (strcmp(vocabulary[i].category, "action") == 0) {
-      for (int j = 10; j < 20; j++) {
+    } else if (strcmp(vocabulary[i].category, "action") == 0 &&
+               EMBEDDING_SIZE >= 20) {
+      for (int j = 10; j < 20; j++)
         embeddings[i][j] += 0.3f;
-      }
-    } else if (strcmp(vocabulary[i].category, "emotion") == 0) {
-      for (int j = 20; j < 30; j++) {
+    } else if (strcmp(vocabulary[i].category, "emotion") == 0 &&
+               EMBEDDING_SIZE >= 30) {
+      for (int j = 20; j < 30; j++)
         embeddings[i][j] += 0.5f;
-      }
-    } else if (strcmp(vocabulary[i].category, "object") == 0) {
-      for (int j = 30; j < 40; j++) {
+    } else if (strcmp(vocabulary[i].category, "object") == 0 &&
+               EMBEDDING_SIZE >= 40) {
+      for (int j = 30; j < 40; j++)
         embeddings[i][j] += 0.1f;
-      }
-    } else if (strcmp(vocabulary[i].category, "place") == 0) {
-      for (int j = 40; j < 50; j++) {
+    } else if (strcmp(vocabulary[i].category, "place") == 0 &&
+               EMBEDDING_SIZE >= 50) {
+      for (int j = 40; j < 50; j++)
         embeddings[i][j] += 0.2f;
-      }
-    } else if (strcmp(vocabulary[i].category, "time") == 0) {
-      for (int j = 50; j < 60; j++) {
+    } else if (strcmp(vocabulary[i].category, "time") == 0 &&
+               EMBEDDING_SIZE >= 60) {
+      for (int j = 50; j < 60; j++)
         embeddings[i][j] += 0.3f;
-      }
-    } else if (strcmp(vocabulary[i].category, "person") == 0) {
-      for (int j = 60; j < 70; j++) {
+    } else if (strcmp(vocabulary[i].category, "person") == 0 &&
+               EMBEDDING_SIZE >= 70) {
+      for (int j = 60; j < 70; j++)
         embeddings[i][j] += 0.4f;
-      }
     }
 
-    float letter_weight = vocabulary[i].letter_weight;
-    for (int j = 30; j < 40; j++) {
-      embeddings[i][j] += letter_weight * 0.1f;
+    // Apply letter weight safely
+    if (EMBEDDING_SIZE >= 40) {
+      float letter_weight = vocabulary[i].letter_weight;
+      for (int j = 30; j < 40; j++)
+        embeddings[i][j] += letter_weight * 0.1f;
     }
 
-    float semantic_weight = vocabulary[i].semantic_weight;
-    for (int j = 40; j < 50; j++) {
-      embeddings[i][j] += semantic_weight * 0.1f;
+    // Apply semantic weight safely
+    if (EMBEDDING_SIZE >= 50) {
+      float semantic_weight = vocabulary[i].semantic_weight;
+      for (int j = 40; j < 50; j++)
+        embeddings[i][j] += semantic_weight * 0.1f;
     }
 
+    // Normalize safely
     float norm = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       norm += embeddings[i][j] * embeddings[i][j];
     }
-    norm = sqrt(norm);
-    if (norm > 1e-8) {
+    norm = sqrtf(norm);
+    if (norm > 1e-12f) { // tighter guard
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
         embeddings[i][j] /= norm;
       }
@@ -3158,7 +3233,7 @@ void initializeWeights(float *weights, int max_neurons, int max_connections,
 void updateWeights(float *weights, Neuron *neurons, int *connections,
                    float learning_rate) {
   for (int i = 0; i < MAX_NEURONS; i++) {
-    for (int j = 0; j < neurons[i].num_connections; j++) {
+    for (size_t j = 0; j < neurons[i].num_connections; j++) {
       int target_idx = connections[i * MAX_CONNECTIONS + j];
       // Modified Hebbian learning rule with normalization
       float pre_activation = neurons[i].state;
@@ -3393,7 +3468,7 @@ void adaptNetworkDynamic(Neuron *neurons, float *weights,
                         (input_tensor[i % INPUT_SIZE] - neurons[i].state);
 
     // Update weights with dynamic adaptation
-    for (int j = 0; j < neurons[i].num_connections; j++) {
+    for (size_t j = 0; j < neurons[i].num_connections; j++) {
       int weight_idx = i * MAX_CONNECTIONS + j;
 
       // Calculate weight update with recovery term
@@ -4215,7 +4290,7 @@ void printReplayStatistics(MemorySystem *memorySystem) {
   int num_replayed = 0;
 
   // Iterate through memory entries to calculate statistics
-  for (int i = 0; i < memorySystem->size; i++) {
+  for (size_t i = 0; i < memorySystem->size; i++) {
     MemoryEntry *entry = &memorySystem->entries[i];
     if (entry->importance > 0.5f) { // Only consider important memories
       total_importance += entry->importance;
@@ -4435,13 +4510,13 @@ void computeNeuronPerformanceMetrics(Neuron *neurons, float *target_outputs,
     float weight_variation = 0.0f;
     float mean_weight = 0.0f;
 
-    for (int j = 0; j < neurons[i].num_connections; j++) {
+    for (size_t j = 0; j < neurons[i].num_connections; j++) {
       total_connection_strength += fabs(weights[i * MAX_CONNECTIONS + j]);
       mean_weight += weights[i * MAX_CONNECTIONS + j];
     }
     mean_weight /= neurons[i].num_connections;
 
-    for (int j = 0; j < neurons[i].num_connections; j++) {
+    for (size_t j = 0; j < neurons[i].num_connections; j++) {
       float weight_diff = weights[i * MAX_CONNECTIONS + j] - mean_weight;
       weight_variation += weight_diff * weight_diff;
     }
@@ -5017,7 +5092,7 @@ void applyMetaControllerAdaptations(Neuron *neurons, float *weights,
 
     // Adjust connection weights based on region importance
     for (int i = start; i < end; i++) {
-      for (int j = 0; j < neurons[i].num_connections; j++) {
+      for (size_t j = 0; j < neurons[i].num_connections; j++) {
         int connection_idx = i * MAX_CONNECTIONS + j;
         // Modulate weights non-linearly with region importance
         weights[connection_idx] *= (1 + region_importance);
@@ -5820,7 +5895,7 @@ MemoryEntry *retrieveRelevantMemory(MemorySystem *memorySystem,
   float best_similarity = -1.0f;
 
   // Compare current neuron states with memory entries
-  for (int i = 0; i < memorySystem->size; i++) {
+  for (size_t i = 0; i < memorySystem->size; i++) {
     int idx = (memorySystem->head - 1 - i + memorySystem->capacity) %
               memorySystem->capacity;
     MemoryEntry *memory = &memorySystem->entries[idx];
@@ -6502,7 +6577,8 @@ void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
   float adaptation_factor =
       system->adaptation_rate * (1.0f - pattern_consistency);
 
-  for (uint32_t i = 0; i < system->num_core_values; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_core_values);
+       i++) {
     // Map patterns to core values (simplified mapping)
     float pattern_influence = 0.0f;
     uint32_t patterns_per_value =
@@ -6510,7 +6586,7 @@ void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
 
     for (uint32_t j = 0; j < patterns_per_value; j++) {
       uint32_t pattern_idx = i * patterns_per_value + j;
-      if (pattern_idx < system->pattern_size) {
+      if (static_cast<int>(pattern_idx) < system->pattern_size) {
         pattern_influence += current_patterns[pattern_idx];
       }
     }
@@ -6525,7 +6601,8 @@ void updateCoreValues(SelfIdentitySystem *system, float *current_patterns,
 }
 
 void updateReferenceStates(SelfIdentitySystem *system, float *current_state) {
-  for (uint32_t i = 0; i < system->verification.state_size; i++) {
+  for (uint32_t i = 0;
+       i < static_cast<uint32_t>(system->verification.state_size); i++) {
     system->verification.reference_state[i] =
         (1.0f - system->adaptation_rate) *
             system->verification.reference_state[i] +
@@ -6587,7 +6664,8 @@ float computeExperienceInfluence(SelfIdentitySystem *system,
   float influence = 0.0f;
   uint32_t recent_experiences = 5; // Consider last 5 experiences
 
-  for (uint32_t i = 0; i < recent_experiences && i < system->history_size;
+  for (uint32_t i = 0; i < static_cast<uint32_t>(recent_experiences) &&
+                       i < static_cast<uint32_t>(system->history_size);
        i++) {
     influence += system->experience_history[i];
   }
@@ -6596,7 +6674,7 @@ float computeExperienceInfluence(SelfIdentitySystem *system,
 }
 
 void updateBeliefs(SelfIdentitySystem *system, MemorySystem *memory_system) {
-  for (uint32_t i = 0; i < system->num_beliefs; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_beliefs); i++) {
     float memory_influence = computeMemoryInfluence(memory_system, i);
     float experience_influence = computeExperienceInfluence(system, i);
 
@@ -6630,7 +6708,8 @@ float computeValueInfluence(SelfIdentitySystem *system, uint32_t marker_idx) {
   float influence = 0.0f;
   uint32_t related_values = 0;
 
-  for (uint32_t i = 0; i < system->num_core_values; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_core_values);
+       i++) {
     if (areValueAndMarkerRelated(i, marker_idx)) {
       influence += system->core_values[i];
       related_values++;
@@ -6645,7 +6724,7 @@ float computeBeliefInfluence(SelfIdentitySystem *system, uint32_t marker_idx) {
   float influence = 0.0f;
   uint32_t related_beliefs = 0;
 
-  for (uint32_t i = 0; i < system->num_beliefs; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_beliefs); i++) {
     if (areBeliefAndMarkerRelated(i, marker_idx)) {
       influence += system->belief_system[i];
       related_beliefs++;
@@ -6657,7 +6736,7 @@ float computeBeliefInfluence(SelfIdentitySystem *system, uint32_t marker_idx) {
 
 // Update identity markers
 void updateIdentityMarkers(SelfIdentitySystem *system) {
-  for (uint32_t i = 0; i < system->num_markers; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_markers); i++) {
     float value_influence = computeValueInfluence(system, i);
     float belief_influence = computeBeliefInfluence(system, i);
 
@@ -6781,7 +6860,7 @@ void updateIdentity(SelfIdentitySystem *system, Neuron *neurons,
       system->behavioral_patterns, current_patterns, system->pattern_size);
 
   // Update behavioral patterns with temporal smoothing
-  for (uint32_t i = 0; i < system->pattern_size; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->pattern_size); i++) {
     system->behavioral_patterns[i] =
         (1 - system->adaptation_rate) * system->behavioral_patterns[i] +
         system->adaptation_rate * current_patterns[i];
@@ -6881,7 +6960,7 @@ KnowledgeFilter *initializeKnowledgeFilter(int initial_capacity) {
       "Prediction",          "Optimization",
       "Error Correction",    "Memory Consolidation"};
 
-  for (int i = 0; i < sizeof(default_categories) / sizeof(char *); i++) {
+  for (size_t i = 0; i < sizeof(default_categories) / sizeof(char *); i++) {
     KnowledgeCategory category = {.importance = 1.0f,
                                   .confidence = 0.5f,
                                   .usage_count = 0,
@@ -6932,7 +7011,7 @@ KnowledgeCategory *categorizeInput(KnowledgeFilter *filter, float *input_vector,
   KnowledgeCategory *best_match = NULL;
   float best_similarity = threshold;
 
-  for (uint32_t i = 0; i < filter->num_categories; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(filter->num_categories); i++) {
     float similarity = computeCategorySimilarity(
         input_vector, filter->categories[i].feature_vector);
 
@@ -7120,7 +7199,7 @@ void addToMemoryLevel(MemoryCluster *level, MemoryEntry *entry) {
 }
 
 void strengthenMemory(MemorySystem *memory_system, int index) {
-  if (index >= memory_system->size) {
+  if (static_cast<int>(index) >= static_cast<int>(memory_system->size)) {
     return;
   }
 
@@ -7275,7 +7354,7 @@ void updateKnowledgeSystem(Neuron *neurons, float *input_tensor,
 }
 
 void initializeKnowledgeMetrics(KnowledgeFilter *filter) {
-  for (uint32_t i = 0; i < filter->num_categories; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(filter->num_categories); i++) {
     // Start with moderate values instead of extremes
     filter->categories[i].importance = 0.5f;
     filter->categories[i].confidence = 0.5f;
@@ -7302,7 +7381,8 @@ SecurityValidationStatus validateCriticalSecurity(const Neuron *neurons,
   for (size_t i = 0; i < max_neurons && !status.critical_violation; i++) {
     for (size_t j = 0; j < neurons[i].num_connections; j++) {
       // Out-of-bounds connection check
-      if (connections[i * max_connections + j] >= max_neurons) {
+      if (static_cast<int>(connections[i * max_connections + j]) >=
+          max_neurons) {
         status.critical_violation = true;
         status.suspect_address =
             (uint64_t)&connections[i * max_connections + j];
@@ -7458,7 +7538,7 @@ void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
   // Print violation details to stderr
   fprintf(stderr, "\nCRITICAL SECURITY VIOLATION DETECTED\n");
   fprintf(stderr, "Type: %s\n", status->violation_type);
-  fprintf(stderr, "Suspect address: 0x%llx\n", status->suspect_address);
+  fprintf(stderr, "Suspect address: 0x%lx\n", status->suspect_address);
 
   // Convert suspect address to void pointer
   void *suspect_ptr = (void *)status->suspect_address;
@@ -7495,7 +7575,7 @@ void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
   FILE *log_file = fopen("security_violations.log", "a");
   if (log_file) {
     fprintf(log_file, "Violation Type: %s\n", status->violation_type);
-    fprintf(log_file, "Suspect Address: 0x%llx\n", status->suspect_address);
+    fprintf(log_file, "Suspect Address: 0x%lx\n", status->suspect_address);
     fprintf(log_file, "Memory Protection: R:%d W:%d X:%d Size:%zu\n",
             mem_protection.is_readable, mem_protection.is_writable,
             mem_protection.is_executable, mem_protection.region_size);
@@ -7505,7 +7585,7 @@ void handleCriticalSecurityViolation(Neuron *neurons, float *weights,
 
 float computeBeliefStability(const SelfIdentitySystem *system,
                              uint32_t belief_index) {
-  if (belief_index >= system->num_beliefs) {
+  if (static_cast<int>(belief_index) >= static_cast<int>(system->num_beliefs)) {
     return 0.0f;
   }
 
@@ -7514,7 +7594,7 @@ float computeBeliefStability(const SelfIdentitySystem *system,
   float coherence_impact = 0.0f;
 
   // Check current belief against temporal coherence
-  for (uint32_t i = 0; i < system->coherence_window - 1; i++) {
+  for (int i = 0; i < system->coherence_window - 1; i++) {
     float current =
         system->temporal_coherence[i * system->num_beliefs + belief_index];
     float next =
@@ -7526,7 +7606,7 @@ float computeBeliefStability(const SelfIdentitySystem *system,
   temporal_variance /= (system->coherence_window - 1);
 
   // Calculate coherence impact
-  for (uint32_t i = 0; i < system->coherence_window; i++) {
+  for (int i = 0; i < system->coherence_window - 1; i++) {
     coherence_impact +=
         system->temporal_coherence[i * system->num_beliefs + belief_index];
   }
@@ -7535,13 +7615,14 @@ float computeBeliefStability(const SelfIdentitySystem *system,
   // Compare with reference state if available
   float reference_deviation = 0.0f;
   if (system->verification.reference_state &&
-      belief_index < system->verification.state_size) {
+      static_cast<int>(belief_index) <
+          static_cast<int>(system->verification.state_size)) {
     float ref_belief = system->verification.reference_state[belief_index];
     float current_belief = system->belief_system[belief_index];
     reference_deviation = fabsf(current_belief - ref_belief);
   }
 
-  // Compute final stability score
+  // Compute final stability scoe
   stability -= sqrtf(temporal_variance); // Reduce stability based on variance
   stability += coherence_impact * 0.3f;  // Boost stability based on coherence
   stability -= reference_deviation *
@@ -7619,7 +7700,8 @@ IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
   IdentityAnalysis analysis = {0};
 
   // Analyze core values
-  for (uint32_t i = 0; i < system->num_core_values; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_core_values);
+       i++) {
     float stability = fabsf(system->core_values[i] -
                             (system->verification.reference_state
                                  ? system->verification.reference_state[i]
@@ -7630,16 +7712,16 @@ IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
   }
 
   // Analyze beliefs
-  for (uint32_t i = 0; i < system->num_beliefs; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_beliefs); i++) {
     if (computeBeliefStability(system, i) < system->verification.threshold) {
       analysis.belief_conflicts++;
     }
   }
 
   // Analyze identity markers
-  for (uint32_t i = 0; i < system->num_markers; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->num_markers); i++) {
     float marker_variance = 0.0f;
-    for (uint32_t j = 0; j < system->coherence_window; j++) {
+    for (size_t j = 0; j < system->coherence_window; j++) {
       marker_variance +=
           fabsf(system->identity_markers[i] -
                 system->temporal_coherence[j * system->num_markers + i]);
@@ -7652,8 +7734,8 @@ IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
 
   // Calculate temporal instability
   float total_temporal_variance = 0.0f;
-  for (uint32_t i = 0; i < system->coherence_window - 1; i++) {
-    for (uint32_t j = 0; j < system->num_beliefs; j++) {
+  for (size_t i = 0; i < system->coherence_window - 1; i++) {
+    for (uint32_t j = 0; j < static_cast<uint32_t>(system->num_beliefs); j++) {
       float diff =
           system->temporal_coherence[i * system->num_beliefs + j] -
           system->temporal_coherence[(i + 1) * system->num_beliefs + j];
@@ -7671,7 +7753,7 @@ IdentityAnalysis analyzeIdentitySystem(const SelfIdentitySystem *system) {
 
   // Calculate pattern deviation
   float pattern_diff = 0.0f;
-  for (uint32_t i = 0; i < system->pattern_size; i++) {
+  for (uint32_t i = 0; i < static_cast<uint32_t>(system->pattern_size); i++) {
     // Check if either of the values is NaN
     if (isnan(system->behavioral_patterns[i]) ||
         isnan(system->verification.reference_state
@@ -7825,7 +7907,7 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
     int replace_idx = 0;
     float min_importance = memorySystem->entries[0].importance;
 
-    for (int i = 1; i < memorySystem->size; i++) {
+    for (size_t i = 1; i < memorySystem->size; i++) {
       if (memorySystem->entries[i].importance < min_importance) {
         min_importance = memorySystem->entries[i].importance;
         replace_idx = i;
@@ -7851,7 +7933,7 @@ void storeQuestionAndAnswer(MemorySystem *memorySystem, const char *question,
       float st_min_importance =
           memorySystem->hierarchy.short_term.entries[0].importance;
 
-      for (int i = 1; i < memorySystem->hierarchy.short_term.size; i++) {
+      for (size_t i = 1; i < memorySystem->hierarchy.short_term.size; i++) {
         if (memorySystem->hierarchy.short_term.entries[i].importance <
             st_min_importance) {
           st_min_importance =
@@ -8232,7 +8314,8 @@ void getEmotionName(int emotion_id, char *name) {
   static const char *emotion_names[] = {"love", "hate", "joy", "fear"};
 
   if (emotion_id >= 0 && emotion_id < MAX_EMOTION_TYPES &&
-      emotion_id < sizeof(emotion_names) / sizeof(emotion_names[0])) {
+      static_cast<size_t>(emotion_id) <
+          sizeof(emotion_names) / sizeof(emotion_names[0])) {
     strcpy(name, emotion_names[emotion_id]);
   } else {
     strcpy(name, "unknown");
@@ -8275,10 +8358,11 @@ void askQuestion(
     char answerBuffer[256] = "";
 
     if (symbol_id == 0) {
-      if (filter->num_categories > 0) {
+      for (uint32_t i = 1; i < static_cast<uint32_t>(filter->num_categories);
+           i++) {
         // Find the last accessed category
         KnowledgeCategory *last_category = &filter->categories[0];
-        for (uint32_t i = 1; i < filter->num_categories; i++) {
+        for (int i = 1; i < filter->num_categories; i++) {
           if (filter->categories[i].last_accessed >
               last_category->last_accessed) {
             last_category = &filter->categories[i];
@@ -8602,7 +8686,7 @@ void expandMemoryCapacity(MemorySystem *memorySystem) {
   }
 
   // Copy existing entries to the new memory
-  for (int i = 0; i < memorySystem->size; i++) {
+  for (size_t i = 0; i < memorySystem->size; i++) {
     new_entries[i] =
         memorySystem
             ->entries[(memorySystem->head + i) % memorySystem->capacity];
@@ -11057,7 +11141,7 @@ void detectSpecializations(NeuronSpecializationSystem *system, Neuron *neurons,
     // Skip neurons that are already specialized
     bool already_specialized = false;
     for (unsigned int j = 0; j < system->count; j++) {
-      if (system->neurons[j].neuron_id == i) {
+      if (system->neurons[j].neuron_id == static_cast<unsigned int>(i)) {
         already_specialized = true;
 
         // Update activation history
@@ -11249,7 +11333,7 @@ void detectSpecializations(NeuronSpecializationSystem *system, Neuron *neurons,
         }
 
         // Count each specialization type
-        for (int j = 0; j < system->count; j++) {
+        for (size_t j = 0; j < static_cast<size_t>(system->count); j++) {
           system->type_distribution[system->neurons[j].type] += 1.0f;
         }
 
@@ -11271,7 +11355,8 @@ void applySpecializations(NeuronSpecializationSystem *system, Neuron *neurons,
   // Apply effects based on specialization type
   for (unsigned int i = 0; i < system->count; i++) {
     unsigned int neuron_id = system->neurons[i].neuron_id;
-    if (neuron_id >= max_neurons)
+    if (static_cast<unsigned int>(neuron_id) >=
+        static_cast<unsigned int>(max_neurons))
       continue;
 
     float boost_factor = system->neurons[i].specialization_score *
@@ -11298,8 +11383,9 @@ void applySpecializations(NeuronSpecializationSystem *system, Neuron *neurons,
 
     case SPEC_CONTEXT_INTEGRATOR:
       // Enhance context integration by increasing connection influence
-      for (unsigned int j = 0;
-           j < neurons[neuron_id].num_connections && j < max_connections; j++) {
+      for (unsigned int j = 0; j < neurons[neuron_id].num_connections &&
+                               static_cast<int>(j) < max_connections;
+           j++) {
         int connection_idx = neuron_id * max_connections + j;
         int target = connections[connection_idx];
         weights[connection_idx] *= (1.0f + 0.1f * boost_factor);
@@ -13062,6 +13148,10 @@ PYBIND11_MODULE(neural_web, m) {
   memory.def("freeMemorySystem", &freeMemorySystem);
   memory.def("checkMemoryCluster", &checkMemoryCluster);
   memory.def("validateMemoryRegionDetailed", &validateMemoryRegionDetailed);
+  memory.def("addMemory", &addMemoryWrapper, py::arg("system"),
+             py::arg("working_memory"), py::arg("neurons"),
+             py::arg("input_tensor"), py::arg("timestamp"),
+             py::arg("feature_projection_matrix"));
 
   // Neural Network
   auto nn = m.def_submodule("neural", "Neural Network Functions");
