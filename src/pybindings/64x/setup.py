@@ -4,12 +4,12 @@ import pybind11
 ext_modules = [
     Extension(
         'neural_web',
-        sources=['neural_web.cpp'],  # Replace with the path to your C++ source file
+        sources=['neural_web.cpp'],  
         include_dirs=[
             pybind11.get_include()
         ],
         language='c++',
-        extra_compile_args=['-std=c++11'],  # Specify any additional compile arguments
+        extra_compile_args=['-std=c++17'],  
     ),
 ]
 
