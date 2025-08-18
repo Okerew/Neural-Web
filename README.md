@@ -190,14 +190,18 @@ clang -dynamiclib -framework Metal -framework Foundation \
 For cpu 86/64 unix version
 
 ```sh
-# Build executable
-clang -o neural_web64 neural_web64.c \
+# Build executable from C++17 source
+clang++ -std=c++17 -O2 -Wall -Wextra \
+  -o neural_web64 neural_web.cpp \
   -I/usr/include \
   -ljson-c -lcurl -lm
 
-# Build static library
-clang -c neural_web64.c -o neural_web64.o
-ar rcs libneural_web64.a neural_web64.o
+# Build object file (for library usage)
+clang++ -std=c++17 -O2 -Wall -Wextra \
+  -c neural_web.cpp -o neural_web64.o
+
+# Create static library
+ar rcs libneural_web.a neural_web64.o
 ```
 
 #### Cuda version 64/86
