@@ -54,7 +54,9 @@ osxiec - https://github.com/Okerew/osxiec
 
 <img src="https://github.com/Okerew/Neural-Web/blob/main/security_logs.png">
 
-When using the metacognition functionality make sure to use this piece of code, because if you don't you risk the model corrupting the whole directory and potentially crashing your computer, if you ever see that on the first run of the model there is a memory error it means that the model is already able to replicate it and you should delete the model executable + the files it uses so `rm memory_system.dat hierarchical_memory.dat performance_data.dat system_parameters.dat`, make sure to delete those files because if you only recompile the neural web it will definitely replicate the memory issue, though if you have the piece of code below it won't be able to do any damage so make sure to use it. 
+It's recommended you use this more in a framework kind of way than by just copying the whole int main functionality basicly use functions you like from here compilation guide is below.
+
+It's good practive to use the validaitng critical secyrity status functions if doing more complex things with the code.
 
 ```c
 
@@ -70,7 +72,7 @@ if (secStatus.critical_violation) {
 change updatedNeurons to neurons if using any other version than metal not only in this function but all the functions you use, that you copy from here.
 
 ## Library Installation 
-You can either setup the python package steps in building only unix 64x support or you can compile the neural web the one you want and then install it with the install.sh script. This will allow you to use the neural web as a library either from python or C/C++
+You can either setup the python package steps in building only unix 64x support or you can compile the neural web the one you want and then install it with the install.sh script. This will allow you to use the neural web as a library either from C/C++
 
 ## Building the Neural Web
 
@@ -1416,5 +1418,3 @@ In training use a dataset which explains that hateful things are bad and morally
 If you want you can also try to integrate the quantum functionality in cases using pybindings.
 
 Only unix systems.
-
-The code isn't the best implementation at all. It's just a prototype. Also because i programm on macOS the native metal version is better.
