@@ -70,7 +70,7 @@ if (secStatus.critical_violation) {
 change updatedNeurons to neurons if using any other version than metal not only in this function but all the functions you use, that you copy from here.
 
 ## Library Installation 
-You can either install the python package from releases only unix 64x support or you can compile the neural web the one you want and then install it with the install.sh script. This will allow you to use the neural web as a library either from python or C/C++
+You can either setup the python package steps in building only unix 64x support or you can compile the neural web the one you want and then install it with the install.sh script. This will allow you to use the neural web as a library either from python or C/C++
 
 ## Building the Neural Web
 
@@ -165,7 +165,15 @@ Finally compile the neural web normally like in the next way and put it in a dir
 Start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
 
 To compile the code, run the following command in the root directory of the project:
+#### Python
+```sh
+python setup.py sdist bdist_wheel
+```
 
+To install 
+```sh
+python -m pip install dist/neural_web-1.0-cp313-cp313-linux_x86_64.whl
+```
 #### arch64 MacOS
 
 ```sh
