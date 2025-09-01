@@ -20,7 +20,7 @@ if [[ "$OS" == "Darwin" ]]; then
     mkdir -p "$LIB_DIR" "$INCLUDE_DIR"
 
     # Metal build
-    METAL_LIB="libneural_web.dylib"
+    METAL_LIB="MacOS/libneural_web.dylib"
 
     cp "$METAL_LIB" "$LIB_DIR/"
     ln -sf "$LIB_DIR/$METAL_LIB" "/usr/local/lib/$METAL_LIB"
@@ -48,14 +48,13 @@ elif [[ "$OS" == "Linux" ]]; then
     done
 
     # C build
-    C_LIB="libneural_web64.a"
+    C_LIB="64\86/cpu/libneural_web64.a"
     cp "$C_LIB" /usr/local/lib/
 
     # CUDA build: only if nvcc exists
     if command -v nvcc >/dev/null 2>&1; then
         echo "CUDA detected: installing CUDA build"
-        CUDA_EXE="neural_web_cu"
-        CUDA_LIB="libneural_web_cu.a"
+        CUDA_LIB="64/86/cuda/libneural_web_cu.a"
         cp "$CUDA_LIB" /usr/local/lib/
     else
         echo "CUDA not found: skipping CUDA build installation"
