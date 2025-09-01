@@ -48,13 +48,13 @@ elif [[ "$OS" == "Linux" ]]; then
     done
 
     # C build
-    C_LIB="64\86/cpu/libneural_web64.a"
+    C_LIB="64\86/CPU/libneural_web64.a"
     cp "$C_LIB" /usr/local/lib/
 
     # CUDA build: only if nvcc exists
     if command -v nvcc >/dev/null 2>&1; then
         echo "CUDA detected: installing CUDA build"
-        CUDA_LIB="64/86/cuda/libneural_web_cu.a"
+        CUDA_LIB="64/86/CUDA/libneural_web_cu.a"
         cp "$CUDA_LIB" /usr/local/lib/
     else
         echo "CUDA not found: skipping CUDA build installation"
