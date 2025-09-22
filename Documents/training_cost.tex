@@ -1,0 +1,94 @@
+\documentclass{article}
+\usepackage{amsmath, amssymb, booktabs}
+
+\title{Training Cost Model for Neural Web}
+\author{Witold Warchoł}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Overview}
+This document provides a symbolic formula for estimating the training cost of the custom brain-inspired neural network architecture. The model integrates neuron updates, hierarchical memory, meta-cognition, imagination, social/emotional layers, and validation overhead.
+
+\section{Training Cost Formula}
+The effective training time is given by:
+
+\begin{equation}
+T_{\text{train}} \;=\; 
+\kappa \cdot \frac{D \cdot E \cdot C_{\text{step}}}{H}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $D$ = dataset size (number of samples)
+    \item $E$ = number of epochs
+    \item $C_{\text{step}}$ = compute cost per training step (operations)
+    \item $H$ = effective hardware throughput (FLOPs/s)
+    \item $\kappa$ = inefficiency multiplier due to kernel optimization and system overhead
+\end{itemize}
+
+\section{Step Cost Expansion}
+The per-step compute cost can be decomposed as:
+
+\begin{align}
+C_{\text{step}} &\approx N \cdot C_{\text{neuron}} \nonumber \\
+&\quad + M \cdot C_{\text{mem}} \nonumber \\
+&\quad + S \cdot (N \cdot C_{\text{neuron}}) \nonumber \\
+&\quad + F \cdot (C_{\text{meta}} + C_{\text{identity}} + C_{\text{emotion}} + C_{\text{social}}) \\
+C_{\text{step,eff}} &= V \cdot C_{\text{step}}
+\end{align}
+
+where:
+\begin{itemize}
+    \item $N$ = total neuron count (proportional to parameter count, e.g. $3 \times 10^8$)
+    \item $C_{\text{neuron}}$ = operations per neuron update (typically $\sim 20$)
+    \item $M$ = number of active memory vectors
+    \item $C_{\text{mem}}$ = operations per memory update (50–200)
+    \item $S$ = number of imagination scenarios simulated per step
+    \item $F$ = frequency of meta/identity/emotion updates per input
+    \item $V$ = validation overhead factor ($1.05$–$1.2$)
+\end{itemize}
+
+\section{Example Calculation}
+For a network with:
+\begin{itemize}
+    \item $N = 3 \times 10^8$
+    \item $M = 10^5$
+    \item $C_{\text{neuron}} = 20$
+    \item $C_{\text{mem}} = 100$
+    \item $S = 3$, $F = 0.2$, $V = 1.1$
+    \item $D = 10^6$ samples, $E = 3$
+\end{itemize}
+
+we obtain:
+
+\begin{align}
+C_{\text{step}} &\approx (3 \times 10^8)(20) + (10^5)(100) + 3(3 \times 10^8)(20) \\
+&\approx 2.4 \times 10^{10} \;\text{ops}
+\end{align}
+
+Total training compute:
+
+\begin{equation}
+C_{\text{train}} = D \cdot E \cdot C_{\text{step}} \approx 7.2 \times 10^{16} \;\text{ops}
+\end{equation}
+
+On an RTX 3060 ($H \approx 1.3 \times 10^{13}$ FLOPs/s):
+
+\begin{equation}
+T_{\text{train}} \approx \kappa \cdot \frac{7.2 \times 10^{16}}{1.3 \times 10^{13}} 
+\approx \kappa \cdot 5.5 \times 10^3 \;\text{seconds}
+\end{equation}
+
+With $\kappa = 5$, this gives roughly $7.5$ hours.
+
+\section{Interpretation}
+\begin{itemize}
+    \item Consumer GPUs (RTX 3060–3090) yield training times in the \textbf{hours} range.
+    \item High-end GPUs (RTX 4090, A100) can reduce training to \textbf{tens of minutes}.
+    \item Inefficiency factor $\kappa$ depends strongly on kernel design and memory locality.
+\end{itemize}
+
+\end{document}
