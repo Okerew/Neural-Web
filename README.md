@@ -46,6 +46,8 @@ If on windows use wsl i have removed the windows version as I don't think it was
 
 Optional:
 
+golang for the converter
+
 docker
 
 osxiec - https://github.com/Okerew/osxiec
@@ -1407,7 +1409,7 @@ neuron update shader and the code must be in the same directory.
 
 To modify number of neurons change MAX_NEURONS
 
-Only for unix type and windows systems
+You can use vocabulary the converter assuming this json structure {"WORD": {"MEANINGS": [[...]], "ANTONYMS": [...], "SYNONYMS": [...]}} it will then output the correct structure for the neural web to read.
 
 Remember to use the security feature
 
