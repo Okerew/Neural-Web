@@ -9398,7 +9398,21 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb,
   return real_size;
 }
 
-// Parse JSON response from DuckDuckGo
+static void add_result_dynamic(char ***titles, char ***snippets, char ***urls,
+                               int *used, int *capacity, const char *title,
+                               const char *snippet, const char *url) {
+  if (*used >= *capacity) {
+    *capacity *= 2;
+    *titles = realloc(*titles, (*capacity) * sizeof(char *));
+    *snippets = realloc(*snippets, (*capacity) * sizeof(char *));
+    *urls = realloc(*urls, (*capacity) * sizeof(char *));
+  }
+  (*titles)[*used] = strdup(title ? title : "");
+  (*snippets)[*used] = strdup(snippet ? snippet : "");
+  (*urls)[*used] = strdup(url ? url : "");
+  (*used)++;
+}
+
 SearchResults *parseSearchResults(const char *json_data) {
   struct json_object *root = json_tokener_parse(json_data);
   SearchResults *results = NULL;
@@ -9415,50 +9429,92 @@ SearchResults *parseSearchResults(const char *json_data) {
     return NULL;
   }
 
-  // Initialize with zero values
   results->titles = NULL;
   results->snippets = NULL;
   results->urls = NULL;
   results->count = 0;
 
-  // Extract "RelatedTopics" array from the response
+  // dynamic storage
+  int capacity = 16;
+  int used = 0;
+  char **titles = malloc(capacity * sizeof(char *));
+  char **snippets = malloc(capacity * sizeof(char *));
+  char **urls = malloc(capacity * sizeof(char *));
+
+  struct json_object *abstract_text, *abstract_url;
+  if (json_object_object_get_ex(root, "AbstractText", &abstract_text) &&
+      strlen(json_object_get_string(abstract_text)) > 0) {
+
+    const char *snippet = json_object_get_string(abstract_text);
+    const char *url = "";
+    if (json_object_object_get_ex(root, "AbstractURL", &abstract_url)) {
+      url = json_object_get_string(abstract_url);
+    }
+    add_result_dynamic(&titles, &snippets, &urls, &used, &capacity, "Abstract",
+                       snippet, url);
+  }
+
+  struct json_object *results_array;
+  if (json_object_object_get_ex(root, "Results", &results_array)) {
+    int r_count = json_object_array_length(results_array);
+    for (int i = 0; i < r_count; i++) {
+      struct json_object *item = json_object_array_get_idx(results_array, i);
+      struct json_object *text, *url;
+
+      const char *snippet = "";
+      const char *link = "";
+      const char *title = "Result";
+
+      if (json_object_object_get_ex(item, "Text", &text)) {
+        snippet = json_object_get_string(text);
+        // crude title = first 50 chars of snippet
+        static char tmp_title[64];
+        snprintf(tmp_title, sizeof(tmp_title), "%.50s", snippet);
+        title = tmp_title;
+      }
+
+      if (json_object_object_get_ex(item, "FirstURL", &url)) {
+        link = json_object_get_string(url);
+      }
+
+      add_result_dynamic(&titles, &snippets, &urls, &used, &capacity, title,
+                         snippet, link);
+    }
+  }
+
   struct json_object *related_topics;
   if (json_object_object_get_ex(root, "RelatedTopics", &related_topics)) {
     int topics_count = json_object_array_length(related_topics);
-
-    results->titles = (char **)malloc(topics_count * sizeof(char *));
-    results->snippets = (char **)malloc(topics_count * sizeof(char *));
-    results->urls = (char **)malloc(topics_count * sizeof(char *));
-
-    if (!results->titles || !results->snippets || !results->urls) {
-      fprintf(stderr, "Failed to allocate memory for search result arrays\n");
-      freeSearchResults(results);
-      json_object_put(root);
-      return NULL;
-    }
-
-    results->count = topics_count;
-
     for (int i = 0; i < topics_count; i++) {
       struct json_object *topic = json_object_array_get_idx(related_topics, i);
-      struct json_object *text, *url, *first_url;
+      struct json_object *text, *url;
+
+      const char *snippet = "";
+      const char *link = "";
+      const char *title = "Topic";
 
       if (json_object_object_get_ex(topic, "Text", &text)) {
-        results->snippets[i] = strdup(json_object_get_string(text));
-        results->titles[i] = strdup(json_object_get_string(
-            text)); // Use same for title if no separate title
-      } else {
-        results->snippets[i] = strdup("");
-        results->titles[i] = strdup("");
+        snippet = json_object_get_string(text);
+        // use snippet start as title
+        static char tmp_title[64];
+        snprintf(tmp_title, sizeof(tmp_title), "%.50s", snippet);
+        title = tmp_title;
       }
 
-      if (json_object_object_get_ex(topic, "FirstURL", &first_url)) {
-        results->urls[i] = strdup(json_object_get_string(first_url));
-      } else {
-        results->urls[i] = strdup("");
+      if (json_object_object_get_ex(topic, "FirstURL", &url)) {
+        link = json_object_get_string(url);
       }
+
+      add_result_dynamic(&titles, &snippets, &urls, &used, &capacity, title,
+                         snippet, link);
     }
   }
+
+  // finalize
+  results->titles = titles;
+  results->snippets = snippets;
+  results->urls = urls;
+  results->count = used;
 
   json_object_put(root);
   return results;
@@ -9592,54 +9648,31 @@ void storeSearchResultsInMemory(MemorySystem *memorySystem,
   }
 }
 
-// Function to generate a search query from neuron states
 char *generateSearchQuery(const Neuron *neurons, int max_neurons) {
-  char *query = (char *)malloc(1024 * sizeof(char));
+  char *query = (char *)malloc(1024);
   if (!query) {
     fprintf(stderr, "Failed to allocate memory for search query\n");
     return NULL;
   }
-
   memset(query, 0, 1024);
 
-  // Find neurons with highest activation
-  float threshold = 0.7f;
+  // Collect keywords from neuron activations
+  float threshold = 0.75f;
   int chars_added = 0;
-  int i;
 
-  // First look for consecutive activated neurons
-  for (i = 0; i < max_neurons - 3 && chars_added < 1000; i++) {
-    if (neurons[i].output > threshold && neurons[i + 1].output > threshold &&
-        neurons[i + 2].output > threshold) {
-
-      // Add word-like pattern based on consecutive activations
-      char word[10];
-      snprintf(word, sizeof(word), "%c%c%c ",
-               (char)(97 + (int)(neurons[i].output * 25)),
-               (char)(97 + (int)(neurons[i + 1].output * 25)),
-               (char)(97 + (int)(neurons[i + 2].output * 25)));
-
+  for (int i = 0; i < max_neurons && chars_added < 900; i++) {
+    if (neurons[i].output > threshold) {
+      char word[12];
+      snprintf(word, sizeof(word), "word%c ",
+               'a' + (int)(neurons[i].output * 25));
       strcat(query, word);
       chars_added += strlen(word);
-      i += 2; // Skip the neurons we just used
     }
   }
 
-  // If we didn't get enough characters, add individual activations
-  if (chars_added < 5) {
-    for (i = 0; i < max_neurons && chars_added < 1000; i++) {
-      if (neurons[i].output > 0.8f) {
-        char c = (char)(97 + (int)(neurons[i].output * 25));
-        query[chars_added++] = c;
-        query[chars_added] = '\0';
-      }
-    }
-  }
-
-  // If still not enough, add some default keywords based on neurons with
-  // highest output
-  if (chars_added < 3) {
-    strcpy(query, "neural network artificial intelligence");
+  // If not enough, seed with defaults
+  if (chars_added < 10) {
+    strcpy(query, "artificial intelligence neural network research");
   }
 
   return query;
