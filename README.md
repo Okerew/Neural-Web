@@ -78,13 +78,13 @@ You can either setup the python package steps in building only unix 64x support 
 
 ## Building the Neural Web
 
-### Recommended way (build with docker or pull from docker hub only neural web 64 cpu version though)
+### Recommended way (build with docker or pull from docker hub)
 
 Find the correct version you want to build by downloading the whole repo `git clone https://github.com/Okerew/Neural-Web.git` and navigating to the correct version you want to build.
 
 #### Firstly
 
-If you seriosly want to do it like I did start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
+If you seriosly want to do it like I did start by firstly generating embeddings with train_embedding main file which you can compile like this `go build`, then run with `./main` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
 
 #### Than to build do
 
@@ -98,75 +98,10 @@ docker build -t neural_web .
 docker run --rm -it neural_web
 ```
 
-#### You can also pull the neural web 64 cpu version with this
-
-```sh
-docker pull okerew/neural_web64
-```
-
-### Alternative recommended way for only macOS arm64 or 64/86 (with osxiec)
-
-Find the correct version you want to build by downloading the whole repo `git clone https://github.com/Okerew/Neural-Web.git` and navigating to the correct version you want to build. Also git clone osxiec `git clone https://github.com/Okerew/osxiec.git`
-
-#### Firstly
-Start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
-
-#### Then make sure to compile osxiec with static linking
-```cmake
-cmake_minimum_required(VERSION 3.27)
-project(osxiec C)
-
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_EXE_LINKER_FLAGS "-static")  # Force static linking
-
-# Add executable
-add_executable(osxiec
-        osxiec.c
-        plugin_manager/plugin.h
-        plugin_manager/plugin_manager.h
-        plugin_manager/plugin_manager.c
-        osxiec_script/osxiec_script.h
-        osxiec_script/osxiec_script.c
-        api_for_osxiec_script.h
-)
-
-# Find and link CURL (static)
-find_package(CURL REQUIRED)
-target_link_libraries(osxiec PRIVATE -Wl,-Bstatic CURL::libcurl -Wl,-Bdynamic)
-
-# Find and link Readline (static)
-include_directories(/opt/homebrew/opt/readline/include)
-target_link_directories(osxiec PRIVATE /opt/homebrew/opt/readline/lib)
-target_link_libraries(osxiec PRIVATE -Wl,-Bstatic readline -Wl,-Bdynamic)
-
-# Find and link json-c (static)
-include_directories(/opt/homebrew/Cellar/json-c/0.17/include)
-target_link_directories(osxiec PRIVATE /opt/homebrew/Cellar/json-c/0.17/lib)
-target_link_libraries(osxiec PRIVATE -Wl,-Bstatic json-c -Wl,-Bdynamic)
-
-# Statically link the standard C library (optional, might cause issues on macOS)
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
-
-# Ensure dependencies are found and linked statically
-set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-set(BUILD_SHARED_LIBS OFF)
-```
-
-#### Then to compile osxiec do these commands
-```sh
-mkidr build
-cd build
-cmake -S .. -B . -G "Ninja"
-ninja
-```
-
-#### Finally
-Finally compile the neural web normally like in the next way and put it in a directory then do `sudo osxiec -contain {directory_path} {some_name}.bin {path_to_config_file_in_directory_path} {container_config_file}` and to run it do `sudo osxiec -oexec {bin_file_path}`
-
 ### Compilation
 
 #### Firstly
-Start by firstly generating embeddings with train_embedding.c file which you can compile like this `clang -o train_embeddings train_embeddings.c`, then run with `./train_embeddings` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
+Start by firstly generating embeddings with train_embeddings main file which you can compile like this `go build`, then run with `./main` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
 
 To compile the code, run the following command in the root directory of the project:
 #### Python
