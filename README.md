@@ -1339,8 +1339,7 @@ Note if you modify max_neurons in the example you have to also modify the input_
 
 The model uses reverse pathways and generally doesn't only do patterns good because it also reverses its outputs and finds more meaning in it and additional pathways to achieve what it is supposed to similar to how humans do, or as how I think humans do, is very dynamic and has meta cognition capabilities.
 
-You can also see Documents/an_idea_of_a_neural_web.pdf file for more information about the reasoning behind the model's structure, mathematics, and the like.
-neuron update shader and the code must be in the same directory.
+See Documents folder for more information on the neural web.
 
 To modify number of neurons change MAX_NEURONS
 
