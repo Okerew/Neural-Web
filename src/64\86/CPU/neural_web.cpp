@@ -184,14 +184,65 @@ typedef struct {
   float importance_score;  // Overall significance in network
 } NeuronPerformanceMetric;
 
-typedef struct {
-  char word[50];
-  char category[50];
-  char *connects_to;
+struct VocabularyEntry {
+  char word[64];
+  char category[32];
   float semantic_weight;
-  const char *description;
+  char *connects_to;
+  char *description;
   float letter_weight;
-} VocabularyEntry;
+
+  VocabularyEntry()
+      : semantic_weight(1.0f), connects_to(nullptr), description(nullptr),
+        letter_weight(1.0f) {
+    word[0] = '\0';
+    category[0] = '\0';
+  }
+
+  ~VocabularyEntry() {
+    if (connects_to) {
+      free(connects_to);
+      connects_to = nullptr;
+    }
+    if (description) {
+      free(description);
+      description = nullptr;
+    }
+  }
+
+  VocabularyEntry(const VocabularyEntry &other)
+      : semantic_weight(other.semantic_weight),
+        letter_weight(other.letter_weight) {
+    strncpy(word, other.word, sizeof(word) - 1);
+    word[sizeof(word) - 1] = '\0';
+    strncpy(category, other.category, sizeof(category) - 1);
+    category[sizeof(category) - 1] = '\0';
+
+    connects_to = other.connects_to ? strdup(other.connects_to) : nullptr;
+    description = other.description ? strdup(other.description) : nullptr;
+  }
+
+  VocabularyEntry &operator=(const VocabularyEntry &other) {
+    if (this != &other) {
+      if (connects_to)
+        free(connects_to);
+      if (description)
+        free(description);
+
+      strncpy(word, other.word, sizeof(word) - 1);
+      word[sizeof(word) - 1] = '\0';
+      strncpy(category, other.category, sizeof(category) - 1);
+      category[sizeof(category) - 1] = '\0';
+
+      semantic_weight = other.semantic_weight;
+      letter_weight = other.letter_weight;
+
+      connects_to = other.connects_to ? strdup(other.connects_to) : nullptr;
+      description = other.description ? strdup(other.description) : nullptr;
+    }
+    return *this;
+  }
+};
 
 typedef struct {
   float prediction_weight;
@@ -1794,7 +1845,9 @@ void initializeNeurons(Neuron *neurons, int *connections, float *weights,
   }
 }
 
-VocabularyEntry vocabulary[VOCAB_SIZE];
+extern VocabularyEntry vocabulary[VOCAB_SIZE];
+
+int safe_vocab_size = 0;
 
 int loadVocabularyFromFile(const char *filename) {
   FILE *file = fopen(filename, "r");
@@ -1803,78 +1856,127 @@ int loadVocabularyFromFile(const char *filename) {
     return -1;
   }
 
-  // Count the number of lines (entries) in the file
   int entryCount = 0;
   char buffer[500];
 
   while (fgets(buffer, sizeof(buffer), file) != NULL) {
-    // Skip comments and empty lines
     if (buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
       continue;
     }
     entryCount++;
   }
 
-  // Reset file position to beginning
+  if (entryCount > VOCAB_SIZE) {
+    fprintf(stderr,
+            "Warning: File has %d entries but VOCAB_SIZE "
+            "is %d. Truncating.\n",
+            entryCount, VOCAB_SIZE);
+    entryCount = VOCAB_SIZE;
+  }
+
+  if (entryCount == 0) {
+    fprintf(stderr, "Error: No valid entries found in file\n");
+    fclose(file);
+    return -1;
+  }
+
   rewind(file);
 
-  // Parse each line and fill the vocabulary entries
   int index = 0;
+  int line_number = 0;
+
   while (fgets(buffer, sizeof(buffer), file) != NULL && index < entryCount) {
-    // Skip comments and empty lines
+    line_number++;
+
     if (buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
       continue;
     }
 
-    // Remove newline character
     buffer[strcspn(buffer, "\n")] = 0;
+    buffer[strcspn(buffer, "\r")] = 0;
 
-    // Format expected:
-    // word,category,semantic_weight,connects_to,description,letter_weight
-    char *token = strtok(buffer, ",");
-    if (!token)
-      continue;
-    strncpy(vocabulary[index].word, token, sizeof(vocabulary[index].word) - 1);
+    std::vector<std::string> tokens;
+    char *saveptr = nullptr;
+    char *token = strtok_r(buffer, ",", &saveptr);
 
-    token = strtok(NULL, ",");
-    if (!token)
-      continue;
-    strncpy(vocabulary[index].category, token,
-            sizeof(vocabulary[index].category) - 1);
+    while (token != nullptr) {
+      while (*token == ' ' || *token == '\t')
+        token++;
 
-    token = strtok(NULL, ",");
-    if (!token)
-      continue;
-    vocabulary[index].semantic_weight = atof(token);
+      char *end = token + strlen(token) - 1;
+      while (end > token && (*end == ' ' || *end == '\t')) {
+        *end = '\0';
+        end--;
+      }
 
-    token = strtok(NULL, ",");
-    if (!token || strcmp(token, "NULL") == 0 || strcmp(token, "null") == 0) {
-      vocabulary[index].connects_to = NULL;
-    } else {
-      vocabulary[index].connects_to = strdup(token);
+      tokens.push_back(std::string(token));
+      token = strtok_r(nullptr, ",", &saveptr);
     }
 
-    token = strtok(NULL, ",");
-    if (!token) {
-      vocabulary[index].description = NULL;
-    } else {
-      vocabulary[index].description = strdup(token);
+    if (tokens.empty() || tokens[0].empty()) {
+      fprintf(stderr, "Warning: Skipping malformed line %d\n", line_number);
+      continue;
     }
 
-    token = strtok(NULL, ",");
-    if (!token) {
-      vocabulary[index].letter_weight = 1.0f; // Default value
+    strncpy(vocabulary[index].word, tokens[0].c_str(),
+            sizeof(vocabulary[index].word) - 1);
+    vocabulary[index].word[sizeof(vocabulary[index].word) - 1] = '\0';
+
+    if (tokens.size() > 1 && !tokens[1].empty()) {
+      strncpy(vocabulary[index].category, tokens[1].c_str(),
+              sizeof(vocabulary[index].category) - 1);
+      vocabulary[index].category[sizeof(vocabulary[index].category) - 1] = '\0';
     } else {
-      vocabulary[index].letter_weight = atof(token);
+      strcpy(vocabulary[index].category, "unknown");
     }
+
+    vocabulary[index].semantic_weight =
+        (tokens.size() > 2 && !tokens[2].empty())
+            ? static_cast<float>(atof(tokens[2].c_str()))
+            : 1.0f;
+
+    if (tokens.size() > 3 && !tokens[3].empty() && tokens[3] != "NULL" &&
+        tokens[3] != "null") {
+      vocabulary[index].connects_to = strdup(tokens[3].c_str());
+      if (!vocabulary[index].connects_to) {
+        fprintf(stderr,
+                "Warning: Memory allocation failed for "
+                "connects_to at line %d\n",
+                line_number);
+        vocabulary[index].connects_to = nullptr;
+      }
+    } else {
+      vocabulary[index].connects_to = nullptr;
+    }
+
+    if (tokens.size() > 4 && !tokens[4].empty()) {
+      vocabulary[index].description = strdup(tokens[4].c_str());
+      if (!vocabulary[index].description) {
+        fprintf(stderr,
+                "Warning: Memory allocation failed for "
+                "description at line %d\n",
+                line_number);
+        vocabulary[index].description = nullptr;
+      }
+    } else {
+      vocabulary[index].description = nullptr;
+    }
+
+    vocabulary[index].letter_weight =
+        (tokens.size() > 5 && !tokens[5].empty())
+            ? static_cast<float>(atof(tokens[5].c_str()))
+            : 1.0f;
 
     index++;
   }
 
   fclose(file);
-  return entryCount; // Return the actual number of entries loaded
-}
+  safe_vocab_size = index;
 
+  printf("Successfully loaded %d vocabulary entries\n", safe_vocab_size);
+
+  return index;
+}
 const float letter_weights[26] = {1.0f,  0.9f,  0.8f, 0.85f, 0.95f, 0.75f, 0.7f,
                                   0.8f,  0.9f,  0.6f, 0.7f,  0.85f, 0.75f, 0.9f,
                                   1.0f,  0.65f, 0.6f, 0.85f, 0.95f, 0.8f,  0.7f,
@@ -2099,43 +2201,50 @@ void initializeVocabularyWeights() {
 }
 
 void importPretrainedEmbeddings(const char *embedding_file) {
+  if (safe_vocab_size <= 0) {
+    fprintf(stderr, "Error: Vocabulary not loaded. Call "
+                    "loadVocabularyFromFile first.\n");
+    return;
+  }
+
   FILE *file = fopen(embedding_file, "r");
   if (!file) {
     fprintf(stderr, "Error: Could not open embedding file: %s\n",
             embedding_file);
     printf("Falling back to random initialization...\n");
 
-    for (int i = 0; i < vocab_size; i++) {
+    for (int i = 0; i < safe_vocab_size; i++) {
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
-        float u1 = ((float)rand() + 1.0f) / (RAND_MAX + 2.0f);
-        float u2 = (float)rand() / (RAND_MAX + 1.0f);
-        float z = sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
+        float u1 = static_cast<float>(rand()) / RAND_MAX;
+        float u2 = static_cast<float>(rand()) / RAND_MAX;
+        if (u1 < 1e-8f)
+          u1 = 1e-8f;
+        float z = std::sqrt(-2.0f * std::log(u1)) * std::cos(2.0f * M_PI * u2);
         embeddings[i][j] = z * 0.02f;
       }
     }
     return;
   }
 
-  printf("Loading pre-trained word embeddings from %s...\n", embedding_file);
+  printf("Loading pre-trained embeddings from %s...\n", embedding_file);
 
-  // Allocate vocab_found safely
-  bool *vocab_found =
-      static_cast<bool *>(std::calloc(vocab_size, sizeof(bool)));
-  if (!vocab_found) {
-    fprintf(stderr, "Error: Memory allocation failed for vocab_found\n");
-    fclose(file);
-    return;
-  }
+  std::vector<bool> vocab_found(safe_vocab_size, false);
 
-  char line[10000];
-  if (fgets(line, sizeof(line), file) != NULL) {
-    int file_vocab_size, file_dim;
-    if (sscanf(line, "%d %d", &file_vocab_size, &file_dim) == 2) {
+  std::unique_ptr<char[]> line(new char[MAX_LINE_LENGTH]);
+
+  int file_dim = EMBEDDING_SIZE;
+  if (fgets(line.get(), MAX_LINE_LENGTH, file) != nullptr) {
+    int file_vocab_size;
+    if (sscanf(line.get(), "%d %d", &file_vocab_size, &file_dim) == 2) {
       printf("Word2Vec format detected: %d words, %d dimensions\n",
              file_vocab_size, file_dim);
+
       if (file_dim != EMBEDDING_SIZE) {
-        printf("Warning: file_dim=%d vs system_dim=%d → trunc/pad\n", file_dim,
-               EMBEDDING_SIZE);
+        printf("Warning: File embedding size (%d) doesn't match "
+               "system size (%d)\n",
+               file_dim, EMBEDDING_SIZE);
+        printf("Embeddings will be %s\n",
+               file_dim > EMBEDDING_SIZE ? "truncated" : "padded with zeros");
       }
     } else {
       rewind(file);
@@ -2143,49 +2252,68 @@ void importPretrainedEmbeddings(const char *embedding_file) {
   }
 
   int loaded_count = 0;
-  while (fgets(line, sizeof(line), file) != NULL) {
-    char *word = strtok(line, " \t");
-    if (!word)
+  int line_num = 0;
+
+  while (fgets(line.get(), MAX_LINE_LENGTH, file) != nullptr) {
+    line_num++;
+
+    char word[MAX_WORD_LENGTH];
+    char *saveptr = nullptr;
+    char *word_token = strtok_r(line.get(), " \t", &saveptr);
+
+    if (!word_token || strlen(word_token) == 0)
       continue;
 
-    // Search vocabulary
+    strncpy(word, word_token, MAX_WORD_LENGTH - 1);
+    word[MAX_WORD_LENGTH - 1] = '\0';
+
     int vocab_idx = -1;
-    for (int i = 0; i < vocab_size; i++) {
-      if (vocabulary[i].word && strcmp(word, vocabulary[i].word) == 0) {
+    for (int i = 0; i < safe_vocab_size; i++) {
+      if (strcmp(word, vocabulary[i].word) == 0) {
         vocab_idx = i;
         break;
       }
     }
+
     if (vocab_idx == -1)
       continue;
 
     vocab_found[vocab_idx] = true;
     loaded_count++;
 
-    float *current_embedding = embeddings[vocab_idx];
+    std::vector<float> temp_values;
+    char *token = strtok_r(nullptr, " \t\n", &saveptr);
+
+    while (token != nullptr &&
+           temp_values.size() < static_cast<size_t>(file_dim)) {
+      temp_values.push_back(static_cast<float>(atof(token)));
+      token = strtok_r(nullptr, " \t\n", &saveptr);
+    }
+
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
-      char *token = strtok(NULL, " \t\n");
-      current_embedding[j] = token ? (float)atof(token) : 0.0f;
+      if (j < static_cast<int>(temp_values.size())) {
+        embeddings[vocab_idx][j] = temp_values[j];
+      } else {
+        embeddings[vocab_idx][j] = 0.0f;
+      }
     }
   }
+
   fclose(file);
 
-  printf("Loaded %d/%d words from pretrained embeddings\n", loaded_count,
-         vocab_size);
-  // For words not found in the pre-trained file, initialize with random values
-  // and try to infer from similar words in our vocabulary that were found
-  for (int i = 0; i < vocab_size; i++) {
+  printf("Successfully loaded %d/%d vocabulary words from "
+         "pretrained embeddings\n",
+         loaded_count, safe_vocab_size);
+
+  for (int i = 0; i < safe_vocab_size; i++) {
     if (!vocab_found[i]) {
-      printf("Word '%s' not found in pretrained embeddings, generating...\n",
-             vocabulary[i].word);
-      // Check if we can find words in the same category that were loaded
       bool found_category_match = false;
-      float category_vector[EMBEDDING_SIZE] = {0};
+      std::vector<float> category_vector(EMBEDDING_SIZE, 0.0f);
       int category_matches = 0;
-      for (int j = 0; j < vocab_size; j++) {
+
+      for (int j = 0; j < safe_vocab_size; j++) {
         if (i != j && vocab_found[j] &&
             strcmp(vocabulary[i].category, vocabulary[j].category) == 0) {
-          // Found a word in the same category, add its embedding
           for (int k = 0; k < EMBEDDING_SIZE; k++) {
             category_vector[k] += embeddings[j][k];
           }
@@ -2193,208 +2321,199 @@ void importPretrainedEmbeddings(const char *embedding_file) {
           found_category_match = true;
         }
       }
-      if (found_category_match) {
-        // Use average of category embeddings with random noise
+
+      if (found_category_match && category_matches > 0) {
         for (int k = 0; k < EMBEDDING_SIZE; k++) {
-          // Average of category vectors
           category_vector[k] /= category_matches;
-          // Add some noise for uniqueness
-          float noise = ((float)rand() / RAND_MAX - 0.5f) * 0.1f;
+          float noise = (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 0.1f;
           embeddings[i][k] = category_vector[k] + noise;
         }
       } else {
-        // Completely random initialization
         for (int j = 0; j < EMBEDDING_SIZE; j++) {
-          float u1 = (float)rand() / RAND_MAX;
-          float u2 = (float)rand() / RAND_MAX;
-          float z = sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI * u2);
+          float u1 = static_cast<float>(rand()) / RAND_MAX;
+          float u2 = static_cast<float>(rand()) / RAND_MAX;
+          if (u1 < 1e-8f)
+            u1 = 1e-8f;
+          float z =
+              std::sqrt(-2.0f * std::log(u1)) * std::cos(2.0f * M_PI * u2);
           embeddings[i][j] = z * 0.02f;
         }
       }
     }
   }
-  // Apply custom modifiers for all words based on vocabulary attributes
-  for (int i = 0; i < vocab_size; ++i) {
-    if (!vocabulary || !embeddings)
-      break; // sanity check
-    if (!embeddings[i])
-      continue; // skip if row not allocated
 
+  for (int i = 0; i < safe_vocab_size; ++i) {
     float *emb_i = embeddings[i];
     const char *cat = vocabulary[i].category;
 
-    // helper: clip range to [0, EMBEDDING_SIZE)
-    auto clip = [&](int s, int e) -> std::pair<int, int> {
-      int ss = std::max(0, s);
-      int ee = std::min(EMBEDDING_SIZE, e);
-      if (ss >= ee)
-        return {0, 0};
-      return {ss, ee};
-    };
-
-    // ---- category boosts ----
-    if (cat) {
+    if (cat && cat[0] != '\0') {
+      int s, e;
       if (strcmp(cat, "fruit") == 0) {
-        auto [s, e] = clip(0, 10);
+        clip_range(0, 10, &s, &e);
         for (int j = s; j < e; ++j)
           emb_i[j] += 0.2f;
       } else if (strcmp(cat, "action") == 0) {
-        auto [s, e] = clip(10, 20);
+        clip_range(10, 20, &s, &e);
         for (int j = s; j < e; ++j)
           emb_i[j] += 0.2f;
       } else if (strcmp(cat, "emotion") == 0) {
-        auto [s, e] = clip(20, 30);
+        clip_range(20, 30, &s, &e);
         for (int j = s; j < e; ++j)
           emb_i[j] += 0.2f;
       }
     }
 
-    // ---- letter weight → [30,40) ----
     {
-      auto [s, e] = clip(30, 40);
-      if (s < e) {
-        float lw = vocabulary[i].letter_weight;
-        for (int j = s; j < e; ++j)
-          emb_i[j] += lw * 0.1f;
-      }
+      int s, e;
+      clip_range(30, 40, &s, &e);
+      float lw = vocabulary[i].letter_weight;
+      for (int j = s; j < e; ++j)
+        emb_i[j] += lw * 0.1f;
     }
 
-    // ---- semantic weight → [40,50) ----
     {
-      auto [s, e] = clip(40, 50);
-      if (s < e) {
-        float sw = vocabulary[i].semantic_weight;
-        for (int j = s; j < e; ++j)
-          emb_i[j] += sw * 0.1f;
-      }
+      int s, e;
+      clip_range(40, 50, &s, &e);
+      float sw = vocabulary[i].semantic_weight;
+      for (int j = s; j < e; ++j)
+        emb_i[j] += sw * 0.1f;
     }
 
-    // ---- connections: pull pairs together in [50,60) ----
-    if (vocabulary[i].connects_to) {
+    if (vocabulary[i].connects_to != nullptr) {
       const char *conn = vocabulary[i].connects_to;
-      for (int j = 0; j < vocab_size; ++j) {
+      for (int j = 0; j < safe_vocab_size; ++j) {
         if (j == i)
           continue;
-        if (!vocabulary[j].word)
-          continue;
         if (strcmp(conn, vocabulary[j].word) == 0) {
-          if (!embeddings[j])
-            break;
           float *emb_j = embeddings[j];
-
-          auto [s, e] = clip(50, 60);
-          if (s >= e)
-            break;
-
+          int s, e;
+          clip_range(50, 60, &s, &e);
           for (int k = s; k < e; ++k) {
             float avg = (emb_i[k] + emb_j[k]) * 0.5f;
             emb_i[k] = emb_i[k] * 0.8f + avg * 0.2f;
             emb_j[k] = emb_j[k] * 0.8f + avg * 0.2f;
           }
-          break; // only first matching connection (same as original)
+          break;
         }
       }
     }
   }
-  // Final L2 normalization for all embeddings (industry standard)
-  for (int i = 0; i < vocab_size; i++) {
+
+  for (int i = 0; i < safe_vocab_size; i++) {
     float norm = 0.0f;
     for (int j = 0; j < EMBEDDING_SIZE; j++) {
       norm += embeddings[i][j] * embeddings[i][j];
     }
-    norm = sqrt(norm);
-    // Prevent division by zero
-    if (norm > 1e-8) {
+    norm = std::sqrt(norm);
+
+    if (norm > 1e-8f) {
       for (int j = 0; j < EMBEDDING_SIZE; j++) {
         embeddings[i][j] /= norm;
       }
+    } else {
+      for (int j = 0; j < EMBEDDING_SIZE; j++) {
+        embeddings[i][j] = 0.0f;
+      }
     }
   }
-  printf("Embedding initialization completed with custom modifiers aplied\n");
+
+  printf("Embedding initialization completed with custom "
+         "modifiers applied\n");
 }
 
 void initializeSparseEmbedding(SparseEmbedding *emb, int word_idx) {
-  int target_active = (int)(EMBEDDING_SIZE * SPARSE_DENSITY);
-  emb->active_dims = (int *)malloc(target_active * sizeof(int));
-  emb->values = (float *)malloc(target_active * sizeof(float));
+  if (word_idx < 0 || word_idx >= safe_vocab_size) {
+    fprintf(stderr, "Error: Invalid word_idx %d\n", word_idx);
+    emb->num_active = 0;
+    emb->active_dims = nullptr;
+    emb->values = nullptr;
+    emb->norm = 0.0f;
+    return;
+  }
+
+  int target_active = static_cast<int>(EMBEDDING_SIZE * SPARSE_DENSITY);
+  if (target_active <= 0)
+    target_active = 1;
+  if (target_active > EMBEDDING_SIZE)
+    target_active = EMBEDDING_SIZE;
+
+  emb->active_dims = new (std::nothrow) int[target_active];
+  emb->values = new (std::nothrow) float[target_active];
+
+  if (!emb->active_dims || !emb->values) {
+    fprintf(stderr, "Error: Memory allocation failed for sparse "
+                    "embedding\n");
+    if (emb->active_dims)
+      delete[] emb->active_dims;
+    if (emb->values)
+      delete[] emb->values;
+    emb->num_active = 0;
+    emb->active_dims = nullptr;
+    emb->values = nullptr;
+    emb->norm = 0.0f;
+    return;
+  }
+
   emb->num_active = target_active;
   emb->norm = 0.0f;
 
-  // Select active dimensions using semantic and phonetic criteria
-  int *candidates = (int *)malloc(EMBEDDING_SIZE * sizeof(int));
-  float *scores = (float *)malloc(EMBEDDING_SIZE * sizeof(float));
+  std::vector<int> candidates(EMBEDDING_SIZE);
+  std::vector<float> scores(EMBEDDING_SIZE);
 
-  // Score each dimension based on word characteristics
   const char *word = vocabulary[word_idx].word;
-  float word_length_factor = log(strlen(word) + 1) / log(10);
+  float word_length_factor = std::log(strlen(word) + 1) / std::log(10.0f);
 
   for (int i = 0; i < EMBEDDING_SIZE; i++) {
     candidates[i] = i;
     scores[i] = 0.0f;
 
-    // Phonetic scoring (letter-based)
     for (int j = 0; word[j]; j++) {
       if (word[j] >= 'a' && word[j] <= 'z') {
-        scores[i] += letter_weights[word[j] - 'a'] * sin(i * 0.1f + j);
+        scores[i] += letter_weights[word[j] - 'a'] * std::sin(i * 0.1f + j);
       }
     }
 
-    // Semantic category scoring
     int category_hash = 0;
     for (int j = 0; vocabulary[word_idx].category[j]; j++) {
       category_hash += vocabulary[word_idx].category[j] * (j + 1);
     }
-    scores[i] += sin(category_hash * 0.001f + i * 0.05f) * word_length_factor;
-
-    // Add noise for uniqueness
-    scores[i] += ((float)rand() / RAND_MAX - 0.5f) * 0.1f;
+    scores[i] +=
+        std::sin(category_hash * 0.001f + i * 0.05f) * word_length_factor;
+    scores[i] += (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 0.1f;
   }
 
-  // Select top dimensions (winner-take-all like in cortex)
   for (int i = 0; i < EMBEDDING_SIZE - 1; i++) {
     for (int j = i + 1; j < EMBEDDING_SIZE; j++) {
       if (scores[j] > scores[i]) {
-        float temp_score = scores[i];
-        scores[i] = scores[j];
-        scores[j] = temp_score;
-
-        int temp_idx = candidates[i];
-        candidates[i] = candidates[j];
-        candidates[j] = temp_idx;
+        std::swap(scores[i], scores[j]);
+        std::swap(candidates[i], candidates[j]);
       }
     }
   }
 
-  // Assign values to active dimensions
   for (int i = 0; i < target_active; i++) {
     emb->active_dims[i] = candidates[i];
 
-    // Use hierarchical semantic layers
     float value = 0.0f;
     for (int layer = 0; layer < NUM_SEMANTIC_LAYERS; layer++) {
       int layer_contrib = (word_idx * 17 + candidates[i] * 23 + layer) % 1000;
-      value +=
-          semantic_weights[layer][candidates[i]] * sin(layer_contrib * 0.01f);
+      value += semantic_weights[layer][candidates[i]] *
+               std::sin(layer_contrib * 0.01f);
       emb->semantic_layer[layer] = layer_contrib % EMBEDDING_SIZE;
     }
 
-    // Normalize and store
-    emb->values[i] = tanh(value * vocabulary[word_idx].semantic_weight);
+    emb->values[i] = std::tanh(value * vocabulary[word_idx].semantic_weight);
     emb->norm += emb->values[i] * emb->values[i];
   }
 
-  emb->norm = sqrt(emb->norm);
+  emb->norm = std::sqrt(emb->norm);
 
-  // Normalize values
   if (emb->norm > 1e-8f) {
     for (int i = 0; i < emb->num_active; i++) {
       emb->values[i] /= emb->norm;
     }
     emb->norm = 1.0f;
   }
-
-  free(candidates);
-  free(scores);
 }
 
 float sparseCosineSimilarity(const SparseEmbedding *a,
@@ -2532,104 +2651,93 @@ SparseEmbedding *getContextualEmbedding(const char *word, const char **context,
 }
 
 void initializeBrainInspiredEmbeddings(const char *pretrained_file) {
+  if (safe_vocab_size <= 0) {
+    fprintf(stderr, "Error: Vocabulary not loaded\n");
+    return;
+  }
+
   printf("Initializing brain-inspired sparse embedding system...\n");
 
   for (int layer = 0; layer < NUM_SEMANTIC_LAYERS; layer++) {
     for (int i = 0; i < EMBEDDING_SIZE; i++) {
       float freq = 0.01f * (layer + 1);
-      semantic_weights[layer][i] = sin(i * freq) * exp(-layer * 0.1f);
+      semantic_weights[layer][i] = std::sin(i * freq) * std::exp(-layer * 0.1f);
     }
   }
 
-  for (int i = 0; i < vocab_size; i++) {
+  for (int i = 0; i < safe_vocab_size; i++) {
     initializeSparseEmbedding(&word_embeddings[i], i);
   }
 
-  memset(context_cache, 0, sizeof(context_cache));
+  std::memset(context_cache, 0, sizeof(context_cache));
 
-  for (int i = 0; i < vocab_size; i++) {
+  for (int i = 0; i < safe_vocab_size; i++) {
     for (int bucket = 0; bucket < HASH_BUCKETS; bucket++) {
       similarity_hash[bucket][i] = 0.0f;
 
-      for (int j = 0; j < word_embeddings[i].num_active; j++) {
-        int dim = word_embeddings[i].active_dims[j];
-        if ((dim * 17 + bucket * 23) % 2) {
-          similarity_hash[bucket][i] += word_embeddings[i].values[j];
+      if (word_embeddings[i].num_active > 0 &&
+          word_embeddings[i].active_dims != nullptr) {
+        for (int j = 0; j < word_embeddings[i].num_active; j++) {
+          int dim = word_embeddings[i].active_dims[j];
+          if ((dim * 17 + bucket * 23) % 2) {
+            similarity_hash[bucket][i] += word_embeddings[i].values[j];
+          }
         }
       }
     }
   }
 
-  printf("Brain-inspired embedding system initialized with %d sparse vectors\n",
-         vocab_size);
+  printf("Brain-inspired embedding system initialized with %d "
+         "sparse vectors\n",
+         safe_vocab_size);
   printf("Average sparsity: %.1f%% (%.0f active dims per word)\n",
          SPARSE_DENSITY * 100, EMBEDDING_SIZE * SPARSE_DENSITY);
 }
 
 void initializeEmbeddings(const char *embedding_file) {
+  if (safe_vocab_size <= 0) {
+    fprintf(stderr, "Error: Load vocabulary before initializing "
+                    "embeddings\n");
+    return;
+  }
+
   importPretrainedEmbeddings(embedding_file);
   initializeBrainInspiredEmbeddings(embedding_file);
+}
 
-  for (int i = 0; i < vocab_size; i++) {
-    // Ensure category string is valid
-    if (vocabulary[i].category == NULL) {
-      continue;
+void cleanupVocabulary() {
+  for (int i = 0; i < safe_vocab_size; i++) {
+    if (vocabulary[i].connects_to) {
+      free(vocabulary[i].connects_to);
+      vocabulary[i].connects_to = nullptr;
     }
+    if (vocabulary[i].description) {
+      free(vocabulary[i].description);
+      vocabulary[i].description = nullptr;
+    }
+  }
+}
 
-    // Apply category-based adjustments safely
-    if (strcmp(vocabulary[i].category, "fruit") == 0 && EMBEDDING_SIZE >= 10) {
-      for (int j = 0; j < 10; j++)
-        embeddings[i][j] += 0.2f;
-    } else if (strcmp(vocabulary[i].category, "action") == 0 &&
-               EMBEDDING_SIZE >= 20) {
-      for (int j = 10; j < 20; j++)
-        embeddings[i][j] += 0.3f;
-    } else if (strcmp(vocabulary[i].category, "emotion") == 0 &&
-               EMBEDDING_SIZE >= 30) {
-      for (int j = 20; j < 30; j++)
-        embeddings[i][j] += 0.5f;
-    } else if (strcmp(vocabulary[i].category, "object") == 0 &&
-               EMBEDDING_SIZE >= 40) {
-      for (int j = 30; j < 40; j++)
-        embeddings[i][j] += 0.1f;
-    } else if (strcmp(vocabulary[i].category, "place") == 0 &&
-               EMBEDDING_SIZE >= 50) {
-      for (int j = 40; j < 50; j++)
-        embeddings[i][j] += 0.2f;
-    } else if (strcmp(vocabulary[i].category, "time") == 0 &&
-               EMBEDDING_SIZE >= 60) {
-      for (int j = 50; j < 60; j++)
-        embeddings[i][j] += 0.3f;
-    } else if (strcmp(vocabulary[i].category, "person") == 0 &&
-               EMBEDDING_SIZE >= 70) {
-      for (int j = 60; j < 70; j++)
-        embeddings[i][j] += 0.4f;
+void cleanupEmbeddings() {
+  for (int i = 0; i < safe_vocab_size; i++) {
+    if (word_embeddings[i].active_dims) {
+      delete[] word_embeddings[i].active_dims;
+      word_embeddings[i].active_dims = nullptr;
     }
+    if (word_embeddings[i].values) {
+      delete[] word_embeddings[i].values;
+      word_embeddings[i].values = nullptr;
+    }
+  }
 
-    // Apply letter weight safely
-    if (EMBEDDING_SIZE >= 40) {
-      float letter_weight = vocabulary[i].letter_weight;
-      for (int j = 30; j < 40; j++)
-        embeddings[i][j] += letter_weight * 0.1f;
+  for (int i = 0; i < VOCAB_SIZE * 4; i++) {
+    if (context_cache[i].embedding.active_dims) {
+      delete[] context_cache[i].embedding.active_dims;
+      context_cache[i].embedding.active_dims = nullptr;
     }
-
-    // Apply semantic weight safely
-    if (EMBEDDING_SIZE >= 50) {
-      float semantic_weight = vocabulary[i].semantic_weight;
-      for (int j = 40; j < 50; j++)
-        embeddings[i][j] += semantic_weight * 0.1f;
-    }
-
-    // Normalize safely
-    float norm = 0.0f;
-    for (int j = 0; j < EMBEDDING_SIZE; j++) {
-      norm += embeddings[i][j] * embeddings[i][j];
-    }
-    norm = sqrtf(norm);
-    if (norm > 1e-12f) { // tighter guard
-      for (int j = 0; j < EMBEDDING_SIZE; j++) {
-        embeddings[i][j] /= norm;
-      }
+    if (context_cache[i].embedding.values) {
+      delete[] context_cache[i].embedding.values;
+      context_cache[i].embedding.values = nullptr;
     }
   }
 }
@@ -14709,6 +14817,9 @@ int main() {
   freeImaginationSystem(imagination_system);
   freeSocialSystem(social_system);
   freeSpecializationSystem(specialization_system);
+  cleanupEmbeddings();
+  cleanupVocabulary();
+  free(input_tensor);
   free(stateHistory);
   free(system_params);
   free(working_memory);
@@ -14716,5 +14827,13 @@ int main() {
   free(contextManager);
   free(performanceMetrics);
   free(metaController);
+  free(previous_outputs);
+  free(goalSystem);
+  free(motivation);
+  free(reflection_params);
+  free(identity_system);
+  free(knowledge_filter);
+  free(metacognition);
+  free(meta_learning_state);
   return 0;
 }
