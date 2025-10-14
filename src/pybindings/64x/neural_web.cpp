@@ -5221,19 +5221,17 @@ float assessCognitiveLoad(MetaController *controller,
   float weight_complexity = 0.0f;
   float temporal_complexity = 0.0f;
 
-  // Compute activation distribution entropy
   for (int i = 0; i < controller->num_regions; i++) {
     float importance = controller->region_importance_scores[i];
     if (importance > 0) {
       activation_entropy -= importance * log2f(importance);
     }
 
-    // Calculate weight complexity
     float region_weight_var = 0.0f;
     float mean_weight = 0.0f;
     int connections_count = 0;
 
-    for (int j = 0; j < MAX_CONNECTIONS; j++) {
+    for (int j = 0; j < controller->num_regions; j++) {
       if (controller->region_importance_scores[j] > 0) {
         mean_weight += controller->region_importance_scores[j];
         connections_count++;
@@ -5242,7 +5240,7 @@ float assessCognitiveLoad(MetaController *controller,
 
     if (connections_count > 0) {
       mean_weight /= connections_count;
-      for (int j = 0; j < MAX_CONNECTIONS; j++) {
+      for (int j = 0; j < controller->num_regions; j++) {
         if (controller->region_importance_scores[j] > 0) {
           float diff = controller->region_importance_scores[j] - mean_weight;
           region_weight_var += diff * diff;
@@ -5251,7 +5249,6 @@ float assessCognitiveLoad(MetaController *controller,
       weight_complexity += sqrtf(region_weight_var / connections_count);
     }
 
-    // Calculate temporal complexity
     float temporal_diff = 0.0f;
     if (i < performance->num_regions) {
       temporal_diff = fabs(performance->region_performance_scores[i] -
@@ -5260,16 +5257,13 @@ float assessCognitiveLoad(MetaController *controller,
     temporal_complexity += temporal_diff;
   }
 
-  // Normalize complexities
   activation_entropy = activation_entropy / log2f(controller->num_regions);
   weight_complexity = weight_complexity / controller->num_regions;
   temporal_complexity = temporal_complexity / controller->num_regions;
 
-  // Combine different complexity measures
   float cognitive_load = (0.4f * activation_entropy + 0.3f * weight_complexity +
                           0.3f * temporal_complexity);
 
-  // Apply sigmoid-like normalization
   cognitive_load = 1.0f / (1.0f + expf(-cognitive_load));
 
   return fminf(1.0f, fmaxf(0.0f, cognitive_load));
@@ -5278,23 +5272,18 @@ float assessCognitiveLoad(MetaController *controller,
 void updateMetacognitionMetrics(MetacognitionMetrics *metacog,
                                 MetaController *controller,
                                 NetworkPerformanceMetrics *performance) {
-  // Update confidence based on performance stability
   float performance_variance =
       computePerformanceVariance(metacog->performance_history, HISTORY_LENGTH);
   metacog->confidence_level = 1.0f / (1.0f + performance_variance);
 
-  // Adapt learning rate based on recent success
   metacog->adaptation_rate =
       computeAdaptiveRate(performance, metacog->performance_history);
 
-  // Assess cognitive load through complexity metrics
   metacog->cognitive_load = assessCognitiveLoad(controller, performance);
 
-  // Update error awareness through prediction analysis
   metacog->error_awareness =
       computeErrorAwareness(performance, metacog->performance_history);
 
-  // Evaluate context relevance
   metacog->context_relevance =
       evaluateContextRelevance(controller, performance);
 }
@@ -5302,43 +5291,40 @@ void updateMetacognitionMetrics(MetacognitionMetrics *metacog,
 void updateMetaControllerPriorities(MetaController *controller,
                                     NetworkPerformanceMetrics *performance,
                                     MetacognitionMetrics *metacog) {
-  // Track historical performance for trend analysis
   float performance_trend = 0.0f;
   for (int i = 0; i < HISTORY_LENGTH - 1; i++) {
     performance_trend +=
         metacog->performance_history[i + 1] - metacog->performance_history[i];
   }
 
-  for (int i = 0; i < controller->num_regions; i++) {
+  int max_regions = controller->num_regions < performance->num_regions
+                        ? controller->num_regions
+                        : performance->num_regions;
+
+  for (int i = 0; i < max_regions; i++) {
     float learning_delta = performance->region_performance_scores[i] -
                            controller->learning_efficiency_history[i];
 
-    // Adjust learning based on metacognitive state
     float adaptive_rate = controller->meta_learning_rate *
                           (1.0f + metacog->adaptation_rate) *
                           (1.0f - metacog->cognitive_load);
 
-    // Dynamic exploration factor based on performance trends
     float dynamic_exploration = controller->exploration_factor *
                                 (1.0f + performance_trend) *
                                 metacog->confidence_level;
 
-    // Update importance with metacognitive awareness
     controller->region_importance_scores[i] += adaptive_rate * learning_delta *
                                                (1.0f + dynamic_exploration) *
                                                metacog->context_relevance;
 
-    // Apply cognitive load-based normalization
     float load_factor = 1.0f / (1.0f + metacog->cognitive_load);
     controller->region_importance_scores[i] *= load_factor;
 
-    // Update learning history with error awareness
     controller->learning_efficiency_history[i] =
         performance->region_performance_scores[i] *
         (1.0f - metacog->error_awareness);
   }
 
-  // Update metacognition metrics
   updateMetacognitionMetrics(metacog, controller, performance);
 }
 
@@ -8116,11 +8102,10 @@ void freeIdentityBackup(SelfIdentityBackup *backup) {
   free(backup);
 }
 
-void computeGradientFeedback(float feedback[EMBEDDING_SIZE], Neuron *neuron,
-                             float target_output[EMBEDDING_SIZE]) {
-  for (int i = 0; i < EMBEDDING_SIZE; i++) {
-    feedback[i] =
-        2.0f * (neuron[i].output - target_output[i]); // Gradient of MSE loss
+void computeGradientFeedback(float feedback[], Neuron *neuron,
+                             float target_output[], int size) {
+  for (int i = 0; i < size; i++) {
+    feedback[i] = 2.0f * (neuron[i].output - target_output[i]);
   }
 }
 
