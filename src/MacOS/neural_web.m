@@ -10884,33 +10884,34 @@ void updateImaginationCreativity(ImaginationSystem *imagination,
   performance_delta = fmax(-1.0f, fmin(1.0f, performance_delta));
   novelty = fmax(0.0f, fmin(1.0f, novelty));
 
-  // If performance is improving, we can be more creative
+  // Adjust creativity more conservatively
   if (performance_delta > 0) {
+    // Slightly increase creativity if performance improves
     imagination->creativity_factor =
-        fmin(1.0f, imagination->creativity_factor + 0.01f);
+        fmin(0.8f, imagination->creativity_factor + 0.005f);
   } else {
-    // If performance is declining, be more conservative
+    // Decrease creativity more when performance drops
     imagination->creativity_factor =
-        fmax(0.3f, imagination->creativity_factor - 0.005f);
+        fmax(0.3f, imagination->creativity_factor - 0.01f);
   }
 
   // Adjust based on novelty
   if (novelty > 0.7f) {
-    // If environment has high novelty, reduce creativity to focus on adaptation
-    imagination->creativity_factor *= 0.98f;
+    // High novelty: reduce creativity further to focus on adaptation
+    imagination->creativity_factor *= 0.97f;
   } else if (novelty < 0.3f) {
-    // In stable environments, we can be more creative
+    // Stable environment: small creativity boost, but limited
     imagination->creativity_factor =
-        fmin(1.0f, imagination->creativity_factor * 1.02f);
+        fmin(0.8f, imagination->creativity_factor * 1.01f);
   }
 
   // Update coherence threshold - higher creativity requires higher coherence
   imagination->coherence_threshold =
-      0.5f + imagination->creativity_factor * 0.3f;
+      0.55f + imagination->creativity_factor * 0.25f;
 
   // Ensure coherence threshold is in valid range
   imagination->coherence_threshold =
-      fmax(0.5f, fmin(0.9f, imagination->coherence_threshold));
+      fmax(0.55f, fmin(0.85f, imagination->coherence_threshold));
 }
 
 void freeImaginationSystem(ImaginationSystem *system) {
@@ -13764,9 +13765,27 @@ int main() {
     generatePredictiveInputs(predictive_inputs,
                              (step > 0) ? &stateHistory[step - 1] : NULL,
                              max_neurons);
-
     // Dynamically sized input tensor
     float *input_tensor = (float *)malloc(max_neurons * sizeof(float));
+
+    for (int i = 0; i < max_neurons; i++) {
+      float historical_weight =
+          (step >= MIN_PREDICTION_SAMPLES) ? PREDICTION_HISTORY_WEIGHT : 0.5f;
+      input_tensor[i] = predictive_inputs[i] * historical_weight;
+
+      if (step >= TEMPORAL_PREDICTION_STEPS) {
+        for (int t = 1; t <= TEMPORAL_PREDICTION_STEPS; t++) {
+          int hist_idx = step - t;
+          float temporal_decay = powf(PREDICTION_ERROR_DECAY, (float)t);
+          input_tensor[i] += stateHistory[hist_idx].states[i] * temporal_decay *
+                             (1.0f - historical_weight) /
+                             TEMPORAL_PREDICTION_STEPS;
+        }
+      } else {
+        input_tensor[i] += predictive_inputs[i] * (1.0f - historical_weight);
+      }
+    }
+
     memcpy(input_tensor, predictive_inputs, max_neurons * sizeof(float));
     generateInputTensor(input_tensor, step, text_input, relevantMemory,
                         system_params);
@@ -13840,6 +13859,20 @@ int main() {
     target_outputs =
         generatePotentialTargets(max_neurons, previous_outputs, stateHistory,
                                  step, relevantMemory, params);
+
+    for (int i = 0; i < max_neurons; i++) {
+      if (step >= PREDICTION_WINDOW) {
+        float accumulated_trend = 0.0f;
+        for (int t = 1; t <= PREDICTION_WINDOW; t++) {
+          int hist_idx = step - t;
+          accumulated_trend += (stateHistory[hist_idx].states[i] -
+                                stateHistory[hist_idx - 1].states[i]) *
+                               powf(PREDICTION_ERROR_DECAY, (float)t);
+        }
+        accumulated_trend /= PREDICTION_WINDOW;
+        target_outputs[i] += accumulated_trend * params.plasticity;
+      }
+    }
 
     float word_feedback[EMBEDDING_SIZE];
     computeGradientFeedback(word_feedback, neurons, target_outputs,
@@ -14502,17 +14535,33 @@ int main() {
                             performance_history[step].error_rate);
 
     float novelty = computeNovelty(updatedNeurons, *stateHistory, step);
-    if (step > 0) {
-      float perf_delta = performance_history[step].average_output -
-                         performance_history[step - 1].average_output;
-      updateImaginationCreativity(imagination_system, perf_delta, novelty);
-
-      if (step % 20 == 0) {
-        printf("\nImagination Creativity: %.2f, Coherence Threshold: %.2f\n",
-               imagination_system->creativity_factor,
-               imagination_system->coherence_threshold);
+    if (step >= PREDICTION_WINDOW) {
+      float prediction_stability = 0.0f;
+      for (int i = 0; i < max_neurons; i++) {
+        float variance = 0.0f;
+        for (int t = 0; t < PREDICTION_WINDOW; t++) {
+          int hist_idx = step - t - 1;
+          float diff =
+              stateHistory[hist_idx].states[i] - updatedNeurons[i].output;
+          variance += diff * diff;
+        }
+        prediction_stability += sqrtf(variance / PREDICTION_WINDOW);
       }
+      prediction_stability /= max_neurons;
+      novelty = novelty * 0.6f + prediction_stability * 0.4f;
     }
+
+    float perf_delta = performance_history[step].average_output -
+                       performance_history[step - 1].average_output;
+
+    updateImaginationCreativity(imagination_system, perf_delta, novelty);
+
+    if (step % 20 == 0) {
+      printf("\nImagination Creativity: %.2f, Coherence Threshold: %.2f\n",
+             imagination_system->creativity_factor,
+             imagination_system->coherence_threshold);
+    }
+
     float task_difficulty = estimateTaskDifficulty(
         current_prompt, performance_history[step].error_rate);
 
