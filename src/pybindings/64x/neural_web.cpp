@@ -11081,33 +11081,34 @@ void updateImaginationCreativity(ImaginationSystem *imagination,
   performance_delta = fmax(-1.0f, fmin(1.0f, performance_delta));
   novelty = fmax(0.0f, fmin(1.0f, novelty));
 
-  // If performance is improving, we can be more creative
+  // Adjust creativity more conservatively
   if (performance_delta > 0) {
+    // Slightly increase creativity if performance improves
     imagination->creativity_factor =
-        fmin(1.0f, imagination->creativity_factor + 0.01f);
+        fmin(0.8f, imagination->creativity_factor + 0.005f);
   } else {
-    // If performance is declining, be more conservative
+    // Decrease creativity more when performance drops
     imagination->creativity_factor =
-        fmax(0.3f, imagination->creativity_factor - 0.005f);
+        fmax(0.3f, imagination->creativity_factor - 0.01f);
   }
 
   // Adjust based on novelty
   if (novelty > 0.7f) {
-    // If environment has high novelty, reduce creativity to focus on adaptation
-    imagination->creativity_factor *= 0.98f;
+    // High novelty: reduce creativity further to focus on adaptation
+    imagination->creativity_factor *= 0.97f;
   } else if (novelty < 0.3f) {
-    // In stable environments, we can be more creative
+    // Stable environment: small creativity boost, but limited
     imagination->creativity_factor =
-        fmin(1.0f, imagination->creativity_factor * 1.02f);
+        fmin(0.8f, imagination->creativity_factor * 1.01f);
   }
 
   // Update coherence threshold - higher creativity requires higher coherence
   imagination->coherence_threshold =
-      0.5f + imagination->creativity_factor * 0.3f;
+      0.55f + imagination->creativity_factor * 0.25f;
 
   // Ensure coherence threshold is in valid range
   imagination->coherence_threshold =
-      fmax(0.5f, fmin(0.9f, imagination->coherence_threshold));
+      fmax(0.55f, fmin(0.85f, imagination->coherence_threshold));
 }
 
 void freeImaginationSystem(ImaginationSystem *system) {
