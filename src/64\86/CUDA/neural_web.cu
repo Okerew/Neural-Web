@@ -698,6 +698,16 @@ typedef struct {
   int initialized;
 } AttentionParams;
 
+typedef struct {
+  char **samples;
+  int *labels;
+  int num_samples;
+  int current_index;
+  int batch_size;
+  int num_epochs;
+  int current_epoch;
+} DatasetLoader;
+
 static AttentionParams g_attention_params = {0};
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
@@ -13740,7 +13750,104 @@ void freeWorkingMemorySystem(WorkingMemorySystem *system) {
   }
 }
 
-int main() {
+DatasetLoader *createDatasetLoader(const char *filename, int batch_size) {
+  DatasetLoader *loader = (DatasetLoader *)malloc(sizeof(DatasetLoader));
+  if (!loader) {
+    fprintf(stderr, "Failed to allocate DatasetLoader\n");
+    return NULL;
+  }
+
+  loader->samples = (char **)malloc(MAX_SAMPLES * sizeof(char *));
+  loader->labels = (int *)malloc(MAX_SAMPLES * sizeof(int));
+  loader->num_samples = 0;
+  loader->current_index = 0;
+  loader->batch_size = batch_size;
+  loader->num_epochs = 0;
+  loader->current_epoch = 0;
+
+  FILE *file = fopen(filename, "r");
+  if (!file) {
+    fprintf(stderr, "Failed to open dataset file: %s\n", filename);
+    free(loader->samples);
+    free(loader->labels);
+    free(loader);
+    return NULL;
+  }
+
+  char line[MAX_LINE_LENGTH];
+  while (fgets(line, MAX_LINE_LENGTH, file) &&
+         loader->num_samples < MAX_SAMPLES) {
+    line[strcspn(line, "\n")] = 0;
+
+    char *tab = strchr(line, '\t');
+    if (tab) {
+      *tab = '\0';
+      loader->labels[loader->num_samples] = atoi(line);
+      loader->samples[loader->num_samples] = strdup(tab + 1);
+    } else {
+      loader->labels[loader->num_samples] = 0;
+      loader->samples[loader->num_samples] = strdup(line);
+    }
+    loader->num_samples++;
+  }
+
+  fclose(file);
+  printf("Loaded %d samples from dataset\n", loader->num_samples);
+  return loader;
+}
+
+int getNextBatch(DatasetLoader *loader, char ***batch_samples,
+                 int **batch_labels, int *actual_batch_size) {
+  if (loader->current_index >= loader->num_samples) {
+    loader->current_index = 0;
+    loader->current_epoch++;
+    return 0;
+  }
+
+  int remaining = loader->num_samples - loader->current_index;
+  *actual_batch_size =
+      (remaining < loader->batch_size) ? remaining : loader->batch_size;
+
+  *batch_samples = &loader->samples[loader->current_index];
+  *batch_labels = &loader->labels[loader->current_index];
+
+  loader->current_index += *actual_batch_size;
+  return 1;
+}
+
+void shuffleDataset(DatasetLoader *loader) {
+  for (int i = loader->num_samples - 1; i > 0; i--) {
+    int j = rand() % (i + 1);
+
+    char *temp_sample = loader->samples[i];
+    loader->samples[i] = loader->samples[j];
+    loader->samples[j] = temp_sample;
+
+    int temp_label = loader->labels[i];
+    loader->labels[i] = loader->labels[j];
+    loader->labels[j] = temp_label;
+  }
+}
+
+void resetDatasetLoader(DatasetLoader *loader) { loader->current_index = 0; }
+
+void freeDatasetLoader(DatasetLoader *loader) {
+  if (!loader)
+    return;
+
+  for (int i = 0; i < loader->num_samples; i++) {
+    free(loader->samples[i]);
+  }
+  free(loader->samples);
+  free(loader->labels);
+  free(loader);
+}
+
+int getDatasetProgress(DatasetLoader *loader) {
+  return (loader->current_index * 100) / loader->num_samples;
+}
+
+int main(int argc, char *argv[]) {
   loadVocabularyFromFile("vocabulary.txt");
 
   // Try to load existing memory system
@@ -15092,6 +15199,7 @@ int main() {
 
   // Cleanup
   freeMemorySystem(memorySystem);
+  freeDatasetLoader(dataset);
   freeMoralCompass(moralCompass);
   freeEmotionalSystem(emotional_system);
   freeImaginationSystem(imagination_system);
