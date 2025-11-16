@@ -1,0 +1,4 @@
+0	What is machine learning? It's a method of data analysis
+1	How does photosynthesis work? Plants convert light to energy
+0	What is the capital of France? Paris is the capital
+1	Explain quantum computing in simple terms
