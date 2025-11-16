@@ -34,10 +34,10 @@ USER $USERNAME
 # Copy the C source file with correct ownership
 COPY --chown=$USERNAME:$USERNAME neural_web.cpp ./
 
+COPY --chown=$USERNAME:$USERNAME definitions.h ./
+
 # Copy the vocabulary.txt file with correct ownership
 COPY --chown=$USERNAME:$USERNAME setup.py ./
-
-COPY --chown=$USERNAME:$USERNAME /replace/with/path/to/you/have/to/also/change/the/c/code/to/include/it/definitions.h ./
 
 RUN python3 setup.py sdist bdist_wheel
 
