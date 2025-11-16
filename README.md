@@ -1335,6 +1335,8 @@ Example of the training can be seen in the MacOS\Arm/neural_web.m file in int ma
 
 ## Needed information
 
+You can call ./process {dataset} to load a dataset.
+
 Note if you modify max_neurons in the example you have to also modify the input_size to be at max greater than the number of max_neurons by 1 or just lesser than the number of max_neurons or it will have an out of bounds error
 
 The model uses reverse pathways and generally doesn't only do patterns good because it also reverses its outputs and finds more meaning in it and additional pathways to achieve what it is supposed to similar to how humans do, or as how I think humans do, is very dynamic and has meta cognition capabilities.
