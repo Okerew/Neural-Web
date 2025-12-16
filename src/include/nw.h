@@ -624,6 +624,84 @@ typedef struct {
   float recency; // How recently this was accessed
 } ContextEmbedding;
 
+typedef struct {
+  char **samples;
+  int *labels;
+  int num_samples;
+  int current_index;
+  int batch_size;
+  int num_epochs;
+  int current_epoch;
+} DatasetLoader;
+
+typedef struct {
+  uint32_t entity_id;
+  char entity_name[64];
+  float attachment_strength;
+  float trust;
+  float familiarity;
+  float dependency;
+  float care_investment;
+  float loss_cost;
+  uint32_t shared_history_index;
+  float emotional_resonance;
+  float conflict_history;
+  uint32_t interaction_count;
+  float last_interaction_valence;
+  float predicted_behavior_alignment;
+  float emotional_debt;
+} AttachmentBond;
+
+typedef struct {
+  float valence;
+  float arousal;
+  float dominance;
+  float complexity;
+  float temporal_depth;
+  uint32_t duration_steps;
+  float stability;
+  float momentum[3];
+} EmotionVector;
+
+typedef struct {
+  uint32_t attractor_id;
+  char attractor_name[64];
+  EmotionVector center_point;
+  float basin_strength;
+  float entry_threshold;
+  float exit_threshold;
+  float stability_factor;
+  uint32_t visit_count;
+  float average_duration;
+  float *context_weights;
+  uint32_t context_dim;
+  bool is_pathological;
+  float reinforcement_rate;
+  uint32_t linked_attractors[5];
+  float transition_probabilities[5];
+} EmotionAttractor;
+
+typedef struct {
+  EmotionVector current_state;
+  EmotionVector base_state;
+  EmotionAttractor *attractors;
+  uint32_t num_attractors;
+  uint32_t current_attractor_id;
+  uint32_t steps_in_current_attractor;
+  EmotionVector history[EMOTION_HISTORY_SIZE];
+  uint32_t history_index;
+  float *affective_embeddings;
+  uint32_t embedding_dim;
+  float plasticity;
+  float self_complexity;
+  AttachmentBond *bonds;
+  uint32_t num_bonds;
+  uint32_t max_bonds;
+  float relational_bias;
+  float predictive_commitment_weight;
+  float subconscious_influence;
+} AffectiveSystem;
+
 MemorySystem *createMemorySystem(int capacity);
 void loadMemorySystem(const char *filename, MemorySystem *memorySystem);
 void saveMemorySystem(MemorySystem memorySystem, const char *filename);
@@ -773,19 +851,6 @@ void applyEthicalConstraints(MoralCompass *compass, Neuron *neurons,
 void generateEthicalReflection(MoralCompass *compass);
 void adaptEthicalFramework(MoralCompass *compass, float learning_rate);
 void freeMoralCompass(MoralCompass *compass);
-void freeEmotionalSystem(EmotionalSystem *system);
-void printEmotionalState(EmotionalSystem *system);
-void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
-                             float *target_outputs, int num_neurons,
-                             unsigned int timestamp);
-void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
-                              int num_neurons, float *input_tensor,
-                              float learning_rate, float plasticity);
-float calculateEmotionalBias(EmotionalSystem *system, float *input,
-                             int input_size);
-void updateEmotionalMemory(EmotionalSystem *system);
-void triggerEmotion(EmotionalSystem *system, int emotion_type,
-                    float trigger_strength, unsigned int timestamp);
 time_t getCurrentTime();
 float computeMSELoss(Neuron *neurons, float *target_outputs, int max_neurons);
 void verifyNetworkState(Neuron *neurons, TaskPrompt *current_prompt);
@@ -819,7 +884,6 @@ void initializeMetacognitionMetrics();
 void initializeMetaLearningState(int size);
 void createWorkingMemorySystem(int capacity);
 void initializeMoralCompass(int num_principles);
-EmotionalSystem *initializeEmotionalSystem();
 ImaginationSystem *initializeImaginationSystem(float creativity_factor,
                                                float coherence_threshold);
 ImaginationScenario createScenario(Neuron *neurons, MemorySystem *memory_system,
@@ -1041,4 +1105,53 @@ void systemFallbackCheck(
 
 void cleanupVocabulary();
 void cleanupEmbeddings();
+AffectiveSystem *initializeAffectiveSystem(unsigned int embed_dim);
+float computeEmotionDistance(EmotionVector *a, EmotionVector *b);
+void updateEmotionMomentum(EmotionVector *current, EmotionVector *target,
+                           float dt);
+unsigned int findNearestAttractor(AffectiveSystem *sys, float *context);
+void updateAttractorDynamics(AffectiveSystem *sys, float *context,
+                             unsigned int step);
+AttachmentBond *findOrCreateBond(AffectiveSystem *sys, unsigned int entity_id,
+                                 const char *name);
+void updateAttachmentBond(AffectiveSystem *sys, AttachmentBond *bond,
+                          float interaction_valence, float behavior_alignment,
+                          float emotional_exchange);
+void reshapeEmbeddingsWithEmotion(AffectiveSystem *sys, float *embeddings,
+                                  unsigned int embed_dim);
+void integrateAttachmentsIntoIdentity(AffectiveSystem *aff,
+                                      float *identity_core_values,
+                                      unsigned int num_values);
+void updatePredictiveCommitment(AffectiveSystem *aff, SocialSystem *social_sys,
+                                float prediction_error);
+void updateAffectiveComplexity(AffectiveSystem *sys, unsigned int step);
+void reinforceAttractorFromBond(AffectiveSystem *sys, AttachmentBond *bond,
+                                bool positive_interaction);
+void simulateEmotionalTrajectory(AffectiveSystem *sys, SocialSystem *social_sys,
+                                 float *context, int steps);
+void printAttractorAnalysis(AffectiveSystem *sys);
+EmotionalSystem *initializeEmotionalSystem();
+void triggerEmotion(EmotionalSystem *system, int emotion_type,
+                    float trigger_strength, unsigned int timestamp);
+void updateEmotionalMemory(EmotionalSystem *system);
+float calculateEmotionalBias(EmotionalSystem *system, float *input,
+                             int input_size);
+void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
+                              int num_neurons, float *input_tensor,
+                              float learning_rate, float plasticity,
+                              AffectiveSystem *aff_sys);
+void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
+                             float *target_outputs, int num_neurons,
+                             unsigned int timestamp, float satisfaction,
+                             AffectiveSystem *aff_sys,
+                             SocialSystem *social_sys);
+void printEmotionalState(EmotionalSystem *system);
+void freeEmotionalSystem(EmotionalSystem *system);
+int getDatasetProgress(DatasetLoader *loader);
+void freeDatasetLoader(DatasetLoader *loader);
+void resetDatasetLoader(DatasetLoader *loader) { loader->current_index = 0; }
+void shuffleDataset(DatasetLoader *loader);
+int getNextBatch(DatasetLoader *loader, char ***batch_samples,
+                 int **batch_labels, int *actual_batch_size);
+DatasetLoader *createDatasetLoader(const char *filename, int batch_size);
 #endif // NEURAL_WEB_H

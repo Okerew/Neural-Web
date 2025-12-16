@@ -710,6 +710,74 @@ typedef struct {
   int current_epoch;
 } DatasetLoader;
 
+typedef struct {
+  uint32_t entity_id;
+  char entity_name[64];
+  float attachment_strength;
+  float trust;
+  float familiarity;
+  float dependency;
+  float care_investment;
+  float loss_cost;
+  uint32_t shared_history_index;
+  float emotional_resonance;
+  float conflict_history;
+  uint32_t interaction_count;
+  float last_interaction_valence;
+  float predicted_behavior_alignment;
+  float emotional_debt;
+} AttachmentBond;
+
+typedef struct {
+  float valence;
+  float arousal;
+  float dominance;
+  float complexity;
+  float temporal_depth;
+  uint32_t duration_steps;
+  float stability;
+  float momentum[3];
+} EmotionVector;
+
+typedef struct {
+  uint32_t attractor_id;
+  char attractor_name[64];
+  EmotionVector center_point;
+  float basin_strength;
+  float entry_threshold;
+  float exit_threshold;
+  float stability_factor;
+  uint32_t visit_count;
+  float average_duration;
+  float *context_weights;
+  uint32_t context_dim;
+  bool is_pathological;
+  float reinforcement_rate;
+  uint32_t linked_attractors[5];
+  float transition_probabilities[5];
+} EmotionAttractor;
+
+typedef struct {
+  EmotionVector current_state;
+  EmotionVector base_state;
+  EmotionAttractor *attractors;
+  uint32_t num_attractors;
+  uint32_t current_attractor_id;
+  uint32_t steps_in_current_attractor;
+  EmotionVector history[EMOTION_HISTORY_SIZE];
+  uint32_t history_index;
+  float *affective_embeddings;
+  uint32_t embedding_dim;
+  float plasticity;
+  float self_complexity;
+  AttachmentBond *bonds;
+  uint32_t num_bonds;
+  uint32_t max_bonds;
+  float relational_bias;
+  float predictive_commitment_weight;
+  float subconscious_influence;
+} AffectiveSystem;
+
 static AttentionParams g_attention_params = {0};
 InternalSymbol symbol_table[MAX_SYMBOLS];
 InternalQuestion question_table[MAX_QUESTIONS];
@@ -10398,6 +10466,511 @@ void freeMoralCompass(MoralCompass *compass) {
   }
 }
 
+AffectiveSystem *initializeAffectiveSystem(uint32_t embed_dim) {
+  AffectiveSystem *sys = malloc(sizeof(AffectiveSystem));
+
+  sys->current_state = (EmotionVector){.valence = 0.0f,
+                                       .arousal = 0.3f,
+                                       .dominance = 0.5f,
+                                       .complexity = 0.2f,
+                                       .temporal_depth = 1.0f,
+                                       .duration_steps = 0,
+                                       .stability = 0.8f,
+                                       .momentum = {0.0f, 0.0f, 0.0f}};
+
+  sys->base_state = sys->current_state;
+  sys->num_attractors = 0;
+  sys->attractors = malloc(MAX_EMOTION_ATTRACTORS * sizeof(EmotionAttractor));
+  sys->current_attractor_id = UINT32_MAX;
+  sys->steps_in_current_attractor = 0;
+  sys->history_index = 0;
+
+  sys->embedding_dim = embed_dim;
+  sys->affective_embeddings = calloc(embed_dim, sizeof(float));
+
+  for (uint32_t i = 0; i < embed_dim; i++) {
+    sys->affective_embeddings[i] = ((float)rand() / RAND_MAX) * 0.2f - 0.1f;
+  }
+
+  sys->plasticity = 0.15f;
+  sys->self_complexity = 0.3f;
+
+  sys->num_bonds = 0;
+  sys->max_bonds = MAX_ATTACHMENT_BONDS;
+  sys->bonds = malloc(MAX_ATTACHMENT_BONDS * sizeof(AttachmentBond));
+
+  sys->relational_bias = 0.4f;
+  sys->predictive_commitment_weight = 0.6f;
+  sys->subconscious_influence = 0.2f;
+  return sys;
+}
+
+float computeEmotionDistance(EmotionVector *a, EmotionVector *b) {
+  float valence_diff = a->valence - b->valence;
+  float arousal_diff = a->arousal - b->arousal;
+  float dominance_diff = a->dominance - b->dominance;
+  float complexity_diff = (a->complexity - b->complexity) * 0.5f;
+  float depth_diff = (a->temporal_depth - b->temporal_depth) * 0.3f;
+
+  return sqrtf(valence_diff * valence_diff + arousal_diff * arousal_diff +
+               dominance_diff * dominance_diff +
+               complexity_diff * complexity_diff + depth_diff * depth_diff);
+}
+
+void updateEmotionMomentum(EmotionVector *current, EmotionVector *target,
+                           float dt) {
+  float valence_force = (target->valence - current->valence) * dt;
+  float arousal_force = (target->arousal - current->arousal) * dt;
+  float dominance_force = (target->dominance - current->dominance) * dt;
+
+  current->momentum[0] = current->momentum[0] * 0.9f + valence_force;
+  current->momentum[1] = current->momentum[1] * 0.9f + arousal_force;
+  current->momentum[2] = current->momentum[2] * 0.9f + dominance_force;
+
+  current->valence += current->momentum[0];
+  current->arousal += current->momentum[1];
+  current->dominance += current->momentum[2];
+
+  current->valence = fmaxf(-1.0f, fminf(1.0f, current->valence));
+  current->arousal = fmaxf(0.0f, fminf(1.0f, current->arousal));
+  current->dominance = fmaxf(0.0f, fminf(1.0f, current->dominance));
+}
+
+uint32_t findNearestAttractor(AffectiveSystem *sys, float *context) {
+  float min_dist = INFINITY;
+  uint32_t nearest = UINT32_MAX;
+
+  for (uint32_t i = 0; i < sys->num_attractors; i++) {
+    EmotionAttractor *attr = &sys->attractors[i];
+    float dist =
+        computeEmotionDistance(&sys->current_state, &attr->center_point);
+
+    if (context != NULL) {
+      float context_alignment = 0.0f;
+      for (uint32_t j = 0; j < sys->embedding_dim; j++) {
+        context_alignment += context[j] * attr->context_weights[j];
+      }
+      dist -= context_alignment * 0.3f;
+    }
+
+    float basin_pull =
+        attr->basin_strength * (1.0f + attr->visit_count * 0.01f);
+    dist /= basin_pull;
+
+    if (dist < min_dist) {
+      min_dist = dist;
+      nearest = i;
+    }
+  }
+
+  return nearest;
+}
+
+void updateAttractorDynamics(AffectiveSystem *sys, float *context,
+                             uint32_t step) {
+  uint32_t nearest = findNearestAttractor(sys, context);
+
+  if (nearest == UINT32_MAX)
+    return;
+
+  EmotionAttractor *attr = &sys->attractors[nearest];
+  float dist = computeEmotionDistance(&sys->current_state, &attr->center_point);
+
+  if (sys->current_attractor_id != nearest) {
+    if (dist < attr->entry_threshold) {
+      if (sys->current_attractor_id != UINT32_MAX) {
+        EmotionAttractor *prev = &sys->attractors[sys->current_attractor_id];
+        float avg = prev->average_duration;
+        float n = prev->visit_count;
+        prev->average_duration =
+            (avg * n + sys->steps_in_current_attractor) / (n + 1);
+      }
+
+      sys->current_attractor_id = nearest;
+      sys->steps_in_current_attractor = 0;
+      attr->visit_count++;
+
+      printf("Entered attractor: %s\n", attr->attractor_name);
+    }
+  } else {
+    sys->steps_in_current_attractor++;
+
+    if (dist > attr->exit_threshold) {
+      printf("Exited attractor: %s after %u steps\n", attr->attractor_name,
+             sys->steps_in_current_attractor);
+
+      for (uint32_t i = 0; i < 5; i++) {
+        if (attr->linked_attractors[i] != UINT32_MAX) {
+          if ((float)rand() / RAND_MAX < attr->transition_probabilities[i]) {
+            sys->current_attractor_id = attr->linked_attractors[i];
+            sys->steps_in_current_attractor = 0;
+            printf("Transitioned to linked attractor: %s\n",
+                   sys->attractors[sys->current_attractor_id].attractor_name);
+            return;
+          }
+        }
+      }
+
+      sys->current_attractor_id = UINT32_MAX;
+    }
+  }
+
+  if (sys->current_attractor_id != UINT32_MAX) {
+    EmotionAttractor *current_attr =
+        &sys->attractors[sys->current_attractor_id];
+    float pull_strength =
+        current_attr->basin_strength * current_attr->stability_factor;
+
+    if (current_attr->is_pathological) {
+      pull_strength *= current_attr->reinforcement_rate;
+      current_attr->basin_strength *= current_attr->reinforcement_rate;
+    }
+
+    updateEmotionMomentum(&sys->current_state, &current_attr->center_point,
+                          pull_strength * 0.1f);
+
+    sys->current_state.complexity =
+        sys->current_state.complexity * 0.95f +
+        current_attr->center_point.complexity * 0.05f;
+    sys->current_state.temporal_depth =
+        sys->current_state.temporal_depth * 0.98f +
+        current_attr->center_point.temporal_depth * 0.02f;
+  }
+}
+
+AttachmentBond *findOrCreateBond(AffectiveSystem *sys, uint32_t entity_id,
+                                 const char *name) {
+  for (uint32_t i = 0; i < sys->num_bonds; i++) {
+    if (sys->bonds[i].entity_id == entity_id) {
+      return &sys->bonds[i];
+    }
+  }
+
+  if (sys->num_bonds >= sys->max_bonds)
+    return NULL;
+
+  AttachmentBond *bond = &sys->bonds[sys->num_bonds++];
+  bond->entity_id = entity_id;
+  strncpy(bond->entity_name, name, 63);
+  bond->entity_name[63] = '\0';
+  bond->attachment_strength = 0.1f;
+  bond->trust = 0.5f;
+  bond->familiarity = 0.0f;
+  bond->dependency = 0.0f;
+  bond->care_investment = 0.0f;
+  bond->loss_cost = 0.0f;
+  bond->shared_history_index = 0;
+  bond->emotional_resonance = 0.0f;
+  bond->conflict_history = 0.0f;
+  bond->interaction_count = 0;
+  bond->last_interaction_valence = 0.0f;
+  bond->predicted_behavior_alignment = 0.5f;
+  bond->emotional_debt = 0.0f;
+
+  return bond;
+}
+
+void updateAttachmentBond(AffectiveSystem *sys, AttachmentBond *bond,
+                          float interaction_valence, float behavior_alignment,
+                          float emotional_exchange) {
+  bond->interaction_count++;
+  bond->last_interaction_valence = interaction_valence;
+
+  float familiarity_delta = 0.01f * (1.0f - bond->familiarity);
+  bond->familiarity += familiarity_delta;
+
+  float trust_delta = (behavior_alignment - 0.5f) * 0.05f;
+  bond->trust += trust_delta * (1.0f - bond->trust * 0.5f);
+  bond->trust = fmaxf(0.0f, fminf(1.0f, bond->trust));
+
+  float resonance_delta = emotional_exchange * 0.1f;
+  bond->emotional_resonance =
+      bond->emotional_resonance * 0.9f + resonance_delta;
+
+  if (interaction_valence < -0.3f) {
+    bond->conflict_history += 0.1f * (1.0f - bond->conflict_history);
+  } else {
+    bond->conflict_history *= 0.95f;
+  }
+
+  bond->care_investment +=
+      fmaxf(0.0f, interaction_valence) * 0.02f * bond->familiarity;
+
+  float attachment_target = bond->familiarity * 0.3f + bond->trust * 0.25f +
+                            bond->emotional_resonance * 0.2f +
+                            bond->care_investment * 0.15f +
+                            (1.0f - bond->conflict_history) * 0.1f;
+
+  bond->attachment_strength =
+      bond->attachment_strength * 0.95f + attachment_target * 0.05f;
+
+  bond->loss_cost = bond->attachment_strength * bond->care_investment *
+                    (1.0f + bond->dependency) * 0.5f;
+
+  bond->predicted_behavior_alignment =
+      bond->predicted_behavior_alignment * 0.9f + behavior_alignment * 0.1f;
+
+  float debt_change = (emotional_exchange > 0) ? emotional_exchange * 0.1f
+                                               : emotional_exchange * 0.05f;
+  bond->emotional_debt += debt_change;
+  bond->emotional_debt *= 0.98f;
+}
+
+void reshapeEmbeddingsWithEmotion(AffectiveSystem *sys, float *embeddings,
+                                  uint32_t embed_dim) {
+  float valence_scale = 1.0f + sys->current_state.valence * 0.3f;
+  float arousal_scale = 1.0f + sys->current_state.arousal * 0.2f;
+  float complexity_factor = sys->current_state.complexity;
+
+  for (uint32_t i = 0; i < embed_dim && i < sys->embedding_dim; i++) {
+    float affective_bias = sys->affective_embeddings[i];
+
+    float emotional_weight =
+        (sys->current_state.valence * 0.4f + sys->current_state.arousal * 0.3f +
+         sys->current_state.dominance * 0.3f) *
+        sys->plasticity;
+
+    embeddings[i] = embeddings[i] * valence_scale * arousal_scale +
+                    affective_bias * emotional_weight;
+
+    float attractor_influence = 0.0f;
+    if (sys->current_attractor_id != UINT32_MAX) {
+      EmotionAttractor *attr = &sys->attractors[sys->current_attractor_id];
+      attractor_influence =
+          attr->context_weights[i] * attr->basin_strength * 0.2f;
+    }
+    embeddings[i] += attractor_influence;
+
+    if (complexity_factor > 0.5f) {
+      float noise =
+          ((float)rand() / RAND_MAX - 0.5f) * complexity_factor * 0.1f;
+      embeddings[i] += noise;
+    }
+
+    sys->affective_embeddings[i] =
+        sys->affective_embeddings[i] * (1.0f - sys->plasticity) +
+        embeddings[i] * sys->plasticity * 0.01f;
+  }
+}
+
+void integrateAttachmentsIntoIdentity(AffectiveSystem *aff,
+                                      float *identity_core_values,
+                                      uint32_t num_values) {
+  if (!aff || !identity_core_values || num_values == 0)
+    return;
+
+  if (aff->num_bonds == 0 || aff->bonds == NULL)
+    return;
+
+  if (aff->num_bonds > aff->max_bonds)
+    aff->num_bonds = aff->max_bonds; // clamp corruption
+
+  float total_attachment_weight = 0.0f;
+
+  for (uint32_t i = 0; i < aff->num_bonds; i++) {
+    total_attachment_weight += fmaxf(0.0f, aff->bonds[i].attachment_strength);
+  }
+
+  if (total_attachment_weight < 0.01f)
+    return;
+
+  for (uint32_t i = 0; i < aff->num_bonds; i++) {
+    AttachmentBond *bond = &aff->bonds[i];
+
+    float strength = fmaxf(0.0f, bond->attachment_strength);
+    float bond_influence = strength / total_attachment_weight;
+
+    uint32_t value_idx = bond->entity_id % num_values;
+    identity_core_values[value_idx] +=
+        bond->care_investment * bond_influence * 0.1f;
+
+    uint32_t trust_idx = (bond->entity_id + 1) % num_values;
+    identity_core_values[trust_idx] += bond->trust * bond_influence * 0.05f;
+
+    if (bond->loss_cost > 0.5f) {
+      uint32_t vulnerability_idx = (bond->entity_id + 2) % num_values;
+      identity_core_values[vulnerability_idx] +=
+          bond->loss_cost * bond_influence * 0.08f;
+    }
+  }
+
+  aff->relational_bias =
+      fminf(0.8f, total_attachment_weight /
+                      (float)fmaxf(1.0f, (float)aff->max_bonds));
+}
+
+void updatePredictiveCommitment(AffectiveSystem *aff, SocialSystem *social_sys,
+                                float prediction_error) {
+  float adjustment =
+      -prediction_error * 0.1f * aff->predictive_commitment_weight;
+
+  aff->predictive_commitment_weight += adjustment;
+  aff->predictive_commitment_weight =
+      fmaxf(0.2f, fminf(0.9f, aff->predictive_commitment_weight));
+
+  if (!social_sys)
+    return;
+
+  for (int i = 0; i < social_sys->model_count; i++) {
+    PersonModel *model = &social_sys->person_models[i];
+
+    float confidence = model->prediction_confidence;
+    float trust = model->trust_level;
+
+    float influence = confidence * trust * 0.2f;
+
+    aff->current_state.complexity += influence * prediction_error;
+
+    if (prediction_error > 0.3f && confidence < 0.5f) {
+      EmotionVector conflict = {.valence = -0.4f - prediction_error * 0.2f,
+                                .arousal = 0.6f,
+                                .dominance = 0.3f,
+                                .complexity = 0.8f,
+                                .temporal_depth = 3.0f};
+      updateEmotionMomentum(&aff->current_state, &conflict, 0.1f);
+    }
+  }
+}
+
+void updateAffectiveComplexity(AffectiveSystem *sys, uint32_t step) {
+  float complexity_target = 0.2f;
+
+  uint32_t recent_attractors[10] = {0};
+  uint32_t unique_count = 0;
+
+  for (int i = 0; i < 10 && i <= (int)step; i++) {
+    uint32_t hist_idx = (sys->history_index - i - 1 + EMOTION_HISTORY_SIZE) %
+                        EMOTION_HISTORY_SIZE;
+    EmotionVector *hist = &sys->history[hist_idx];
+
+    bool found = false;
+    for (uint32_t j = 0; j < unique_count; j++) {
+      if (fabsf(hist->valence - sys->history[recent_attractors[j]].valence) <
+          0.2f) {
+        found = true;
+        break;
+      }
+    }
+    if (!found && unique_count < 10) {
+      recent_attractors[unique_count++] = hist_idx;
+    }
+  }
+
+  complexity_target += (float)unique_count * 0.08f;
+
+  for (uint32_t i = 0; i < sys->num_bonds; i++) {
+    if (sys->bonds[i].conflict_history > 0.3f) {
+      complexity_target += sys->bonds[i].conflict_history * 0.1f;
+    }
+  }
+
+  complexity_target += sys->subconscious_influence * 0.15f;
+
+  sys->self_complexity =
+      sys->self_complexity * 0.95f + complexity_target * 0.05f;
+  sys->current_state.complexity = sys->self_complexity;
+
+  sys->plasticity = 0.1f + sys->self_complexity * 0.15f;
+}
+
+void reinforceAttractorFromBond(AffectiveSystem *sys, AttachmentBond *bond,
+                                bool positive_interaction) {
+  if (sys->current_attractor_id == UINT32_MAX)
+    return;
+
+  EmotionAttractor *current = &sys->attractors[sys->current_attractor_id];
+
+  float bond_strength = bond->attachment_strength;
+
+  if (positive_interaction && bond_strength > 0.5f) {
+    current->basin_strength *= 1.02f;
+    current->basin_strength = fminf(1.5f, current->basin_strength);
+
+    current->stability_factor = fminf(0.95f, current->stability_factor + 0.01f);
+  } else if (!positive_interaction && bond_strength > 0.5f) {
+    if (current->center_point.valence < 0.0f) {
+      current->basin_strength *= 1.05f;
+      current->is_pathological =
+          (current->basin_strength > 1.0f) ? true : current->is_pathological;
+    }
+  }
+
+  for (uint32_t i = 0; i < sys->embedding_dim; i++) {
+    float bond_signature =
+        sinf((float)bond->entity_id * 0.1f + (float)i * 0.05f);
+    current->context_weights[i] += bond_signature * bond_strength * 0.01f;
+  }
+}
+
+void simulateEmotionalTrajectory(AffectiveSystem *sys, SocialSystem *social_sys,
+                                 float *context, int steps) {
+  printf("\n=== Emotional Trajectory Simulation ===\n");
+
+  for (int step = 0; step < steps; step++) {
+
+    sys->history[sys->history_index] = sys->current_state;
+    sys->history_index = (sys->history_index + 1) % EMOTION_HISTORY_SIZE;
+
+    updateAttractorDynamics(sys, context, step);
+
+    if (social_sys && step % 5 == 0 && social_sys->model_count > 0) {
+
+      int idx = rand() % social_sys->model_count;
+      PersonModel *model = &social_sys->person_models[idx];
+
+      float simulated_alignment = model->prediction_confidence *
+                                  (1.0f - fabsf(sys->current_state.valence));
+
+      model->prediction_confidence +=
+          simulated_alignment * social_sys->learning_rate;
+
+      model->prediction_confidence =
+          fminf(1.0f, fmaxf(0.0f, model->prediction_confidence));
+    }
+
+    updateAffectiveComplexity(sys, step);
+
+    if (step % 10 == 0) {
+      float mock_error = fabsf((float)rand() / RAND_MAX - 0.5f) * 0.4f;
+      updatePredictiveCommitment(sys, social_sys, mock_error);
+    }
+
+    if (step % 20 == 0) {
+      printf("\nStep %u\n", step);
+      printf("  V=%.2f A=%.2f D=%.2f C=%.2f\n", sys->current_state.valence,
+             sys->current_state.arousal, sys->current_state.dominance,
+             sys->current_state.complexity);
+      printf("  Predictive Commitment: %.2f\n",
+             sys->predictive_commitment_weight);
+    }
+  }
+}
+
+void printAttractorAnalysis(AffectiveSystem *sys) {
+  printf("\n=== Attractor Basin Analysis ===\n");
+
+  for (uint32_t i = 0; i < sys->num_attractors; i++) {
+    EmotionAttractor *attr = &sys->attractors[i];
+    printf("\n%s:\n", attr->attractor_name);
+    printf("  Basin Strength: %.3f\n", attr->basin_strength);
+    printf("  Visit Count: %u\n", attr->visit_count);
+    printf("  Avg Duration: %.1f steps\n", attr->average_duration);
+    printf("  Pathological: %s\n", attr->is_pathological ? "YES" : "NO");
+    printf("  Center: V=%.2f A=%.2f D=%.2f\n", attr->center_point.valence,
+           attr->center_point.arousal, attr->center_point.dominance);
+
+    printf("  Linked to: ");
+    for (uint32_t j = 0; j < 5; j++) {
+      if (attr->linked_attractors[j] != UINT32_MAX) {
+        printf("%s(%.2f) ",
+               sys->attractors[attr->linked_attractors[j]].attractor_name,
+               attr->transition_probabilities[j]);
+      }
+    }
+    printf("\n");
+  }
+}
+
 EmotionalSystem *initializeEmotionalSystem() {
   EmotionalSystem *system = (EmotionalSystem *)malloc(sizeof(EmotionalSystem));
   if (!system) {
@@ -10504,7 +11077,8 @@ float calculateEmotionalBias(EmotionalSystem *system, float *input,
 
 void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
                               int num_neurons, float *input_tensor,
-                              float learning_rate, float plasticity) {
+                              float learning_rate, float plasticity,
+                              AffectiveSystem *aff_sys) {
   float emotional_bias =
       calculateEmotionalBias(system, input_tensor, num_neurons);
 
@@ -10519,7 +11093,6 @@ void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
   float anticipation_intensity = 0.0f;
   float trust_intensity = 0.0f;
 
-  // Positive-based derivations
   if (love_intensity > 0.2f) {
     trust_intensity += love_intensity * 0.6f;
     joy_intensity += love_intensity * 0.5f;
@@ -10530,7 +11103,6 @@ void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
     anticipation_intensity += trust_intensity * 0.4f;
   }
 
-  // Negative-based derivations
   if (hate_intensity > 0.2f) {
     disgust_intensity += hate_intensity * 0.5f;
     fear_intensity += hate_intensity * 0.4f;
@@ -10541,7 +11113,6 @@ void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
     anticipation_intensity += fear_intensity * 0.3f;
   }
 
-  // Joy and trust may lead to surprise (delight)
   if (joy_intensity > 0.3f && surprise_intensity < 0.2f) {
     surprise_intensity += joy_intensity * 0.2f;
   }
@@ -10556,17 +11127,24 @@ void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
                   joy_intensity + surprise_intensity +
                   0.5f * anticipation_intensity;
 
+  if (aff_sys != NULL) {
+    aff_sys->current_state.valence =
+        aff_sys->current_state.valence * 0.7f + valence_bias * 0.3f;
+    aff_sys->current_state.arousal =
+        aff_sys->current_state.arousal * 0.7f + arousal * 0.3f;
+
+    float complexity_factor = positive_valence * negative_valence * 2.0f;
+    aff_sys->current_state.complexity =
+        aff_sys->current_state.complexity * 0.9f + complexity_factor * 0.1f;
+
+    reshapeEmbeddingsWithEmotion(aff_sys, input_tensor, num_neurons);
+  }
+
   for (int i = 0; i < num_neurons; i++) {
-    // Shift perception based on valence
     neurons[i].state += valence_bias * 0.25f;
-
-    // Enhance activation based on arousal
     neurons[i].state *= (1.0f + arousal * 0.15f);
-
-    // Apply emotional bias uniformly
     neurons[i].state += emotional_bias * 0.2f;
 
-    // Emotion-specific modulation
     if (love_intensity > 0.2f) {
       plasticity *= (1.0f + love_intensity * 0.3f);
       neurons[i].state += love_intensity * 0.15f;
@@ -10591,51 +11169,91 @@ void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
       learning_rate *= (1.0f + surprise_intensity * 0.5f);
     }
 
-    // Small emotional noise
     float emotional_noise = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) *
                             (positive_valence + negative_valence) * 0.05f;
     neurons[i].state += emotional_noise;
   }
 
   if (love_intensity > 0.5f || hate_intensity > 0.5f) {
-    printf("Emotional processing applied - Valence: %.2f, Arousal: %.2f\n",
+    printf("Emotional processing - Valence: %.2f, Arousal: %.2f\n",
            valence_bias, arousal);
-    printf("Emotional dimensions - Love: %.2f, Hate: %.2f, Joy: %.2f, Fear: "
-           "%.2f, Trust: %.2f, Surprise: %.2f\n",
-           love_intensity, hate_intensity, joy_intensity, fear_intensity,
-           trust_intensity, surprise_intensity);
+    if (aff_sys != NULL) {
+      printf("Affective complexity: %.2f, Self-complexity: %.2f\n",
+             aff_sys->current_state.complexity, aff_sys->self_complexity);
+    }
   }
 }
 
 void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
                              float *target_outputs, int num_neurons,
-                             unsigned int timestamp, float satisfaction) {
+                             unsigned int timestamp, float satisfaction,
+                             AffectiveSystem *aff_sys,
+                             SocialSystem *social_sys) {
   float love_trigger = 0.0f;
   float hate_trigger = 0.0f;
-  float problem_difficulty = 0.0f;
   float error_rate = 0.0f;
 
-  // Calculate error rate as a measure of problem difficulty
   for (int i = 0; i < num_neurons; i++) {
-    error_rate += fabs(neurons[i].output - target_outputs[i]);
+    error_rate += fabsf(neurons[i].output - target_outputs[i]);
   }
-  error_rate /= num_neurons;
-  problem_difficulty = fmin(1.0f, error_rate * 2.0f);
+  error_rate /= (float)num_neurons;
 
-  // Clamp satisfaction to ensure it's within [0, 1] range
-  satisfaction = fmin(1.0f, fmax(0.0f, satisfaction));
+  float problem_difficulty = fminf(1.0f, error_rate * 2.0f);
+  satisfaction = fminf(1.0f, fmaxf(0.0f, satisfaction));
 
-  // Generate love trigger based on problem-solving success and satisfaction
   love_trigger = (1.0f - problem_difficulty) * satisfaction;
-
-  // Generate hate trigger based on problem-solving difficulty and satisfaction
   hate_trigger = problem_difficulty * (1.0f - satisfaction) * 0.7f;
 
-  // Apply triggers
   triggerEmotion(system, EMOTION_LOVE, love_trigger, timestamp);
   triggerEmotion(system, EMOTION_HATE, hate_trigger, timestamp);
 
-  // Update memory
+  if (!aff_sys) {
+    updateEmotionalMemory(system);
+    return;
+  }
+
+  if (love_trigger > 0.3f) {
+    EmotionVector target = {.valence = 0.6f + love_trigger * 0.3f,
+                            .arousal = 0.5f + love_trigger * 0.2f,
+                            .dominance = 0.6f,
+                            .complexity = 0.4f,
+                            .temporal_depth = 2.0f};
+    updateEmotionMomentum(&aff_sys->current_state, &target, 0.15f);
+  }
+
+  if (hate_trigger > 0.3f) {
+    EmotionVector target = {.valence = -0.5f - hate_trigger * 0.3f,
+                            .arousal = 0.7f + hate_trigger * 0.2f,
+                            .dominance = 0.4f,
+                            .complexity = 0.6f,
+                            .temporal_depth = 3.0f};
+    updateEmotionMomentum(&aff_sys->current_state, &target, 0.15f);
+  }
+
+  updateAffectiveComplexity(aff_sys, timestamp);
+
+  if (social_sys && social_sys->model_count > 0) {
+    for (int i = 0; i < social_sys->model_count; i++) {
+      PersonModel *model = &social_sys->person_models[i];
+
+      float interaction_valence = system->emotions[EMOTION_LOVE].intensity -
+                                  system->emotions[EMOTION_HATE].intensity;
+
+      model->relationship_quality +=
+          interaction_valence * social_sys->learning_rate;
+
+      model->trust_level +=
+          interaction_valence * 0.5f * social_sys->learning_rate;
+
+      model->relationship_quality =
+          fminf(1.0f, fmaxf(-1.0f, model->relationship_quality));
+
+      model->trust_level = fminf(1.0f, fmaxf(0.0f, model->trust_level));
+
+      model->interaction_count++;
+    }
+  }
+
   updateEmotionalMemory(system);
 }
 
@@ -13858,6 +14476,27 @@ PYBIND11_MODULE(neural_web, m) {
   imagination.def("updateImaginationCreativity", &updateImaginationCreativity);
   imagination.def("freeImaginationSystem", &freeImaginationSystem);
   imagination.def("validateImaginationSystem", &validateImaginationSystem);
+
+  // Affective System
+  auto affective = m.def_submodule("affective", "Affective System Functions");
+  affective.def("initializeAffectiveSystem", &initializeAffectiveSystem);
+  affective.def("computeEmotionDistance", &computeEmotionDistance);
+  affective.def("updateEmotionMomentum", &updateEmotionMomentum);
+  affective.def("findNearestAttractor", &findNearestAttractor);
+  affective.def("updateAttractorDynamics", &updateAttractorDynamics);
+  affective.def("findOrCreateBond", &findOrCreateBond);
+  affective.def("updateAttachmentBond", &updateAttachmentBond);
+  affective.def("reshapeEmbeddingsWithEmotion", &reshapeEmbeddingsWithEmotion);
+  affective.def("integrateAttachmentsIntoIdentity",
+                &integrateAttachmentsIntoIdentity);
+  affective.def("updatePredictiveCommitment", &updatePredictiveCommitment);
+  affective.def("updateAffectiveComplexity", &updateAffectiveComplexity);
+  affective.def("reinforceAttractorFromBond", &reinforceAttractorFromBond);
+  affective.def("simulateEmotionalTrajectory", &simulateEmotionalTrajectory);
+  affective.def("printAttractorAnalysis", &printAttractorAnalysis);
+  affective.def("triggerEmotion", &triggerEmotion);
+  affective.def("updateEmotionalMemory", &updateEmotionalMemory);
+  affective.def("calculateEmotionalBias", &calculateEmotionalBias);
 
   // Emotional + Social
   auto affect = m.def_submodule("affect", "Emotion & Social Functions");
