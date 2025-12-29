@@ -50,8 +50,6 @@ golang for the converter
 
 docker
 
-osxiec - https://github.com/Okerew/osxiec
-
 ## Disclaimer
 
 <img src="https://github.com/Okerew/Neural-Web/blob/main/security_logs.png">
