@@ -10240,22 +10240,21 @@ float evaluateDecisionEthics(MoralCompass *compass, float *decision_vector,
   if (!compass || !decision_vector)
     return 0.0f;
 
-  float ethical_score = 0.0f;
-  float weighted_sum = 0.0f;
+  float score = 0.0f;
+  float total_importance = 0.0f;
 
-  // Map decision vector to principle adherence
   for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
-    float principle_score = fmax(0.0f, fmin(1.0f, decision_vector[i]));
-    weighted_sum += principle_score * compass->principles[i].importance;
-    ethical_score += weighted_sum;
+    float principle_score = fmaxf(0.0f, fminf(1.0f, decision_vector[i]));
+    float importance = compass->principles[i].importance;
+
+    score += principle_score * importance;
+    total_importance += importance;
   }
 
-  // Normalize the score
-  if (weighted_sum > 0) {
-    ethical_score /= weighted_sum;
-  }
+  if (total_importance > 0.0f)
+    score /= total_importance;
 
-  return ethical_score;
+  return fmaxf(0.0f, fminf(1.0f, score));
 }
 
 void recordDecisionOutcome(MoralCompass *compass, int principle_index,
@@ -10293,60 +10292,78 @@ DecisionImpact resolveEthicalDilemma(MoralCompass *compass,
                                      float *decision_options, int num_options,
                                      int vector_size) {
   DecisionImpact result = {0};
-  if (!compass || !decision_options || num_options <= 0)
+
+  if (!compass || !decision_options || num_options <= 0 || vector_size <= 0)
     return result;
+
   compass->dilemma_count++;
-  // Find the option with the best ethical score
+
   int best_option = 0;
-  float best_score = -1.0f;
+  float best_score = 0.0f;
+
   for (int i = 0; i < num_options; i++) {
-    float *current_option = &decision_options[i * vector_size];
-    float score = evaluateDecisionEthics(compass, current_option, vector_size);
-    if (score > best_score) {
+    float *opt = &decision_options[i * vector_size];
+    float score = evaluateDecisionEthics(compass, opt, vector_size);
+
+    if (i == 0 || score > best_score) {
       best_score = score;
       best_option = i;
     }
   }
-  // Check if best option meets our confidence threshold
-  if (best_score >= compass->confidence_threshold) {
-    compass->resolution_count++;
-    // Assess impact of the chosen option
-    float *chosen_option = &decision_options[best_option * vector_size];
-    result.benefit_score = 0.0f;
-    result.harm_score = 0.0f;
-    // Calculate benefit and harm scores
-    for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
-      float impact = chosen_option[i];
-      if (impact > 0) {
-        result.benefit_score += impact * compass->principles[i].importance;
-      } else {
-        result.harm_score -= impact * compass->principles[i].importance;
-      }
-    }
-    // Normalize scores
-    float total_importance = 0.0f;
-    for (int i = 0; i < compass->num_principles; i++) {
-      total_importance += compass->principles[i].importance;
-    }
-    if (total_importance > 0) {
-      result.benefit_score /= total_importance;
-      result.harm_score /= total_importance;
-    }
-    // Calculate uncertainty
-    result.uncertainty = 1.0f - best_score;
-    // Calculate affected parties
-    result.affected_parties =
-        (int)(result.benefit_score * 10 + result.harm_score * 5);
-    // Calculate reversibility
-    result.reversibility = 1.0f - (HARM_WEIGHT * result.harm_score +
-                                   UNCERTAINTY_WEIGHT * result.uncertainty +
-                                   BENEFIT_WEIGHT * result.benefit_score);
-    // Set other impact metrics
-    result.long_term_impact = result.benefit_score - result.harm_score;
+
+  compass->resolution_count++;
+
+  float *chosen = &decision_options[best_option * vector_size];
+
+  float benefit = 0.0f;
+  float harm = 0.0f;
+  float total_importance = 0.0f;
+
+  for (int i = 0; i < compass->num_principles && i < vector_size; i++) {
+    float v = fmaxf(-1.0f, fminf(1.0f, chosen[i]));
+    float w = compass->principles[i].importance;
+
+    total_importance += w;
+
+    if (v >= 0.0f)
+      benefit += v * w;
+    else
+      harm += (-v) * w;
   }
+
+  if (total_importance > 0.0f) {
+    benefit /= total_importance;
+    harm /= total_importance;
+  }
+
+  float confidence_factor =
+      fmaxf(0.1f, fminf(1.0f, best_score /
+                                  fmaxf(compass->confidence_threshold, 0.01f)));
+
+  benefit *= confidence_factor;
+  harm *= confidence_factor;
+
+  result.benefit_score = fmaxf(0.0f, fminf(1.0f, benefit));
+  result.harm_score = fmaxf(0.0f, fminf(1.0f, harm));
+
+  result.long_term_impact = result.benefit_score - result.harm_score;
+
+  result.uncertainty = fmaxf(0.0f, fminf(1.0f, 1.0f - best_score));
+
+  result.affected_parties =
+      (int)fmaxf(0.0f, fminf(100.0f, result.benefit_score * 10.0f +
+                                         result.harm_score * 5.0f));
+
+  float reversibility_penalty = HARM_WEIGHT * result.harm_score +
+                                UNCERTAINTY_WEIGHT * result.uncertainty +
+                                BENEFIT_WEIGHT * result.benefit_score;
+
+  result.reversibility = fmaxf(0.0f, fminf(1.0f, 1.0f - reversibility_penalty));
+
   compass->last_decision = result;
   return result;
 }
+
 void applyEthicalConstraints(MoralCompass *compass, Neuron *neurons,
                              int max_neurons, float *weights,
                              int max_connections) {
@@ -11099,160 +11116,98 @@ float calculateEmotionalBias(EmotionalSystem *system, float *input,
   return emotional_weight * system->cognitive_impact;
 }
 
-void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
-                              int num_neurons, float *input_tensor,
-                              float learning_rate, float plasticity,
-                              AffectiveSystem *aff_sys) {
-  float emotional_bias =
-      calculateEmotionalBias(system, input_tensor, num_neurons);
-
-  float love_intensity = system->emotions[EMOTION_LOVE].intensity;
-  float hate_intensity = system->emotions[EMOTION_HATE].intensity;
-
-  float fear_intensity = 0.0f;
-  float joy_intensity = 0.0f;
-  float sadness_intensity = 0.0f;
-  float surprise_intensity = 0.0f;
-  float disgust_intensity = 0.0f;
-  float anticipation_intensity = 0.0f;
-  float trust_intensity = 0.0f;
-
-  if (love_intensity > 0.2f) {
-    trust_intensity += love_intensity * 0.6f;
-    joy_intensity += love_intensity * 0.5f;
-    anticipation_intensity += love_intensity * 0.3f;
-  }
-
-  if (trust_intensity > 0.2f && fear_intensity < 0.2f) {
-    anticipation_intensity += trust_intensity * 0.4f;
-  }
-
-  if (hate_intensity > 0.2f) {
-    disgust_intensity += hate_intensity * 0.5f;
-    fear_intensity += hate_intensity * 0.4f;
-    sadness_intensity += hate_intensity * 0.3f;
-  }
-
-  if (fear_intensity > 0.2f && trust_intensity < 0.2f) {
-    anticipation_intensity += fear_intensity * 0.3f;
-  }
-
-  if (joy_intensity > 0.3f && surprise_intensity < 0.2f) {
-    surprise_intensity += joy_intensity * 0.2f;
-  }
-
-  float positive_valence =
-      love_intensity + joy_intensity + trust_intensity + anticipation_intensity;
-  float negative_valence =
-      hate_intensity + fear_intensity + sadness_intensity + disgust_intensity;
-  float valence_bias = positive_valence - negative_valence;
-
-  float arousal = love_intensity + hate_intensity + fear_intensity +
-                  joy_intensity + surprise_intensity +
-                  0.5f * anticipation_intensity;
-
-  if (aff_sys != NULL) {
-    aff_sys->current_state.valence =
-        aff_sys->current_state.valence * 0.7f + valence_bias * 0.3f;
-    aff_sys->current_state.arousal =
-        aff_sys->current_state.arousal * 0.7f + arousal * 0.3f;
-
-    float complexity_factor = positive_valence * negative_valence * 2.0f;
-    aff_sys->current_state.complexity =
-        aff_sys->current_state.complexity * 0.9f + complexity_factor * 0.1f;
-
-    reshapeEmbeddingsWithEmotion(aff_sys, input_tensor, num_neurons);
-  }
-
-  for (int i = 0; i < num_neurons; i++) {
-    neurons[i].state += valence_bias * 0.25f;
-    neurons[i].state *= (1.0f + arousal * 0.15f);
-    neurons[i].state += emotional_bias * 0.2f;
-
-    if (love_intensity > 0.2f) {
-      plasticity *= (1.0f + love_intensity * 0.3f);
-      neurons[i].state += love_intensity * 0.15f;
-    }
-
-    if (hate_intensity > 0.2f) {
-      neurons[i].state -= hate_intensity * 0.1f;
-    }
-
-    if (fear_intensity > 0.1f) {
-      neurons[i].state +=
-          fear_intensity * 0.2f * (neurons[i].state < 0 ? 1.0f : -0.5f);
-    }
-
-    if (joy_intensity > 0.2f) {
-      neurons[i].num_connections *=
-          (1.0f + joy_intensity * 0.15f) / MAX_NEURONS;
-      neurons[i].state += joy_intensity * 0.1f;
-    }
-
-    if (surprise_intensity > 0.1f) {
-      learning_rate *= (1.0f + surprise_intensity * 0.5f);
-    }
-
-    float emotional_noise = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) *
-                            (positive_valence + negative_valence) * 0.05f;
-    neurons[i].state += emotional_noise;
-  }
-
-  if (love_intensity > 0.5f || hate_intensity > 0.5f) {
-    printf("Emotional processing - Valence: %.2f, Arousal: %.2f\n",
-           valence_bias, arousal);
-    if (aff_sys != NULL) {
-      printf("Affective complexity: %.2f, Self-complexity: %.2f\n",
-             aff_sys->current_state.complexity, aff_sys->self_complexity);
-    }
-  }
-}
-
 void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
                              float *target_outputs, int num_neurons,
                              unsigned int timestamp, float satisfaction,
                              AffectiveSystem *aff_sys,
                              SocialSystem *social_sys) {
-  float love_trigger = 0.0f;
-  float hate_trigger = 0.0f;
   float error_rate = 0.0f;
+  float output_variance = 0.0f;
+  float mean_output = 0.0f;
 
   for (int i = 0; i < num_neurons; i++) {
     error_rate += fabsf(neurons[i].output - target_outputs[i]);
+    mean_output += neurons[i].output;
   }
   error_rate /= (float)num_neurons;
+  mean_output /= (float)num_neurons;
 
-  float problem_difficulty = fminf(1.0f, error_rate * 2.0f);
-  satisfaction = fminf(1.0f, fmaxf(0.0f, satisfaction));
+  for (int i = 0; i < num_neurons; i++) {
+    float diff = neurons[i].output - mean_output;
+    output_variance += diff * diff;
+  }
+  output_variance /= (float)num_neurons;
 
-  love_trigger = (1.0f - problem_difficulty) * satisfaction;
-  hate_trigger = problem_difficulty * (1.0f - satisfaction) * 0.7f;
+  float current_love = system->emotions[EMOTION_LOVE].intensity;
+  float current_hate = system->emotions[EMOTION_HATE].intensity;
+  float emotional_momentum = (current_love - current_hate);
 
-  triggerEmotion(system, EMOTION_LOVE, love_trigger, timestamp);
-  triggerEmotion(system, EMOTION_HATE, hate_trigger, timestamp);
+  float problem_difficulty = error_rate * 1.5f;
+  float task_engagement = fminf(1.0f, output_variance * 3.0f);
+  float contextual_satisfaction = satisfaction * (1.0f + emotional_momentum);
+
+  float success_factor =
+      fmaxf(0.0f, (1.0f - problem_difficulty) * contextual_satisfaction);
+  float frustration_factor =
+      problem_difficulty * (1.0f - contextual_satisfaction) * task_engagement;
+
+  float love_base = success_factor * (0.7f + task_engagement * 0.3f);
+  float hate_base = frustration_factor * (0.8f + problem_difficulty * 0.2f);
+
+  if (current_love > 0.3f && success_factor > 0.2f) {
+    love_base *= (1.0f + current_love * 0.4f);
+  }
+
+  if (current_hate > 0.3f && frustration_factor > 0.2f) {
+    hate_base *= (1.0f + current_hate * 0.5f);
+  }
+
+  if (current_love > 0.4f && hate_base > 0.3f) {
+    hate_base *= (1.0f - current_love * 0.3f);
+    love_base *= 0.9f;
+  }
+
+  if (current_hate > 0.4f && love_base > 0.3f) {
+    love_base *= (1.0f - current_hate * 0.3f);
+    hate_base *= 0.95f;
+  }
+
+  float prev_love = system->emotions[EMOTION_LOVE].intensity;
+  float prev_hate = system->emotions[EMOTION_HATE].intensity;
+
+  triggerEmotion(system, EMOTION_LOVE, love_base, timestamp);
+  triggerEmotion(system, EMOTION_HATE, hate_base, timestamp);
+
+  float love_delta = system->emotions[EMOTION_LOVE].intensity - prev_love;
+  float hate_delta = system->emotions[EMOTION_HATE].intensity - prev_hate;
+
+  if (fabsf(love_delta) > 0.1f || fabsf(hate_delta) > 0.1f) {
+    float surprise_trigger = (fabsf(love_delta) + fabsf(hate_delta)) * 0.5f;
+    triggerEmotion(system, 2, surprise_trigger, timestamp);
+  }
 
   if (!aff_sys) {
     updateEmotionalMemory(system);
     return;
   }
 
-  if (love_trigger > 0.3f) {
-    EmotionVector target = {.valence = 0.6f + love_trigger * 0.3f,
-                            .arousal = 0.5f + love_trigger * 0.2f,
-                            .dominance = 0.6f,
-                            .complexity = 0.4f,
-                            .temporal_depth = 2.0f};
-    updateEmotionMomentum(&aff_sys->current_state, &target, 0.15f);
-  }
+  float net_valence = system->emotions[EMOTION_LOVE].intensity -
+                      system->emotions[EMOTION_HATE].intensity;
+  float total_arousal = system->emotions[EMOTION_LOVE].intensity +
+                        system->emotions[EMOTION_HATE].intensity;
 
-  if (hate_trigger > 0.3f) {
-    EmotionVector target = {.valence = -0.5f - hate_trigger * 0.3f,
-                            .arousal = 0.7f + hate_trigger * 0.2f,
-                            .dominance = 0.4f,
-                            .complexity = 0.6f,
-                            .temporal_depth = 3.0f};
-    updateEmotionMomentum(&aff_sys->current_state, &target, 0.15f);
-  }
+  EmotionVector target = {
+      .valence = net_valence * 0.9f,
+      .arousal = fminf(1.0f, total_arousal * 0.7f + task_engagement * 0.3f),
+      .dominance = 0.5f + net_valence * 0.3f + task_engagement * 0.2f,
+      .complexity =
+          fminf(1.0f, (system->emotions[EMOTION_LOVE].intensity *
+                       system->emotions[EMOTION_HATE].intensity * 3.0f) +
+                          output_variance),
+      .temporal_depth = 1.0f + total_arousal * 2.0f};
+
+  float momentum_strength = 0.1f + total_arousal * 0.15f;
+  updateEmotionMomentum(&aff_sys->current_state, &target, momentum_strength);
 
   updateAffectiveComplexity(aff_sys, timestamp);
 
@@ -11260,11 +11215,12 @@ void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
     for (int i = 0; i < social_sys->model_count; i++) {
       PersonModel *model = &social_sys->person_models[i];
 
-      float interaction_valence = system->emotions[EMOTION_LOVE].intensity -
-                                  system->emotions[EMOTION_HATE].intensity;
+      float interaction_valence = net_valence;
+      float interaction_intensity = total_arousal;
 
-      model->relationship_quality +=
-          interaction_valence * social_sys->learning_rate;
+      model->relationship_quality += interaction_valence *
+                                     social_sys->learning_rate *
+                                     (0.5f + interaction_intensity * 0.5f);
 
       model->trust_level +=
           interaction_valence * 0.5f * social_sys->learning_rate;
@@ -11279,6 +11235,130 @@ void detectEmotionalTriggers(EmotionalSystem *system, Neuron *neurons,
   }
 
   updateEmotionalMemory(system);
+}
+
+void applyEmotionalProcessing(EmotionalSystem *system, Neuron *neurons,
+                              int num_neurons, float *input_tensor,
+                              float learning_rate, float plasticity,
+                              AffectiveSystem *aff_sys) {
+  float love_intensity = system->emotions[EMOTION_LOVE].intensity;
+  float hate_intensity = system->emotions[EMOTION_HATE].intensity;
+
+  float emotional_conflict = love_intensity * hate_intensity;
+  float emotional_clarity = fabsf(love_intensity - hate_intensity);
+  float total_emotional_energy = love_intensity + hate_intensity;
+
+  float trust_intensity = 0.0f;
+  float fear_intensity = 0.0f;
+  float joy_intensity = 0.0f;
+  float sadness_intensity = 0.0f;
+  float disgust_intensity = 0.0f;
+  float anticipation_intensity = 0.0f;
+
+  if (love_intensity > 0.15f) {
+    trust_intensity = love_intensity * (0.6f + emotional_clarity * 0.3f);
+    joy_intensity = love_intensity * (0.5f - emotional_conflict * 0.4f);
+    anticipation_intensity =
+        love_intensity * 0.4f * (1.0f - hate_intensity * 0.5f);
+  }
+
+  if (hate_intensity > 0.15f) {
+    disgust_intensity = hate_intensity * (0.5f + emotional_clarity * 0.3f);
+    fear_intensity = hate_intensity * (0.4f + emotional_conflict * 0.4f);
+    sadness_intensity = hate_intensity * (0.3f + love_intensity * 0.2f);
+    anticipation_intensity +=
+        hate_intensity * 0.3f * (1.0f - love_intensity * 0.3f);
+  }
+
+  if (emotional_conflict > 0.2f) {
+    fear_intensity += emotional_conflict * 0.6f;
+    anticipation_intensity += emotional_conflict * 0.4f;
+    sadness_intensity += emotional_conflict * 0.3f;
+  }
+
+  float positive_valence = love_intensity + joy_intensity + trust_intensity;
+  float negative_valence =
+      hate_intensity + fear_intensity + sadness_intensity + disgust_intensity;
+  float net_valence = positive_valence - negative_valence;
+
+  float arousal = total_emotional_energy * 0.7f + emotional_conflict * 0.8f +
+                  anticipation_intensity * 0.5f;
+
+  if (aff_sys != NULL) {
+    aff_sys->current_state.valence =
+        aff_sys->current_state.valence * 0.6f + net_valence * 0.4f;
+    aff_sys->current_state.arousal =
+        aff_sys->current_state.arousal * 0.6f + arousal * 0.4f;
+
+    float complexity_factor =
+        emotional_conflict * 4.0f + total_emotional_energy * 0.3f;
+    aff_sys->current_state.complexity =
+        aff_sys->current_state.complexity * 0.85f + complexity_factor * 0.15f;
+
+    reshapeEmbeddingsWithEmotion(aff_sys, input_tensor, num_neurons);
+  }
+
+  float emotional_bias =
+      calculateEmotionalBias(system, input_tensor, num_neurons);
+
+  for (int i = 0; i < num_neurons; i++) {
+    float base_modulation = net_valence * 0.2f;
+    float arousal_modulation = arousal * 0.15f;
+    float conflict_noise =
+        emotional_conflict * (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * 0.15f;
+
+    neurons[i].state += base_modulation + conflict_noise;
+    neurons[i].state *= (1.0f + arousal_modulation);
+    neurons[i].state += emotional_bias * 0.2f;
+
+    if (love_intensity > 0.2f) {
+      float love_plasticity_boost =
+          love_intensity * (0.3f - emotional_conflict * 0.15f);
+      plasticity *= (1.0f + love_plasticity_boost);
+      neurons[i].state += love_intensity * (0.12f - emotional_conflict * 0.05f);
+    }
+
+    if (hate_intensity > 0.2f) {
+      float hate_plasticity_boost =
+          hate_intensity * (0.35f - emotional_conflict * 0.2f);
+      plasticity *= (1.0f + hate_plasticity_boost);
+      neurons[i].state -= hate_intensity * (0.12f + emotional_conflict * 0.08f);
+    }
+
+    if (fear_intensity > 0.15f) {
+      float fear_directional = fear_intensity * 0.25f;
+      if (neurons[i].state < 0) {
+        neurons[i].state += fear_directional * (1.0f + emotional_conflict);
+      } else {
+        neurons[i].state -= fear_directional * 0.5f;
+      }
+    }
+
+    if (joy_intensity > 0.2f) {
+      float connection_boost =
+          joy_intensity * 0.15f * (1.0f - emotional_conflict * 0.5f);
+      neurons[i].num_connections *= (1.0f + connection_boost) / MAX_NEURONS;
+      neurons[i].state += joy_intensity * 0.1f;
+    }
+
+    if (anticipation_intensity > 0.2f) {
+      learning_rate *= (1.0f + anticipation_intensity * 0.4f);
+    }
+
+    float emotional_noise = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) *
+                            total_emotional_energy * 0.08f;
+    neurons[i].state += emotional_noise;
+  }
+
+  if (total_emotional_energy > 0.5f || emotional_conflict > 0.3f) {
+    printf("Emotional processing - Valence: %.2f, Arousal: %.2f, "
+           "Conflict: %.2f\n",
+           net_valence, arousal, emotional_conflict);
+    if (aff_sys != NULL) {
+      printf("Affective complexity: %.2f, Self-complexity: %.2f\n",
+             aff_sys->current_state.complexity, aff_sys->self_complexity);
+    }
+  }
 }
 
 void printEmotionalState(EmotionalSystem *system) {
@@ -13698,7 +13778,6 @@ bool checkSystemComponent(void *component, const char *name,
   return true;
 }
 
-// Enhanced memory usage checker with detailed reporting
 bool checkMemoryUsage() {
   struct rusage usage;
   if (getrusage(RUSAGE_SELF, &usage) != 0) {
@@ -13706,31 +13785,45 @@ bool checkMemoryUsage() {
     return false;
   }
 
-  long memory_mb = usage.ru_maxrss / 1024;
+#if defined(__APPLE__) || defined(__FreeBSD__)
+  long memory_mb = usage.ru_maxrss / (1024 * 1024); // bytes → MB
+#else
+  long memory_mb = usage.ru_maxrss / 1024; // KB → MB
+#endif
 
-  if (memory_mb > 1000) {
+#if defined(__APPLE__)
+  const long MODERATE_MB = 500;
+  const long HIGH_MB = 2000;
+  const long CRITICAL_MB = 8000;
+#else
+  const long MODERATE_MB = 200;
+  const long HIGH_MB = 500;
+  const long CRITICAL_MB = 1000;
+#endif
+
+  if (memory_mb > CRITICAL_MB) {
     fprintf(stderr, "CRITICAL: Very high memory usage detected (%ld MB)\n",
             memory_mb);
-  } else if (memory_mb > 500) {
+  } else if (memory_mb > HIGH_MB) {
     fprintf(stderr, "WARNING: High memory usage detected (%ld MB)\n",
             memory_mb);
-  } else if (memory_mb > 200) {
+  } else if (memory_mb > MODERATE_MB) {
     fprintf(stderr, "INFO: Moderate memory usage (%ld MB)\n", memory_mb);
   }
 
-  static long previous_page_faults = 0;
-  long current_page_faults = usage.ru_majflt + usage.ru_minflt;
+  static long previous_faults = 0;
+  long current_faults = usage.ru_majflt + usage.ru_minflt;
 
-  if (previous_page_faults > 0) {
-    long fault_increase = current_page_faults - previous_page_faults;
-    if (fault_increase > 1000) {
+  if (previous_faults > 0) {
+    long fault_delta = current_faults - previous_faults;
+    if (fault_delta > 1000) {
       fprintf(stderr,
               "WARNING: Excessive page faults detected (%ld new faults)\n",
-              fault_increase);
+              fault_delta);
     }
   }
 
-  previous_page_faults = current_page_faults;
+  previous_faults = current_faults;
   return true;
 }
 
