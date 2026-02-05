@@ -84,18 +84,6 @@ Find the correct version you want to build by downloading the whole repo `git cl
 
 If you seriosly want to do it like I did start by firstly generating embeddings with train_embedding main file which you can compile like this `go build`, then run with `./main` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
 
-#### Than to build do
-
-```sh
-docker build -t neural_web .
-```
-
-#### To run do
-
-```sh
-docker run --rm -it neural_web
-```
-
 ### Compilation
 
 #### Firstly
@@ -128,41 +116,6 @@ clang -dynamiclib -framework Metal -framework Foundation \
   -ljson-c -lcurl \
   -o libneural_web.dylib neural_web.m
 
-```
-
-#### 64/86 unix
-
-For cpu 86/64 unix version
-
-```sh
-# Build executable from C++17 source
-clang++ -std=c++17 -O2 -Wall -Wextra \
-  -o neural_web64 neural_web.cpp \
-  -I/usr/include \
-  -ljson-c -lcurl -lm
-
-# Build object file (for library usage)
-clang++ -std=c++17 -O2 -Wall -Wextra \
-  -c neural_web.cpp -o neural_web64.o
-
-# Create static library
-ar rcs libneural_web.a neural_web64.o
-```
-
-#### Cuda version 64/86
-
-For cuda version
-
-```sh
-# Build executable
-nvcc -o neural_web_cu neural_web.cu \
-  -I/usr/include \
-  -L/opt/homebrew/Cellar/json-c/0.17/lib \
-  -ljson-c -lcurl
-
-# Build static library
-nvcc -c neural_web.cu -o neural_web_cu.o
-ar rcs libneural_web_cu.a neural_web_cu.o
 ```
 
 JsonC library replace with your own imports in the command if you copied it into the project or aren't using homebrew or another version of the lib
@@ -1329,9 +1282,11 @@ Dynamic parameter adaptation allows the neural network to adjust its parameters 
 
 ### Example
 
-Example of the training can be seen in the MacOS\Arm/neural_web.m file in int main or if you are not familiar with metal 86\64/CPU/neural_web64.c and 86\64/CUDA/neural_web.cu
+Example of the training can be seen in the MacOS\Arm/neural_web.m file in int main or if you are not familiar with metal.
 
 ## Needed information
+
+The metal version is more experimental in the sense of the structure of the int main function while although the pybindings version is a conversion of c code from the metal version to cpp for pybindings you should use it if you want to actually do something serious with the neural web architecture.
 
 You can call ./process {dataset} to load a dataset.
 
@@ -1346,7 +1301,5 @@ To modify number of neurons change MAX_NEURONS
 You can use vocabulary the converter assuming this json structure {"WORD": {"MEANINGS": [[...]], "ANTONYMS": [...], "SYNONYMS": [...]}} it will then output the correct structure for the neural web to read.
 
 Remember to use the security feature
-
-In training use a dataset which explains that hateful things are bad and morally correct things are good, to fix the problem.
 
 Only unix systems.
