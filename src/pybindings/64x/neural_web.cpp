@@ -1,5 +1,6 @@
 #include "../../include/definitions.h"
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <ctype.h>
 #include <curl/curl.h>
@@ -8,19 +9,23 @@
 #include <immintrin.h>
 #include <json-c/json.h>
 #include <math.h>
+#include <memory>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <vector>
 
 #define arc4random() rand()
 
@@ -2277,6 +2282,21 @@ void initializeVocabularyWeights() {
   for (int i = 0; i < vocab_size; i++) {
     ((VocabularyEntry *)&vocabulary[i])->letter_weight =
         computeLetterWeight(vocabulary[i].word);
+  }
+}
+
+static inline void clip_range(int start, int end, int *out_start,
+                              int *out_end) {
+  if (start < 0)
+    start = 0;
+  if (end > EMBEDDING_SIZE)
+    end = EMBEDDING_SIZE;
+  if (start >= end) {
+    *out_start = 0;
+    *out_end = 0;
+  } else {
+    *out_start = start;
+    *out_end = end;
   }
 }
 
@@ -9723,9 +9743,10 @@ static void add_result_dynamic(char ***titles, char ***snippets, char ***urls,
                                const char *snippet, const char *url) {
   if (*used >= *capacity) {
     *capacity *= 2;
-    *titles = realloc(*titles, (*capacity) * sizeof(char *));
-    *snippets = realloc(*snippets, (*capacity) * sizeof(char *));
-    *urls = realloc(*urls, (*capacity) * sizeof(char *));
+    *titles = (char **)realloc(*titles, (*capacity) * sizeof(char *));
+    *snippets = (char **)realloc(*snippets, (*capacity) * sizeof(char *));
+
+    *urls = (char **)realloc(*urls, (*capacity) * sizeof(char *));
   }
   (*titles)[*used] = strdup(title ? title : "");
   (*snippets)[*used] = strdup(snippet ? snippet : "");
@@ -9757,9 +9778,11 @@ SearchResults *parseSearchResults(const char *json_data) {
   // dynamic storage
   int capacity = 16;
   int used = 0;
-  char **titles = malloc(capacity * sizeof(char *));
-  char **snippets = malloc(capacity * sizeof(char *));
-  char **urls = malloc(capacity * sizeof(char *));
+  char **titles = (char **)malloc(capacity * sizeof(char *));
+
+  char **snippets = (char **)malloc(capacity * sizeof(char *));
+
+  char **urls = (char **)malloc(capacity * sizeof(char *));
 
   struct json_object *abstract_text, *abstract_url;
   if (json_object_object_get_ex(root, "AbstractText", &abstract_text) &&
@@ -10484,7 +10507,7 @@ void freeMoralCompass(MoralCompass *compass) {
 }
 
 AffectiveSystem *initializeAffectiveSystem(uint32_t embed_dim) {
-  AffectiveSystem *sys = malloc(sizeof(AffectiveSystem));
+  AffectiveSystem *sys = (AffectiveSystem *)malloc(sizeof(AffectiveSystem));
 
   sys->current_state = (EmotionVector){.valence = 0.0f,
                                        .arousal = 0.3f,
@@ -10497,13 +10520,15 @@ AffectiveSystem *initializeAffectiveSystem(uint32_t embed_dim) {
 
   sys->base_state = sys->current_state;
   sys->num_attractors = 0;
-  sys->attractors = malloc(MAX_EMOTION_ATTRACTORS * sizeof(EmotionAttractor));
+  sys->attractors = (EmotionAttractor *)malloc(MAX_EMOTION_ATTRACTORS *
+                                               sizeof(EmotionAttractor));
+
   sys->current_attractor_id = UINT32_MAX;
   sys->steps_in_current_attractor = 0;
   sys->history_index = 0;
 
   sys->embedding_dim = embed_dim;
-  sys->affective_embeddings = calloc(embed_dim, sizeof(float));
+  sys->affective_embeddings = (float *)calloc(embed_dim, sizeof(float));
 
   for (uint32_t i = 0; i < embed_dim; i++) {
     sys->affective_embeddings[i] = ((float)rand() / RAND_MAX) * 0.2f - 0.1f;
@@ -10514,7 +10539,8 @@ AffectiveSystem *initializeAffectiveSystem(uint32_t embed_dim) {
 
   sys->num_bonds = 0;
   sys->max_bonds = MAX_ATTACHMENT_BONDS;
-  sys->bonds = malloc(MAX_ATTACHMENT_BONDS * sizeof(AttachmentBond));
+  sys->bonds =
+      (AttachmentBond *)malloc(MAX_ATTACHMENT_BONDS * sizeof(AttachmentBond));
 
   sys->relational_bias = 0.4f;
   sys->predictive_commitment_weight = 0.6f;
