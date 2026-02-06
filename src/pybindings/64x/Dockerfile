@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 
-# Set up a non-root user
+# Set up a non-root user (optional, but avoids root execution)
 ARG USERNAME=developer
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -31,12 +31,10 @@ WORKDIR /app
 # Switch to the non-root user
 USER $USERNAME
 
-# Copy the C source file with correct ownership
 COPY --chown=$USERNAME:$USERNAME neural_web.cpp ./
 
-COPY --chown=$USERNAME:$USERNAME definitions.h ./
+COPY --chown=$USERNAME:$USERNAME /replace/with/path/to/you/have/to/also/change/the/c/code/to/include/it/definitions.h ./
 
-# Copy the vocabulary.txt file with correct ownership
 COPY --chown=$USERNAME:$USERNAME setup.py ./
 
 RUN python3 setup.py sdist bdist_wheel
