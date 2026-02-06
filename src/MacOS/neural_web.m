@@ -14360,7 +14360,7 @@ int main(int argc, char *argv[]) {
       [device newComputePipelineStateWithFunction:weightFunction error:&error];
 
   id<MTLFunction> neuronFunction =
-      [library newFunctionWithName:@"process_neurons"];
+      [library newFunctionWithName:@"update_neurons"];
   id<MTLComputePipelineState> neuronPipelineState =
       [device newComputePipelineStateWithFunction:neuronFunction error:nil];
 

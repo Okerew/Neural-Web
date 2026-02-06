@@ -203,66 +203,6 @@ uint id [[thread_position_in_grid]]) {
   weights[id] = metal::clamp(new_weight, MIN_WEIGHT, MAX_WEIGHT);
 }
 
-kernel void process_neurons(device Neuron* neurons [[buffer(0)]],
-device const float* weights [[buffer(1)]],
-device const uint* connections [[buffer(2)]],
-device const uint& max_neurons [[buffer(3)]],
-device const uint& max_connections [[buffer(4)]],
-device const float* input_tensor [[buffer(5)]],
-device const uint& input_size [[buffer(6)]],
-device const float* recurrent_weights [[buffer(7)]],
-device const uint& activation_type [[buffer(8)]],
-uint id [[thread_position_in_grid]]) {
-  if (id >= max_neurons) return;
-
-  float current_state = neurons[id].state;
-  float current_output = neurons[id].output;
-  uint num_conn = neurons[id].num_connections;
-  uint layer = neurons[id].layer_id;
-
-  // Calculate weighted sum
-  float weighted_sum = 0.0f;
-  for (uint i = 0; i < num_conn; i++) {
-    uint conn_idx = id * max_connections + i;
-    uint target = connections[conn_idx];
-
-    float depth_scale = 1.0f / (1.0f + layer);
-    float connection_strength = weights[conn_idx] * depth_scale;
-
-    weighted_sum += neurons[target].state * connection_strength * 0.6f +
-    neurons[target].output * connection_strength * 0.4f;
-  }
-
-  // Input processing with temporal dynamics
-  float input_influence = input_tensor[id % input_size];
-  float temporal_factor = 1.0f / (1.0f + id % 4);
-
-  // State update with multiple influences
-  float new_state = current_state * DECAY_RATE +
-  weighted_sum * CONNECTION_WEIGHT +
-  input_influence * INPUT_WEIGHT * temporal_factor;
-
-  // Add recurrent influence
-  float recurrent_influence = current_output * recurrent_weights[id];
-  new_state += recurrent_influence * 0.15f;
-
-  // Dynamic activation
-  float dynamic_scale = ACTIVATION_SCALE * (1.0f + 0.1f * metal::sin(input_influence * M_PI_F));
-  float new_output = activation_function(new_state, dynamic_scale, ACTIVATION_BIAS, activation_type);
-
-  // Add controlled randomization
-  float random_val = metal::fract(metal::sin(dot(float2(float(id), new_state),
-  float2(12.9898f, 78.233f))) * 43758.5453f);
-  new_output += random_val * 0.01f;
-
-  // Clamp output
-  new_output = metal::clamp(new_output, MIN_ACTIVATION, MAX_ACTIVATION);
-
-  // Store results
-  neurons[id].state = new_state;
-  neurons[id].output = new_output;
-}
-
 kernel void backwardKernel(
 const device Neuron *neurons [[buffer(0)]],
 device float *weights [[buffer(1)]],

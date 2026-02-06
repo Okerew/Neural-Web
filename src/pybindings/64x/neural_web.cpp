@@ -1014,62 +1014,6 @@ void memoryReplayOnCPU(Neuron *neurons, float *weights, int *connections,
   }
 }
 
-void processNeuronsOnCPU(Neuron *neurons, const float *weights,
-                         const int *connections, const int max_neurons,
-                         const int max_connections, const float *input_tensor,
-                         const int input_size,
-                         const unsigned int activation_type) {
-  for (int id = 0; id < max_neurons; id++) {
-    float current_state = neurons[id].state;
-    float current_output = neurons[id].output;
-    int num_conn = neurons[id].num_connections;
-    int layer = neurons[id].layer_id;
-
-    // Calculate weighted sum
-    float weighted_sum = 0.0f;
-    for (int i = 0; i < num_conn; i++) {
-      int conn_idx = id * max_connections + i;
-      int target = connections[conn_idx];
-
-      float depth_scale = 1.0f / (1.0f + layer);
-      float connection_strength = weights[conn_idx] * depth_scale;
-
-      weighted_sum += neurons[target].state * connection_strength * 0.6f +
-                      neurons[target].output * connection_strength * 0.4f;
-    }
-
-    // Input processing with temporal dynamics
-    float input_influence = input_tensor[id % input_size];
-    float temporal_factor = 1.0f / (1.0f + id % 4);
-
-    // State update with multiple influences
-    float new_state = current_state * DECAY_RATE +
-                      weighted_sum * CONNECTION_WEIGHT +
-                      input_influence * INPUT_WEIGHT * temporal_factor;
-
-    // Add recurrent influence
-    float recurrent_influence = current_output * weights[id];
-    new_state += recurrent_influence * 0.15f;
-
-    // Dynamic activation
-    float dynamic_scale =
-        ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-    float new_output = activation_function(new_state, dynamic_scale,
-                                           ACTIVATION_BIAS, activation_type);
-
-    // Add controlled randomization
-    float random_val = generate_random(id, new_state);
-    new_output += random_val * 0.01f;
-
-    // Clamp output
-    new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
-
-    // Store results
-    neurons[id].state = new_state;
-    neurons[id].output = new_output;
-  }
-}
-
 DynamicParameters initDynamicParameters() {
   DynamicParameters params = {.input_noise_scale = 0.1f,
                               .weight_noise_scale = 0.05f,
@@ -14538,7 +14482,6 @@ PYBIND11_MODULE(neural_web, m) {
   nn.def("computePredictionErrors", &computePredictionErrors);
   nn.def("backpropagationOnCPU", &backpropagationOnCPU);
   nn.def("updateWeightsOnCPU", &updateWeightsOnCPU);
-  nn.def("processNeuronsOnCPU", &processNeuronsOnCPU);
   nn.def("reverseProcessOnCPU", &reverseProcessOnCPU);
   nn.def("captureNetworkState", &captureNetworkState);
   nn.def("verifyNetworkState", &verifyNetworkState);
