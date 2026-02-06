@@ -1,0 +1,7 @@
+neural_web.cpp
+setup.py
+neural_web.egg-info/PKG-INFO
+neural_web.egg-info/SOURCES.txt
+neural_web.egg-info/dependency_links.txt
+neural_web.egg-info/requires.txt
+neural_web.egg-info/top_level.txt
