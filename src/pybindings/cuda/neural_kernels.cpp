@@ -30,7 +30,6 @@ void memory_replay_wrapper(torch::Tensor neurons, torch::Tensor weights,
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("update_neurons", &update_neurons_wrapper, "Update neurons");
   m.def("update_weights", &update_weights_wrapper, "Update weights");
-  m.def("process_neurons", &process_neurons_wrapper, "Process neurons");
   m.def("backward", &backward_wrapper, "Backward pass");
   m.def("reverse_process", &reverse_process_wrapper, "Reverse process");
   m.def("memory_replay", &memory_replay_wrapper, "Memory replay");
