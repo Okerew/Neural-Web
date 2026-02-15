@@ -18,6 +18,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#define arc4random() rand()
+
 typedef struct {
   float state;
   float output;
