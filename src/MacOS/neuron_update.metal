@@ -80,9 +80,11 @@ static inline float activation_function(float x, float scale, float bias, uint a
     case ACTIVATION_LEAKY_RELU:
     base_activation = leaky_relu(scaled);
     break;
-    case ACTIVATION_SWISH:
-    base_activation = swish(scaled);
-    break;
+    case ACTIVATION_SWISH: {
+      float s = swish(scaled);
+      base_activation = s * fast_tanh(metal::log(1.0f + metal::exp(s)));
+      break;
+    }
     case ACTIVATION_TANH:
     default:
     base_activation = fast_tanh(scaled);
@@ -148,16 +150,34 @@ uint id [[thread_position_in_grid]]) {
 
   // Add recurrent connection influence
   float recurrent_influence = current_output * recurrent_weights[id];
-  new_state += recurrent_influence * 0.15f;
+  float rec = recurrent_influence * 0.15f;
+  rec = rec / (1.0f + metal::abs(rec));
+  new_state += rec;
+
 
   // Apply activation function with dynamic scaling
   float dynamic_scale = ACTIVATION_SCALE * (1.0f + 0.1f * metal::sin(input_influence * M_PI_F));
-  float new_output = activation_function(new_state, dynamic_scale, ACTIVATION_BIAS, activation_type);
+
+  float h1 = activation_function(new_state, dynamic_scale, ACTIVATION_BIAS, activation_type);
+
+  // micro residual refinement (acts like an extra hidden layer)
+  float h2 = activation_function(
+  h1 * 1.25f + 0.15f * new_state,
+  1.1f,
+  0.0f,
+  activation_type
+  );
+
+  // gated residual blend → prevents stagnation + explosion
+  float gate = sigmoid(h1 * 0.7f);
+  float new_output = metal::mix(h1, h2, gate);
+
 
   // Add slight randomization for variability
   float random_val = metal::fract(metal::sin(dot(float2(float(id), new_state),
   float2(12.9898f, 78.233f))) * 43758.5453f);
-  new_output += random_val * 0.01f;
+  float noise_gate = sigmoid(metal::abs(new_output) * 2.0f);
+  new_output += random_val * 0.01f * noise_gate;
 
   // Ensure outputs stay within valid range
   new_output = metal::clamp(new_output, MIN_ACTIVATION, MAX_ACTIVATION);
@@ -196,8 +216,7 @@ uint id [[thread_position_in_grid]]) {
 
   // Update weight with momentum
   float momentum = 0.9f;
-  float new_weight = current_weight + delta_w;
-  new_weight = momentum * current_weight + (1.0f - momentum) * new_weight;
+  float new_weight = current_weight + (1.0f - momentum) * delta_w;
 
   // Clip weights
   weights[id] = metal::clamp(new_weight, MIN_WEIGHT, MAX_WEIGHT);
@@ -219,6 +238,7 @@ const device float *epsilon [[buffer(11)]],
 const device float *learningRate [[buffer(12)]],
 const device uint *timeSteps [[buffer(13)]],
 device uint *t [[buffer(14)]],  // Optimization step counter
+const device uint &activation_type [[buffer(15)]],
 uint gid [[thread_position_in_grid]]) {
 
   if (gid >= *maxNeurons) return;
@@ -233,7 +253,29 @@ uint gid [[thread_position_in_grid]]) {
 
     // Compute error
     float error = predictedOutput - targetOutput;
-    float activationGradient = predictedOutput * (1.0 - predictedOutput); // Sigmoid derivative
+
+    float activationGradient;
+    float y = predictedOutput;
+
+    switch (activation_type) {
+      case ACTIVATION_RELU:
+      activationGradient = y > 0.0f ? 1.0f : 0.0f;
+      break;
+      case ACTIVATION_LEAKY_RELU:
+      activationGradient = y > 0.0f ? 1.0f : 0.01f;
+      break;
+      case ACTIVATION_SWISH:
+      activationGradient = y + sigmoid(y) * (1.0f - y);
+      break;
+      case ACTIVATION_SIGMOID:
+      activationGradient = y * (1.0f - y);
+      break;
+      case ACTIVATION_TANH:
+      default:
+      activationGradient = 1.0f - y * y;
+      break;
+    }
+
     totalError += error;
 
     // Store error for analysis

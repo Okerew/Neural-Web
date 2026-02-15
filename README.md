@@ -1,4 +1,4 @@
-# Decentralized 3D Neural Web Architecture Documentation
+# Larkos Documentation
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@
 Video explanation:
 <a href="https://www.youtube.com/watch?v=dw4DhJ3TPBY"><img src="structure.png" alt_text="watch the video"></a>
 
-This documentation provides a comprehensive guide to the decentralized neural web architecture implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization.
+This documentation provides a comprehensive guide to the Lattice-Associated Recursive Knowledge Organization System (or decentralized neural web architecture) implemented in the provided code. The architecture is designed to simulate a neural network with hierarchical memory management, dynamic adaptation, and performance optimization along with other features.
 The goal of this architecture is to present an alternative to modern neural models, which are often complex and resource-intensive, taking inspiration from our brains, neurons are decentralized organized in layers, allowing them to interact with themselves and change themselves overtime in more than just sates and weights, while also creating a dynamic memory system.
 
 <a href="https://mermaid.live/edit#pako:eNqNWGtv2zgW_SuEgAk6QDLbOq_WAyzgxE7iady4kZtiZzIfaIm2OZFIg6LSeur-9z2XokTJznTXH_wQ7_tx7qW_RYlORdSPloavV2w2_PVRMbwGfzxGY7UuLRtyyx-jP9nR0b-3U6MTURQiZfPNll2A5oMojVYFCDzjhSP8tE65FSy2eN-yy4awesKq412mS51DoWB3pcVnsWVD8A0SK5-5leC9KlXivryyXK1-DuyXbZ2fhVyuiHsE7uqH18de3Yj5XHLFbgU3SqplS8bIyRikf5WFDTIu_OnQnV4LJQwJmohcmw17EInVZsuuoMk_mnDFlyIXygbR1ftPP9Vs8aawIq-eXjnBMcR4qVJA7TUE3kjoMslKJjzznEHktWO7Fxb0z4KN87U2CIptybgJRnk6ngUBN07ARJglsiRzmXHT4h23HAIJIrXL-akQbKENmxqRSpeVLfsNXPVvGHWp0w5j5epQJHzDDnCqCp3JlFe874PG2plkv07eOxF3awuL_27SQNFD0BE2kDXB_qzNE_TXRGNlBWqctLXNmQnSxttSPk-ocDrcwYLPk6pOikKiTprAItxdgrhckxdsUMXCNw4khprylBdGppSEFZEfsFutlkczYXKvuvKqU0bXmZ6jJhBBK75aX3KGfSrw0Y7TICGdNR0EUR--zNyqrKqZxmqRlYJysJcVJKtLC-eeZSoamVYzDwuVs43h92KRiaqF2z0wrUNK1lbNzz6WPJMW3t_HMHqfsbH3Pm6wg6OHoHv0dQ1aYFQlCkDwABEjZKms0h96_qHyNUW7ysWGjYzRpkAS4Cx8gqdX1AlXQqRznjzRgRVmR8jVuI0cKG9ZkJ0-4yHdng6uSCUaBELZEaIs4elkN8-xyBZH3jigwF7cKtQcKJ5t0AxU4Abfa9CNyfQfiGgciMe-MS3Cxi4kRx7IVVVYPpfIgoOEmNCeDnEU-4MNu1yJ5Kkl6qIdi92ibxwLppJ5yJchssY09mocj-KfO07OC8QJ5r1X-ksmqGEO2JRbkkN4BXo3sH4oN9hJ9FWbbvI5UChBaRIx4uTxKP4PoQCSUya2BKax2UqXNEpuuVqW1Gj7wjwovBBzysYu9UitHMaF2qZi36XylRjqasKfXECnu5S-sHwTon3YJ5UKgySq1HFcX7ZzMNHNXG3XlG_poSHUaor0wOEYWTihOO_zNsGYxB4SJEaJbYE0RCBbqpJy3aX29dKou3cFTAkYbhTPkZ5Bytd2p_E8c0AqDx11qIoqSI3Ho1z_UwstFlT6oV59FwA6JneEHV3OgB-Tu2qM6rTMaC9oXKTqrEJAjR3v0Nepx_ykOUFV2h7-O9TBwZGttoF7wQutXFIno31qjeHRAv0dgpmRSxoXLqSU5XtRrBEtUYSi8qDq_YbGGgJdRNpBbXKGKmN-MLeG7G8df2viLbulVUEYMtWddDib-N6297opNzwHRpkiQGU1QWdlG1CpeA4DRG3ZB-h6Wf6Hnfj6HfWlYX3rE62kpawF6Xdut7VfsC-0cHGCDAE2unvgXaejQ0lX_jQhDRB3JTP42ynYgZPhDw7YA3crlHBbOgYzbaK7_K316cqng2wLI_bhI7gehAkj4qA-dHVkdGtxfPjo0SYnJ8bGiAwLkLLegkGXrHb2f6BSZ-w1UHfQlGa7WZslvB7vUxrRkqq05gzWTusFJS2TUOlbRh7PaFfxmPEvD3AVZwskDcRSadetd11i08kAtEVbgV8uQofCb0wrak8HlyTloDmk1RdSqkWidXWajGrsVIlcZ4K96bOhZkqzFTc5HL15Q5DYPOmzwbOWKePO9ILZFbcs4SVW81IpQTVMi21RAt4MtQYqN-V5Z3jt6ez1XZgID9cYAjzZOP95abXS-Yas6LmN7J9pmF4wnmWMoJCWhx9oO-6zCyxtprSrRVlFmidJadwAmN4cU_S4xFSWqqFSBJeBEspxSPr0-v-I6UmfXXFpGiFKq6NUFokBPijfjtObE0L9qk0WbWruAt6lr9Wv_eW42CmiWCeSdpJWF4dBwOewaYRqsSvENqbp2qUPu1W96GqTkuYargr2RdpVreVa86y1dHqm-jYC5ipGO1eSpgnj7m5SV2yAfzdvwiKHYqqjsD9Wm0692ay1XQlLsmhbo8n-AmvYqPwlq7r6C_YgjYOOzq2iRVhdnyuJWNVGz6i81iD1VFho1xJ0l0bsR4DWqE7SUN2Ipx8ZLzg3M3QjmPHiqbp4IXkERC_zhSQ2dx25VEEJjL7XmWgnzhPSkGB3zwD7mcxFmHz-3C99fnDVf5BAzodfo8MoxzWSyzTqR9-I6zFCEnI0fx9fU7HgZYbp9Ki-g5R6N96oJOqjzcRhZGjbjfoLJAy_SjeCh5LjBp03T9dc_a51XrPgZ9T_Fn2N-r3TX96en7x7e3bWOz8_P319chht8PT4-JeT3uuTXu_47fnZm3cnp98Po7-dgNegP32NV-_k7Pis9-60dxgtDVnurRE0NC51qWzUPz7GqUhpEE-q_67cX1jf_wumlDOh">You can see the architecture better here</a>
@@ -36,19 +36,17 @@ gnuplot library
 
 json-c library
 
-curl library
-
 for metal macos version metal api
 
-for cuda version cuda
+for cuda version cuda and pybind11
+
+golang(for converter and train embeddings)
+
+python(for running cuda version and for running libary file through ctypes)
+
+docker(optional)
 
 If on windows use wsl i have removed the windows version as I don't think it was ever correctly working either way.
-
-Optional:
-
-golang for the converter
-
-docker
 
 ## Disclaimer
 
@@ -56,7 +54,7 @@ docker
 
 It's recommended you use this more in a framework kind of way than by just copying the whole int main functionality basicly use functions you like from here compilation guide is below.
 
-It's good practice to use the validaitng critical secyrity status functions if doing more complex things with the code.
+It's good practice to use the validating critical security status functions if doing more complex things with the code.
 
 ```c
 
@@ -69,11 +67,8 @@ if (secStatus.critical_violation) {
 }
 ```
 
-change updatedNeurons to neurons if using any other version than metal not only in this function but all the functions you use, that you copy from here.
-
 ## Library Installation 
-You can either setup the python package steps in building only unix 64x support or you can compile the neural web the one you want and then install it with the install.sh script. This will allow you to use the neural web as a library either from C/C++
-
+You can either setup the C version and use it with ctypes by building it as a libary with unix 64x support or you can compile the neural web on macOS if you really want but I wouldn't recommend that.
 ## Building the Neural Web
 
 ### Recommended way (build with docker or pull from docker hub)
@@ -82,22 +77,26 @@ Find the correct version you want to build by downloading the whole repo `git cl
 
 #### Firstly
 
-If you seriosly want to do it like I did start by firstly generating embeddings with train_embedding main file which you can compile like this `go build`, then run with `./main` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
+If you seriously want to do it like I did start by firstly generating embeddings with train_embedding main file which you can compile like this `go build`, then run with `./main` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
 
 ### Compilation
 
 #### Firstly
-Start by firstly generating embeddings with train_embeddings main file which you can compile like this `go build`, then run with `./main` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web.
+Start by firstly generating embeddings with train_embeddings main file which you can compile like this `go build`, then run with `./main` this should generate a embeddings file (custom_embeddings.txt) if you didn't change the name which then copy to the directory were you will be building the neural web, note although this isn't needed it is needed if you want to fully use larkos.
 
 To compile the code, run the following command in the root directory of the project:
-#### Python
+#### C through Ctypes
 ```sh
-python setup.py sdist bdist_wheel
+gcc -shared -fPIC -o neural_web.so neural_web.c -ljson-c
 ```
 
-To install 
-```sh
-python -m pip install dist/neural_web-1.0-cp313-cp313-linux_x86_64.whl
+To use (You can see more in the test_ctypes.py example)
+```python
+from ctypes import CDLL
+import numpy as np
+
+lib_path = os.path.join(os.getcwd(), "neural_web.so")
+lib = CDLL(lib_path)
 ```
 #### arch64 MacOS
 
@@ -106,14 +105,14 @@ python -m pip install dist/neural_web-1.0-cp313-cp313-linux_x86_64.whl
 clang -framework Metal -framework Foundation \
   -I/opt/homebrew/Cellar/json-c/0.17/include \
   -L/opt/homebrew/Cellar/json-c/0.17/lib \
-  -ljson-c -lcurl \
+  -ljson-c \
   -o neural_web neural_web.m
 
 # Build dynamic library
 clang -dynamiclib -framework Metal -framework Foundation \
   -I/opt/homebrew/Cellar/json-c/0.17/include \
   -L/opt/homebrew/Cellar/json-c/0.17/lib \
-  -ljson-c -lcurl \
+  -ljson-c \
   -o libneural_web.dylib neural_web.m
 
 ```
@@ -450,24 +449,6 @@ typedef struct {
 } InternalQuestion;
 ```
 
-### Search world wide web
-
-The search world wide web allows the network to search for information. It allows the network to ask questions about it self and get answers
-
-```c
-typedef struct {
-  char *data;
-  size_t size;
-} HttpResponse;
-
-typedef struct {
-  char **titles;
-  char **snippets;
-  char **urls;
-  int count;
-} SearchResults;
-```
-
 ### Moral compass
 
 The moral compass ensures the model adheres to basic ethical principles. It allows the model to make decisions that are aligned with ethical standards.
@@ -665,6 +646,7 @@ typedef struct {
 - #### `retrieveMemory(MemorySystem memorySystem)` Retrieves the most relevant memory entry. Searches the memory system for the memory that best matches a certain criterion.
 - #### `consolidateMemory(MemorySystem memorySystem)` Consolidates memories to reinforce learning. Strengthens important memories or transfers them to long-term storage.
 - #### `consolidateToLongTermMemory(WorkingMemorySystem working_memory, MemorySystem memorySystem, int step)` Consolidates working memory to long-term memory. Moves short-term memories to long-term storage.
+- #### `addToDirectMemory(MemorySystem *memorySystem, const MemoryEntry *entry)` Adds a memory entry directly to the memory system. Adds the memory entry to the memory system without any integration with the working memory.
 
 ## Neural Network
 
@@ -717,8 +699,7 @@ typedef struct {
 
 ## Security and Validation
 
-- #### `validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections, MemorySystem* memorySystem)` Validates critical security aspects of the system. Checks the system for security vulnerabilities or issues.
-- #### `criticalSecurityShutdown(Neuron* neurons, float* weights, int* connections, MemorySystem* memorySystem, SecurityValidationStatus* secStatus)` Performs a critical security shutdown if necessary. Shuts down the system if a security issue is detected.
+- #### `validateCriticalSecurity(Neuron* neurons, float* weights, int* connections, int max_neurons, int max_connections, MemorySystem* memorySystem)` Validates and prevents things that the network shouldn't do.
 
 ## Knowledge and Insights
 
@@ -733,19 +714,6 @@ typedef struct {
 - #### `askQuestion(int question_id, Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float* learning_rate)` Asks a question to the internal self-expression system. Processes the question and generates a response.
 - #### `expandMemoryCapacity(MemorySystem *memorySystem)` Expands the memory capacity of the memory system. Increases the amount of memory available in the system.
 - #### `adjustBehaviorBasedOnAnswers(Neuron* neurons, float* input_tensor, MemorySystem* memorySystem, float *learning_rate, float *input_noise_scale, float *weight_noise_scale)` Adjusts the behavior based on answers from the internal self-expression system. Makes changes to the network based on the responses to questions.
-
-## Search World Wide Web
-
-- #### `enhanceDecisionMakingWithSearch(const Neuron *neurons, const SearchResults *results, float *decision_weights, int max_neurons)` Enhances decision making with search results. Adjusts the decision weights based on the search results.
-- #### `storeSearchResultsWithMetadata(MemorySystem *memorySystem, WorkingMemorySystem *working_memory, const SearchResults *results, const char *original_query, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` Stores search results with metadata in the memory system and working memory. Adds the search results to the memory system and working memory.
-- #### `addToWorkingMemory(WorkingMemorySystem *working_memory, const MemoryEntry *entry, float feature_projection_matrix[FEATURE_VECTOR_SIZE][MEMORY_VECTOR_SIZE])` Adds a memory entry to the working memory. Adds the memory entry to the working memory for future reference.
-- #### `integrateWebSearch(Neuron *neurons, float *input_tensor, int max_neurons, MemorySystem *memorySystem, int step)` Integrates web search into the decision making process.
-- #### `generateSearchQuery(const Neuron *neurons, int max_neurons)` Generates a search query based on the current state of the network. Creates a query for web search based on the network's current state.
-- #### `storeSearchResultsInMemory(MemorySystem *memorySystem, const SearchResults *results)` Stores search results in the memory system. Adds the search results to the memory system for future reference.
-- #### `addToDirectMemory(MemorySystem *memorySystem, const MemoryEntry *entry)` Adds a memory entry directly to the memory system. Adds the memory entry to the memory system without any integration with the working memory.
-- #### `convertSearchResultsToInput(const SearchResults *results, float *input_tensor, int max_neurons)` Converts search results to input for the network. Converts the search results into a format that can be processed by the network.
-- #### `performWebSearch(const char *query)` Performs a web search based on the given query. Fetches search results from the web with duckduckgo.
-- #### `parseSearchResults(const char *json_data)` Parses search results from a JSON response. Extracts the search results from the JSON data.
 
 ## Moral Compass
 
@@ -806,7 +774,6 @@ typedef struct {
 - #### `updateEmbeddings(float* embeddings, float* input_tensor, int max_embeddings, int max_neurons)` Updates embeddings based on input tensor. Adjusts the embeddings to better represent the input data.
 - #### `isWordMeaningful(const char* word)` Checks if a word is meaningful. Determines whether a word is relevant or important.
 - #### `importPretrainedEmbeddings(const char* embedding_file)` Import pretrained embeddings. Loads pre-trained embeddings from a file for use with the network.
-- #### `write_callback(void *contents, size_t size, size_t nmemb, void *userp)` Callback function for curl_easy_perform. Handles the response from the server.
 
 ## Initialization Functions
 
@@ -1286,9 +1253,8 @@ Example of the training can be seen in the MacOS\Arm/neural_web.m file in int ma
 
 ## Needed information
 
-The metal version is more experimental in the sense of the structure of the int main function while although the pybindings version is a conversion of c code from the metal version to cpp for pybindings you should use it if you want to actually do something serious with the neural web architecture.
-
-You can call ./process {dataset} to load a dataset.
+The metal version is more experimental in the sense of the structure of the int main function you should mostly use the C version contained in 64x/main folder by compiling it as a library and then running it through ctypes.
+You can call ./neural_web {dataset} to load a dataset.
 
 Note if you modify max_neurons in the example you have to also modify the input_size to be at max greater than the number of max_neurons by 1 or just lesser than the number of max_neurons or it will have an out of bounds error
 
@@ -1303,3 +1269,4 @@ You can use vocabulary the converter assuming this json structure {"WORD": {"MEA
 Remember to use the security feature
 
 Only unix systems.
+

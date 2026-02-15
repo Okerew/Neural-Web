@@ -1,6 +1,7 @@
-# Use Debian as the base image
-FROM --platform=linux/amd64 debian:latest
+# Use the NVIDIA CUDA base image with Debian
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
 
+# Install dependencies (no sudo required in Docker)
 RUN apt-get update && apt-get install -y \
     clang \
     gnuplot \
@@ -14,7 +15,6 @@ RUN apt-get update && apt-get install -y \
     python3-pybind11 \
     && rm -rf /var/lib/apt/lists/*
 
-
 # Set up a non-root user (optional, but avoids root execution)
 ARG USERNAME=developer
 ARG USER_UID=1000
@@ -22,7 +22,6 @@ ARG USER_GID=1000
 
 RUN groupadd --gid $USER_GID $USERNAME && \
     useradd --uid $USER_UID --gid $USER_GID -m $USERNAME && \
-    mkdir -p /app && \
     chown -R $USERNAME:$USERNAME /app
 
 # Set working directory
@@ -31,9 +30,9 @@ WORKDIR /app
 # Switch to the non-root user
 USER $USERNAME
 
-COPY --chown=$USERNAME:$USERNAME neural_web.cpp ./
+COPY --chown=$USERNAME:$USERNAME cuda_kernels.cu  ./
 
-COPY --chown=$USERNAME:$USERNAME /replace/with/path/to/you/have/to/also/change/the/c/code/to/include/it/definitions.h ./
+COPY --chown=$USERNAME:$USERNAME neural_kernels.cpp  ./
 
 COPY --chown=$USERNAME:$USERNAME setup.py ./
 

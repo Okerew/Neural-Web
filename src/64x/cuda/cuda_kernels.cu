@@ -55,19 +55,22 @@ __device__ float activation_function(float x, float scale, float bias,
   case ACTIVATION_LEAKY_RELU:
     base_activation = leaky_relu(scaled);
     break;
-  case ACTIVATION_SWISH:
-    base_activation = swish(scaled);
+  case ACTIVATION_SWISH: {
+    float s = swish(scaled);
+    base_activation = s * fast_tanh(logf(1.0f + expf(s)));
     break;
+  }
   case ACTIVATION_TANH:
   default:
     base_activation = fast_tanh(scaled);
     break;
   }
 
+  float sign_val = copysignf(1.0f, base_activation);
+  float abs_val = fabsf(base_activation);
+
   if (activation_type == ACTIVATION_TANH ||
       activation_type == ACTIVATION_SIGMOID) {
-    float sign_val = copysignf(1.0f, base_activation);
-    float abs_val = fabsf(base_activation);
     return sign_val * powf(abs_val, 1.1f);
   } else {
     return base_activation;
@@ -110,17 +113,27 @@ update_neurons(Neuron *neurons, const float *weights,
                     input_influence * INPUT_WEIGHT * temporal_factor;
 
   float recurrent_influence = current_output * recurrent_weights[id];
-  new_state += recurrent_influence * 0.15f;
+  float rec = recurrent_influence * 0.15f;
+  rec = rec / (1.0f + fabsf(rec));
+  new_state += rec;
 
   float dynamic_scale =
       ACTIVATION_SCALE * (1.0f + 0.1f * sinf(input_influence * M_PI));
-  float new_output = activation_function(new_state, dynamic_scale,
-                                         ACTIVATION_BIAS, activation_type);
+
+  float h1 = activation_function(new_state, dynamic_scale, ACTIVATION_BIAS,
+                                 activation_type);
+
+  float h2 = activation_function(h1 * 1.25f + 0.15f * new_state, 1.1f, 0.0f,
+                                 activation_type);
+
+  float gate = sigmoid(h1 * 0.7f);
+  float new_output = gate * h2 + (1.0f - gate) * h1;
 
   float2 hash_input = make_float2(id, new_state);
   float random_val = fract(
       sinf(dot(hash_input, make_float2(12.9898f, 78.233f))) * 43758.5453f);
-  new_output += random_val * 0.01f;
+  float noise_gate = sigmoid(fabsf(new_output) * 2.0f);
+  new_output += random_val * 0.01f * noise_gate;
 
   new_output = fminf(fmaxf(new_output, MIN_ACTIVATION), MAX_ACTIVATION);
 
@@ -154,17 +167,18 @@ __global__ void update_weights(float *weights, const Neuron *neurons,
   float delta_w = learning_rate * (hebbian_term - normalization_term);
 
   float momentum = 0.9f;
-  float new_weight = current_weight + delta_w;
-  new_weight = momentum * current_weight + (1.0f - momentum) * new_weight;
+  float new_weight = current_weight + (1.0f - momentum) * delta_w;
 
   weights[id] = fminf(fmaxf(new_weight, MIN_WEIGHT), MAX_WEIGHT);
 }
 
-__global__ void
-backward_kernel(const Neuron *neurons, float *weights, const int *connections,
-                const unsigned int max_neurons,
-                const unsigned int max_connections, const float *target_outputs,
-                float *output_errors, const float learning_rate) {
+__global__ void backward_kernel(const Neuron *neurons, float *weights,
+                                const int *connections,
+                                const unsigned int max_neurons,
+                                const unsigned int max_connections,
+                                const float *target_outputs,
+                                float *output_errors, const float learning_rate,
+                                const unsigned int activation_type) {
   unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id >= max_neurons)
     return;
@@ -175,7 +189,27 @@ backward_kernel(const Neuron *neurons, float *weights, const int *connections,
   float error = predicted_output - target_output;
   output_errors[id] = error;
 
-  float activation_gradient = predicted_output * (1.0f - predicted_output);
+  float activation_gradient;
+  float y = predicted_output;
+
+  switch (activation_type) {
+  case ACTIVATION_RELU:
+    activation_gradient = y > 0.0f ? 1.0f : 0.0f;
+    break;
+  case ACTIVATION_LEAKY_RELU:
+    activation_gradient = y > 0.0f ? 1.0f : 0.01f;
+    break;
+  case ACTIVATION_SWISH:
+    activation_gradient = y + sigmoid(y) * (1.0f - y);
+    break;
+  case ACTIVATION_SIGMOID:
+    activation_gradient = y * (1.0f - y);
+    break;
+  case ACTIVATION_TANH:
+  default:
+    activation_gradient = 1.0f - y * y;
+    break;
+  }
 
   for (unsigned int i = 0; i < max_connections; i++) {
     int conn_idx = id * max_connections + i;
