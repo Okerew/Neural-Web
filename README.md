@@ -14,9 +14,6 @@
 10. [API Reference](#api-reference)
 11. [Algorithm explanations and mathematics](#algorithm-and-mathematics)
 12. [Training mechanism](#neural-web-training-mechanism)
-13. [Reflection System](#reflection-system)
-14. [Self-Identification System](#self-identification-system)
-15. [Knowledge Filter](#knowledge-filter)
 
 ## Introduction
 
