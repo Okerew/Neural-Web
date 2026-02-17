@@ -91,7 +91,7 @@ gcc -shared -fPIC -o neural_web.so neural_web.c -ljson-c
 To use (You can see more in the test_ctypes.py example)
 ```python
 from ctypes import CDLL
-import os as np
+import os
 
 lib_path = os.path.join(os.getcwd(), "neural_web.so")
 lib = CDLL(lib_path)
